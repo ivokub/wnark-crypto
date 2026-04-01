@@ -1,0 +1,72 @@
+{
+  "word4": [
+    {
+      "name": "zero4",
+      "host_words": ["0x0", "0x0", "0x0", "0x0"],
+      "gpu_limbs": ["0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0"],
+      "bytes_le": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "name": "one4",
+      "host_words": ["0x1", "0x0", "0x0", "0x0"],
+      "gpu_limbs": ["0x1", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0"],
+      "bytes_le": "0100000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "name": "bn254_fr_modulus_minus_one",
+      "host_words": ["0x43e1f593f0000000", "0x2833e84879b97091", "0xb85045b68181585d", "0x30644e72e131a029"],
+      "gpu_limbs": ["0xf0000000", "0x43e1f593", "0x79b97091", "0x2833e848", "0x8181585d", "0xb85045b6", "0xe131a029", "0x30644e72"],
+      "bytes_le": "000000f093f5e1439170b97948e833285d588181b64550b829a031e1724e6430"
+    },
+    {
+      "name": "bn254_fp_modulus_minus_one",
+      "host_words": ["0x3c208c16d87cfd46", "0x97816a916871ca8d", "0xb85045b68181585d", "0x30644e72e131a029"],
+      "gpu_limbs": ["0xd87cfd46", "0x3c208c16", "0x6871ca8d", "0x97816a91", "0x8181585d", "0xb85045b6", "0xe131a029", "0x30644e72"],
+      "bytes_le": "46fd7cd8168c203c8dca7168916a81975d588181b64550b829a031e1724e6430"
+    },
+    {
+      "name": "carry_heavy4",
+      "host_words": ["0xffffffffffffffff", "0x0", "0x0", "0x0"],
+      "gpu_limbs": ["0xffffffff", "0xffffffff", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0"],
+      "bytes_le": "ffffffffffffffff000000000000000000000000000000000000000000000000"
+    },
+    {
+      "name": "random4",
+      "host_words": ["0x1122334455667788", "0x99aabbccddeeff00", "0x0123456789abcdef", "0xfedcba9876543210"],
+      "gpu_limbs": ["0x55667788", "0x11223344", "0xddeeff00", "0x99aabbcc", "0x89abcdef", "0x01234567", "0x76543210", "0xfedcba98"],
+      "bytes_le": "887766554433221100ffeeddccbbaa99efcdab89674523011032547698badcfe"
+    }
+  ],
+  "word6": [
+    {
+      "name": "zero6",
+      "host_words": ["0x0", "0x0", "0x0", "0x0", "0x0", "0x0"],
+      "gpu_limbs": ["0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0"],
+      "bytes_le": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "name": "one6",
+      "host_words": ["0x1", "0x0", "0x0", "0x0", "0x0", "0x0"],
+      "gpu_limbs": ["0x1", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0"],
+      "bytes_le": "010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "name": "bls12_381_fp_modulus_minus_one",
+      "host_words": ["0xb9feffffffffaaaa", "0x1eabfffeb153ffff", "0x6730d2a0f6b0f624", "0x64774b84f38512bf", "0x4b1ba7b6434bacd7", "0x1a0111ea397fe69a"],
+      "gpu_limbs": ["0xffffaaaa", "0xb9feffff", "0xb153ffff", "0x1eabfffe", "0xf6b0f624", "0x6730d2a0", "0xf38512bf", "0x64774b84", "0x434bacd7", "0x4b1ba7b6", "0x397fe69a", "0x1a0111ea"],
+      "bytes_le": "aaaafffffffffeb9ffff53b1feffab1e24f6b0f6a0d23067bf1285f3844b7764d7ac4b43b6a71b4b9ae67f39ea11011a"
+    },
+    {
+      "name": "carry_heavy6",
+      "host_words": ["0x0", "0x0", "0xffffffffffffffff", "0x0", "0x0", "0x0"],
+      "gpu_limbs": ["0x0", "0x0", "0x0", "0x0", "0xffffffff", "0xffffffff", "0x0", "0x0", "0x0", "0x0", "0x0", "0x0"],
+      "bytes_le": "00000000000000000000000000000000ffffffffffffffff000000000000000000000000000000000000000000000000"
+    },
+    {
+      "name": "random6",
+      "host_words": ["0x0123456789abcdef", "0xfedcba9876543210", "0x0000000100000002", "0x13579bdf2468ace0", "0xaaaaaaaa55555555", "0xdeadbeefcafef00d"],
+      "gpu_limbs": ["0x89abcdef", "0x01234567", "0x76543210", "0xfedcba98", "0x00000002", "0x00000001", "0x2468ace0", "0x13579bdf", "0x55555555", "0xaaaaaaaa", "0xcafef00d", "0xdeadbeef"],
+      "bytes_le": "efcdab89674523011032547698badcfe0200000001000000e0ac6824df9b571355555555aaaaaaaa0df0fecaefbeadde"
+    }
+  ]
+}

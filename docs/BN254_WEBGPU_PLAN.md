@@ -1,6 +1,6 @@
 # Pairing-Friendly Curve WebGPU Primitive Plan
 
-Status: Draft for review
+Status: Phase 0 and Phase 1 completed
 Last updated: 2026-04-01
 
 ## Goal
@@ -251,11 +251,11 @@ Note:
 ## Phase 0: Planning and scaffolding
 
 - [x] Create repo plan document
-- [ ] Confirm plan and initial scope with user
-- [ ] Create directory layout for shaders, Go host code, TypeScript host code, and testdata
-- [ ] Make the scaffolding curve-parameterized even if only BN254 is implemented first
-- [ ] Add shared shader loading strategy for Go and TypeScript
-- [ ] Add browser and Metal test harness skeletons for future kernels
+- [x] Confirm plan and initial scope with user
+- [x] Create directory layout for shaders, Go host code, TypeScript host code, and testdata
+- [x] Make the scaffolding curve-parameterized even if only BN254 is implemented first
+- [x] Add shared shader loading strategy for Go and TypeScript
+- [x] Add browser and Metal test harness skeletons for future kernels
 
 Deliverable:
 
@@ -263,14 +263,14 @@ Deliverable:
 
 ## Phase 1: Shared representation and conversion layer
 
-- [ ] Define WGSL field element structs for 4-word and 6-word fields
-- [ ] Define Go wrapper types for WGSL buffer-compatible field elements
-- [ ] Define TypeScript wrapper types for WGSL buffer-compatible field elements
-- [ ] Implement Go conversion: `[4]uint64` <-> `[8]u32`
-- [ ] Implement Go conversion: `[6]uint64` <-> `[12]u32`
-- [ ] Implement TS conversion: bytes / bigint / limb arrays <-> GPU limbs
-- [ ] Define canonical serialization policy for tests
-- [ ] Add golden test vectors for edge cases:
+- [x] Define WGSL field element structs for 4-word and 6-word fields
+- [x] Define Go wrapper types for WGSL buffer-compatible field elements
+- [x] Define TypeScript wrapper types for WGSL buffer-compatible field elements
+- [x] Implement Go conversion: `[4]uint64` <-> `[8]u32`
+- [x] Implement Go conversion: `[6]uint64` <-> `[12]u32`
+- [x] Implement TS conversion: bytes / bigint / limb arrays <-> GPU limbs
+- [x] Define canonical serialization policy for tests
+- [x] Add golden test vectors for edge cases:
   - zero
   - one
   - modulus minus one
@@ -281,6 +281,12 @@ Deliverable:
 
 - host can move BN254 field elements between gnark-crypto and WGSL-compatible buffers without ambiguity
 - the shared representation layer is ready for future BLS12-381 / BLS12-377 support
+
+Notes from implementation:
+
+- Phase 1 includes shared little-endian test vectors for both 4-word and 6-word layouts.
+- Go verification is in place via `go test ./go/curvegpu/...` and the repo-local smoke command in `cmd/curvegpu-metal-smoke`.
+- TypeScript scaffolding and conversion helpers are implemented, but no TS build step has been wired up yet because the repo does not currently vendor a local TypeScript toolchain.
 
 ## Phase 2: `fr` arithmetic baseline
 
