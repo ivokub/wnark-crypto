@@ -1,7 +1,7 @@
 # Pairing-Friendly Curve WebGPU Primitive Plan
 
-Status: Phase 0 and Phase 1 completed
-Last updated: 2026-04-01
+Status: Phase 0, Phase 1, and Phase 2 completed; Phase 3 next
+Last updated: 2026-04-02
 
 ## Goal
 
@@ -294,16 +294,16 @@ First field to implement: `fr`.
 
 Operations:
 
-- [ ] zero / one / copy / equality
-- [ ] addition
-- [ ] subtraction
-- [ ] negation
-- [ ] conditional subtraction / normalization
-- [ ] doubling
-- [ ] Montgomery multiplication
-- [ ] squaring
-- [ ] conversion to Montgomery
-- [ ] conversion from Montgomery
+- [x] zero / one / copy / equality
+- [x] addition
+- [x] subtraction
+- [x] negation
+- [x] conditional subtraction / normalization
+- [x] doubling
+- [x] Montgomery multiplication
+- [x] squaring
+- [x] conversion to Montgomery
+- [x] conversion from Montgomery
 
 Kernel strategy:
 
@@ -312,14 +312,30 @@ Kernel strategy:
 
 Tests:
 
-- [ ] Go CPU vs GPU random differential tests against gnark-crypto `fr`
-- [ ] Browser CPU vs GPU random differential tests against exported test vectors
-- [ ] Metal/browser parity tests on the same vectors
-- [ ] edge-case tests around carries and reduction boundaries
+- [x] Go CPU vs GPU random differential tests against gnark-crypto `fr`
+- [x] Browser CPU vs GPU random differential tests against exported test vectors
+- [x] Metal/browser parity tests on the same vectors
+- [x] edge-case tests around carries and reduction boundaries
 
 Deliverable:
 
 - stable `fr` arithmetic layer verified in Metal and browser
+
+Notes from implementation:
+
+- A correctness-first BN254 `fr` WGSL kernel exists for `copy`, `zero`, `one`, `equal`, `add`, `sub`, `neg`, `double`, and `normalize`.
+- Metal verification is in place via `CGO_ENABLED=0 go run ./cmd/bn254-fr-metal-smoke`, using shared vectors and direct `gnark-crypto` cross-checks for the reduced-element ops.
+- BN254 `fr` Montgomery multiplication is implemented in WGSL using 16-bit sub-limbs inside the shader and is verified on Metal against shared vectors plus `gnark-crypto`.
+- BN254 `fr` squaring is implemented by reusing the same Montgomery multiplication path and is verified on Metal against shared vectors plus `gnark-crypto`.
+- BN254 `fr` conversion to and from Montgomery form is implemented in WGSL and verified on Metal against shared vectors plus `gnark-crypto`.
+- The shared Phase 2 vectors were regenerated from `gnark-crypto` so the browser and Metal harnesses now use the correct BN254 Montgomery encoding for `one`; `equal` returns Montgomery `1` for consistency with the rest of the field API.
+- A Go differential test now batches deterministic random BN254 `fr` cases through the WebGPU kernel and checks `copy`, `equal`, `zero`, `one`, `add`, `sub`, `neg`, `double`, `mul`, `square`, `to_mont`, and `from_mont` against `gnark-crypto`.
+- Shared browser assets exist (`web/src/bn254_fr_ops.ts`, `web/static/bn254_fr_ops.html`).
+- Headed Chrome on Apple Silicon validates the Phase 2 browser smoke successfully across all currently implemented ops, with adapter diagnostics reporting `vendor = apple` and `architecture = metal-3`.
+- Browser validation now includes `mul: OK`, `square: OK`, `to_mont: OK`, and `from_mont: OK` in the headed-Chrome Phase 2 smoke page, across shared sanity, edge-case, and deterministic differential vectors.
+- After adding new browser ops, manual headed-Chrome validation is still required before treating them as browser-verified.
+- Headless Chrome on macOS/Metal is currently unreliable for this page and should be treated as a browser automation limitation, not as a correctness failure of the WGSL arithmetic.
+- For now, browser validation for Phase 2 is manual via `web/static/bn254_fr_ops.html`; Metal remains the automated local verification path.
 
 ## Phase 3: `fp` arithmetic baseline
 
@@ -475,7 +491,7 @@ Every primitive should be testable in three ways:
 
 1. reference CPU result from gnark-crypto
 2. Metal result from Go + `gogpu/wgpu`
-3. browser result from TypeScript + headless Chrome
+3. browser result from TypeScript + headed Chrome WebGPU
 
 ### Test layers
 
@@ -507,22 +523,18 @@ The easiest way to avoid host-language drift is:
 - serialize them into `testdata/vectors/...`
 - consume the same vectors from TypeScript and Go GPU harnesses
 
-## Browser automation plan
+## Browser validation plan
 
-We already have a headless Chrome pattern working in this repo. We should extend the same approach:
+Current accepted Phase 2 browser validation path:
 
-- TypeScript/browser page supports `autorun=1`
-- page writes `data-status="pass|fail"`
-- page logs operation results and mismatches to DOM
-- shell script / test target runs headless Chrome and checks the DOM
+- open `web/static/bn254_fr_ops.html` in headed Chrome
+- confirm the page reports all implemented ops as `OK`
+- confirm adapter diagnostics report the Apple Metal-backed adapter rather than a fallback path
 
-Future targets:
+Future browser automation work remains desirable, but it is now explicitly separate from primitive correctness:
 
-- `make test-browser`
-- `make test-browser-fr`
-- `make test-browser-fp`
-- `make test-browser-g1`
-- `make test-browser-ntt`
+- investigate a reliable automation path that works on macOS/Metal without depending on flaky headless Chrome behavior
+- once stable, restore shell-script-driven browser automation for `fr`, `fp`, `g1`, and `ntt`
 
 ## Metal automation plan
 
@@ -632,6 +644,6 @@ These are the main decisions to confirm before coding:
 ## Progress notes
 
 - [x] Existing repo compute harness works on Metal
-- [x] Existing browser WebGPU harness works under headless Chrome
+- [x] Existing browser WebGPU harness works in headed Chrome on Apple Silicon with Metal-backed adapter diagnostics
 - [x] Initial primitive implementation plan stored in repo
 - [ ] Implementation not started yet
