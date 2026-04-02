@@ -40,6 +40,7 @@ const G1_OP_DOUBLE_JAC: u32 = 4u;
 const G1_OP_ADD_MIXED: u32 = 5u;
 const G1_OP_JAC_TO_AFFINE: u32 = 6u;
 const G1_OP_AFFINE_ADD: u32 = 7u;
+const G1_OP_SCALAR_MUL_AFFINE: u32 = 8u;
 const FP_LIMB16_MASK: u32 = 0xffffu;
 const FP_QINV_NEG_16: u32 = 0x6389u;
 
@@ -567,6 +568,26 @@ fn g1_add_mixed(p: G1Point, a: G1Point) -> G1Point {
   return out;
 }
 
+fn g1_scalar_bit(words: Fp, bit: u32) -> bool {
+  let word = words.limbs[bit / 32u];
+  return ((word >> (bit % 32u)) & 1u) != 0u;
+}
+
+fn g1_scalar_mul_affine(base: G1Point, scalar_words: Fp) -> G1Point {
+  if (g1_affine_is_infinity(base)) {
+    return g1_jac_to_affine(g1_jac_infinity());
+  }
+
+  var acc = g1_jac_infinity();
+  for (var bit: i32 = 255; bit >= 0; bit = bit - 1) {
+    acc = g1_double_jac(acc);
+    if (g1_scalar_bit(scalar_words, u32(bit))) {
+      acc = g1_add_mixed(acc, base);
+    }
+  }
+  return g1_jac_to_affine(acc);
+}
+
 fn g1_dispatch(opcode: u32, a: G1Point, b: G1Point) -> G1Point {
   if (opcode == G1_OP_COPY) {
     return a;
@@ -591,6 +612,9 @@ fn g1_dispatch(opcode: u32, a: G1Point, b: G1Point) -> G1Point {
   }
   if (opcode == G1_OP_AFFINE_ADD) {
     return g1_jac_to_affine(g1_add_mixed(g1_affine_to_jac(a), b));
+  }
+  if (opcode == G1_OP_SCALAR_MUL_AFFINE) {
+    return g1_scalar_mul_affine(a, b.x);
   }
   return g1_jac_infinity();
 }

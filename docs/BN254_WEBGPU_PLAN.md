@@ -1,6 +1,6 @@
 # Pairing-Friendly Curve WebGPU Primitive Plan
 
-Status: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, and Phase 6 completed; Phase 7 next
+Status: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, Phase 6, and Phase 7 completed; Phase 8 next
 Last updated: 2026-04-02
 
 ## Goal
@@ -472,10 +472,10 @@ Notes from implementation:
 
 Start with the simplest correct algorithm first.
 
-- [ ] fixed-base scalar multiplication baseline
-- [ ] variable-base double-and-add baseline
-- [ ] batched scalar multiplication harness
-- [ ] compare against gnark-crypto `ScalarMultiplication`
+- [x] fixed-base scalar multiplication baseline
+- [x] variable-base double-and-add baseline
+- [x] batched scalar multiplication harness
+- [x] compare against gnark-crypto `ScalarMultiplication`
 
 Later optimization candidates:
 
@@ -486,6 +486,17 @@ Later optimization candidates:
 Deliverable:
 
 - correct scalar multiplication before optimizing MSM
+
+Notes from implementation:
+
+- The first Phase 7 slice adds a correctness-first BN254 G1 scalar-multiplication baseline to `shaders/curves/bn254/g1_arith.wgsl` as `G1_OP_SCALAR_MUL_AFFINE`.
+- The GPU path uses a simple MSB-first double-and-add loop over 256 scalar bits, with affine base inputs and affine-normalized outputs.
+- The Go wrapper lives in `go/curvegpu/bn254/g1.go` and exposes `ScalarMulAffine` over batched affine bases and packed `fr` scalar words.
+- Shared vectors are generated from `gnark-crypto` in `testdata/vectors/g1/bn254_phase7_scalar_mul.json`, covering variable-base and fixed-base cases including zero, one, small deterministic scalars, infinity input, and `q-1`.
+- A native Metal smoke command exists in `cmd/bn254-g1-scalar-metal-smoke`, and it passes on Apple Silicon for both `scalar_mul_affine` and `scalar_mul_base_affine`.
+- A manual headed-Chrome browser smoke exists in `web/static/bn254_g1_scalar_mul.html`, and it passes on Apple Silicon with adapter diagnostics reporting `vendor = apple` and `architecture = metal-3`.
+- The Go differential test for this slice lives in `go/curvegpu/bn254_g1_scalar_mul_test.go` and checks the scalar-multiplication results against the shared vectors.
+- The broader `CGO_ENABLED=0 go test ./go/curvegpu/...` path remains unreliable under `gogpu/wgpu` Metal due to backend instability during repeated GPU-heavy test churn, so the dedicated Metal smoke is the trusted native verification signal for this slice.
 
 ## Phase 8: MSM
 

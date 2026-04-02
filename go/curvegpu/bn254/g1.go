@@ -21,6 +21,7 @@ const (
 	G1OpAddMixed
 	G1OpJacToAffine
 	G1OpAffineAdd
+	G1OpScalarMulAffine
 )
 
 const (
@@ -334,6 +335,10 @@ func (k *G1Kernel) AffineAdd(a, b []G1Affine) ([]G1Jac, error) {
 	return k.Run(G1OpAffineAdd, AffineToKernelBatch(a), AffineToKernelBatch(b))
 }
 
+func (k *G1Kernel) ScalarMulAffine(base []G1Affine, scalars []curvegpu.U32x8) ([]G1Jac, error) {
+	return k.Run(G1OpScalarMulAffine, AffineToKernelBatch(base), scalarWordsToBatch(scalars))
+}
+
 func inferG1Count(a, b []G1Jac) (int, error) {
 	switch {
 	case len(a) == 0 && len(b) == 0:
@@ -384,6 +389,14 @@ func unflattenG1Batch(data []byte, count int) []G1Jac {
 			out[i].Y[j] = binary.LittleEndian.Uint32(data[base+32+j*4:])
 			out[i].Z[j] = binary.LittleEndian.Uint32(data[base+64+j*4:])
 		}
+	}
+	return out
+}
+
+func scalarWordsToBatch(in []curvegpu.U32x8) []G1Jac {
+	out := make([]G1Jac, len(in))
+	for i := range in {
+		out[i].X = in[i]
 	}
 	return out
 }
