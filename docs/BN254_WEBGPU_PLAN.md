@@ -1,6 +1,6 @@
 # Pairing-Friendly Curve WebGPU Primitive Plan
 
-Status: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, Phase 6, and Phase 7 completed; Phase 8 next
+Status: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, Phase 6, Phase 7, and Phase 8 completed; Phase 9 next
 Last updated: 2026-04-02
 
 ## Goal
@@ -502,9 +502,9 @@ Notes from implementation:
 
 Only after scalar multiplication and G1 arithmetic are stable:
 
-- [ ] define MSM API and buffer layouts
-- [ ] baseline MSM using simple batching or naive decomposition
-- [ ] compare against gnark-crypto `MultiExp`
+- [x] define MSM API and buffer layouts
+- [x] baseline MSM using simple batching or naive decomposition
+- [x] compare against gnark-crypto `MultiExp`
 - [ ] measure crossover points for GPU usefulness
 
 Later optimization candidates:
@@ -516,6 +516,17 @@ Later optimization candidates:
 Deliverable:
 
 - initial correctness-validated MSM prototype
+
+Notes from implementation:
+
+- The first Phase 8 slice implements a correctness-first BN254 G1 MSM baseline in `go/curvegpu/bn254/g1_msm.go`.
+- This baseline is deliberately host-orchestrated: it composes the already-validated GPU `ScalarMulAffine` and pairwise `AffineAdd` operations rather than introducing a bucketed MSM kernel too early.
+- The MSM API uses a flat `count * termsPerInstance` layout for affine bases and scalar word buffers, with one affine-normalized output point per MSM instance.
+- Shared vectors are generated from `gnark-crypto` in `testdata/vectors/g1/bn254_phase8_msm.json`, covering small deterministic MSMs, zero scalars, infinity bases, and `q-1`.
+- A native Metal smoke command exists in `cmd/bn254-g1-msm-metal-smoke`, and it passes on Apple Silicon for `msm_naive_affine`.
+- A manual headed-Chrome browser smoke exists in `web/static/bn254_g1_msm.html`, and it passes on Apple Silicon with adapter diagnostics reporting `vendor = apple` and `architecture = metal-3`.
+- The Go validation for this slice lives in `go/curvegpu/bn254_g1_msm_test.go` and checks the MSM outputs against the shared vectors.
+- A helper split in `shaders/curves/bn254/g1_arith.wgsl` now exposes the Jacobian-returning `g1_scalar_mul_affine_jac`, which keeps the scalar-multiplication logic reusable for future optimized MSM kernels.
 
 ## Phase 9: Multi-curve extension
 

@@ -573,11 +573,7 @@ fn g1_scalar_bit(words: Fp, bit: u32) -> bool {
   return ((word >> (bit % 32u)) & 1u) != 0u;
 }
 
-fn g1_scalar_mul_affine(base: G1Point, scalar_words: Fp) -> G1Point {
-  if (g1_affine_is_infinity(base)) {
-    return g1_jac_to_affine(g1_jac_infinity());
-  }
-
+fn g1_scalar_mul_affine_jac(base: G1Point, scalar_words: Fp) -> G1Point {
   var acc = g1_jac_infinity();
   for (var bit: i32 = 255; bit >= 0; bit = bit - 1) {
     acc = g1_double_jac(acc);
@@ -585,6 +581,14 @@ fn g1_scalar_mul_affine(base: G1Point, scalar_words: Fp) -> G1Point {
       acc = g1_add_mixed(acc, base);
     }
   }
+  return acc;
+}
+
+fn g1_scalar_mul_affine(base: G1Point, scalar_words: Fp) -> G1Point {
+  if (g1_affine_is_infinity(base)) {
+    return g1_jac_to_affine(g1_jac_infinity());
+  }
+  let acc = g1_scalar_mul_affine_jac(base, scalar_words);
   return g1_jac_to_affine(acc);
 }
 
