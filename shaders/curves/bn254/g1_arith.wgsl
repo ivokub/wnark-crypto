@@ -13,10 +13,8 @@ struct Fp16 {
 }
 
 struct Params {
-  count: u32,
-  opcode: u32,
-  _pad0: u32,
-  _pad1: u32,
+  lane0: vec4<u32>,
+  lane1: vec4<u32>,
 }
 
 const FP_OP_COPY: u32 = 0u;
@@ -70,6 +68,34 @@ const FP_MODULUS_MINUS_TWO: array<u32, 8> = array<u32, 8>(
 @group(0) @binding(1) var<storage, read> input_b: array<u32>;
 @group(0) @binding(2) var<storage, read_write> output: array<u32>;
 @group(0) @binding(3) var<uniform> params: Params;
+
+fn params_count() -> u32 {
+  return params.lane0.x;
+}
+
+fn params_opcode() -> u32 {
+  return params.lane0.y;
+}
+
+fn params_terms_per_instance() -> u32 {
+  return params.lane0.z;
+}
+
+fn params_window() -> u32 {
+  return params.lane0.w;
+}
+
+fn params_num_windows() -> u32 {
+  return params.lane1.x;
+}
+
+fn params_bucket_count() -> u32 {
+  return params.lane1.y;
+}
+
+fn params_row_width() -> u32 {
+  return params.lane1.z;
+}
 
 fn fp_zero() -> Fp {
   var z: Fp;
@@ -573,6 +599,29 @@ fn g1_scalar_bit(words: Fp, bit: u32) -> bool {
   return ((word >> (bit % 32u)) & 1u) != 0u;
 }
 
+fn g1_window_digit(words: Fp, bit_offset: u32, window: u32) -> u32 {
+  if (window == 0u) {
+    return 0u;
+  }
+  let word = bit_offset / 32u;
+  let shift = bit_offset % 32u;
+  let mask = (1u << window) - 1u;
+  if (word >= 8u) {
+    return 0u;
+  }
+  if ((shift + window) <= 32u) {
+    return (words.limbs[word] >> shift) & mask;
+  }
+  let low_bits = words.limbs[word] >> shift;
+  if ((word + 1u) >= 8u) {
+    return low_bits & mask;
+  }
+  let high_width = shift + window - 32u;
+  let high_mask = (1u << high_width) - 1u;
+  let high_bits = words.limbs[word + 1u] & high_mask;
+  return (low_bits | (high_bits << (32u - shift))) & mask;
+}
+
 fn g1_scalar_mul_affine_jac(base: G1Point, scalar_words: Fp) -> G1Point {
   var acc = g1_jac_infinity();
   for (var bit: i32 = 255; bit >= 0; bit = bit - 1) {
@@ -589,6 +638,28 @@ fn g1_scalar_mul_affine(base: G1Point, scalar_words: Fp) -> G1Point {
     return g1_jac_to_affine(g1_jac_infinity());
   }
   let acc = g1_scalar_mul_affine_jac(base, scalar_words);
+  return g1_jac_to_affine(acc);
+}
+
+fn g1_scalar_mul_affine_small(base: G1Point, scalar: u32) -> G1Point {
+  if (scalar == 0u || g1_affine_is_infinity(base)) {
+    return g1_jac_to_affine(g1_jac_infinity());
+  }
+  var acc = g1_jac_infinity();
+  var cur_jac = g1_affine_to_jac(base);
+  var cur_aff = base;
+  var k = scalar;
+  loop {
+    if ((k & 1u) != 0u) {
+      acc = g1_add_mixed(acc, cur_aff);
+    }
+    k = k >> 1u;
+    if (k == 0u) {
+      break;
+    }
+    cur_jac = g1_double_jac(cur_jac);
+    cur_aff = g1_jac_to_affine(cur_jac);
+  }
   return g1_jac_to_affine(acc);
 }
 
@@ -677,8 +748,101 @@ fn g1_store(index: u32, value: G1Point) {
 @compute @workgroup_size(64)
 fn g1_ops_main(@builtin(global_invocation_id) id: vec3<u32>) {
   let i = id.x;
-  if (i >= params.count) {
+  if (i >= params_count()) {
     return;
   }
-  g1_store(i, g1_dispatch(params.opcode, g1_load_from(0u, i), g1_load_from(1u, i)));
+  g1_store(i, g1_dispatch(params_opcode(), g1_load_from(0u, i), g1_load_from(1u, i)));
+}
+
+@compute @workgroup_size(64)
+fn g1_msm_bucket_main(@builtin(global_invocation_id) id: vec3<u32>) {
+  let i = id.x;
+  if (i >= params_count()) {
+    return;
+  }
+  let bucket_count = params_bucket_count();
+  let num_windows = params_num_windows();
+  let per_instance = num_windows * bucket_count;
+  let instance = i / per_instance;
+  let rem = i % per_instance;
+  let win = rem / bucket_count;
+  let bucket = (rem % bucket_count) + 1u;
+  let window = params_window();
+  let terms_per_instance = params_terms_per_instance();
+  let bit_offset = win * window;
+  let base_offset = instance * terms_per_instance;
+
+  var acc = g1_jac_infinity();
+  for (var term = 0u; term < terms_per_instance; term = term + 1u) {
+    let idx = base_offset + term;
+    let scalar_words = g1_load_from(1u, idx).x;
+    if (g1_window_digit(scalar_words, bit_offset, window) == bucket) {
+      acc = g1_add_mixed(acc, g1_load_from(0u, idx));
+    }
+  }
+  g1_store(i, g1_jac_to_affine(acc));
+}
+
+@compute @workgroup_size(64)
+fn g1_msm_window_weight_main(@builtin(global_invocation_id) id: vec3<u32>) {
+  let i = id.x;
+  if (i >= params_count()) {
+    return;
+  }
+  let bucket_count = params_bucket_count();
+  let bucket = (i % bucket_count) + 1u;
+  let point = g1_load_from(0u, i);
+  if (g1_affine_is_infinity(point)) {
+    g1_store(i, point);
+    return;
+  }
+  g1_store(i, g1_scalar_mul_affine_small(point, bucket));
+}
+
+@compute @workgroup_size(64)
+fn g1_msm_window_reduce_main(@builtin(global_invocation_id) id: vec3<u32>) {
+  let i = id.x;
+  if (i >= params_count()) {
+    return;
+  }
+  let row_width = params_row_width();
+  let next_width = (row_width + 1u) / 2u;
+  let row = i / next_width;
+  let slot = i % next_width;
+  let left_index = row * row_width + (2u * slot);
+  let right_index = left_index + 1u;
+  let left = g1_load_from(0u, left_index);
+  var right: G1Point;
+  if ((2u * slot + 1u) < row_width) {
+    right = g1_load_from(0u, right_index);
+  } else {
+    right.x = fp_zero();
+    right.y = fp_zero();
+    right.z = fp_zero();
+  }
+  g1_store(i, g1_jac_to_affine(g1_add_mixed(g1_affine_to_jac(left), right)));
+}
+
+@compute @workgroup_size(64)
+fn g1_msm_combine_main(@builtin(global_invocation_id) id: vec3<u32>) {
+  let i = id.x;
+  if (i >= params_count()) {
+    return;
+  }
+  let num_windows = params_num_windows();
+  let window = params_window();
+  var acc = g1_jac_infinity();
+  for (var win: i32 = i32(num_windows) - 1; win >= 0; win = win - 1) {
+    if (u32(win) != (num_windows - 1u)) {
+      for (var step = 0u; step < window; step = step + 1u) {
+        acc = g1_double_jac(acc);
+      }
+    }
+    let point = g1_load_from(0u, i * num_windows + u32(win));
+    if (g1_affine_is_infinity(point)) {
+      continue;
+    }
+    acc = g1_add_mixed(acc, point);
+  }
+  g1_store(i, g1_jac_to_affine(acc));
 }

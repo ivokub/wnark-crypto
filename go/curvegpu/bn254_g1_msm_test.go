@@ -59,7 +59,7 @@ func TestBN254G1MSMKernelAgainstGnarkCrypto(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunAffineNaive: %v", err)
 	}
-	mustEqualG1Batch(t, "msm_naive", got, want)
+	mustEqualG1BatchSemantically(t, "msm_naive", got, want)
 	mustBeOnCurveOrInfinity(t, "msm_naive", got)
 }
 

@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BN254 fr Vector WebGPU Benchmark</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #10161d;
+      --panel: #17212b;
+      --text: #e7edf4;
+      --muted: #94a3b8;
+      --border: #314154;
+      --accent: #0f766e;
+    }
+
+    body {
+      margin: 0;
+      font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: radial-gradient(circle at top, #223042, var(--bg) 60%);
+      color: var(--text);
+    }
+
+    main {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+
+    p {
+      margin: 0 0 20px;
+      color: var(--muted);
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(4, max-content) 1fr;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    input {
+      width: 72px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: color-mix(in srgb, var(--panel) 92%, black);
+      color: var(--text);
+      font: inherit;
+    }
+
+    button {
+      border: 1px solid var(--border);
+      background: var(--accent);
+      color: #ecfeff;
+      padding: 10px 14px;
+      border-radius: 10px;
+      cursor: pointer;
+      font: inherit;
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: 0.7;
+    }
+
+    .status {
+      color: var(--muted);
+      justify-self: end;
+    }
+
+    pre {
+      margin: 0;
+      padding: 16px;
+      background: color-mix(in srgb, var(--panel) 92%, black);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: auto;
+      min-height: 320px;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body data-status="idle">
+  <main>
+    <h1>BN254 fr Vector WebGPU Benchmark</h1>
+    <p>
+      This page measures the full browser WebGPU path for large BN254 scalar-field vector operations:
+      pipeline initialization, input upload, kernel dispatch, and result readback.
+    </p>
+
+    <div class="controls">
+      <label>min log2 <input id="min-log" type="number" min="1" max="24" value="10"></label>
+      <label>max log2 <input id="max-log" type="number" min="1" max="24" value="20"></label>
+      <label>iters <input id="iters" type="number" min="1" max="20" value="3"></label>
+      <button id="run">Run Benchmark</button>
+      <span id="status" class="status">Idle</span>
+    </div>
+
+    <pre id="log"></pre>
+  </main>
+
+  <script type="module" src="./bn254_fr_vector_bench.js"></script>
+</body>
+</html>

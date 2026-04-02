@@ -227,6 +227,20 @@ func mustEqualG1Batch(t *testing.T, name string, got, want []bn254gpu.G1Jac) {
 	}
 }
 
+func mustEqualG1BatchSemantically(t *testing.T, name string, got, want []bn254gpu.G1Jac) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s length mismatch: got=%d want=%d", name, len(got), len(want))
+	}
+	for i := range got {
+		gotAff := gpuJacToGnarkAffine(got[i])
+		wantAff := gpuJacToGnarkAffine(want[i])
+		if !gotAff.Equal(&wantAff) {
+			t.Fatalf("%s mismatch at index %d: got=%+v want=%+v", name, i, got[i], want[i])
+		}
+	}
+}
+
 func mustBeOnCurve(t *testing.T, name string, got []bn254gpu.G1Jac) {
 	t.Helper()
 	for i := range got {
@@ -256,6 +270,13 @@ func gpuJacToGnark(in bn254gpu.G1Jac) gnarkbn254.G1Jac {
 		Y: limbsToFpElement(in.Y),
 		Z: limbsToFpElement(in.Z),
 	}
+}
+
+func gpuJacToGnarkAffine(in bn254gpu.G1Jac) gnarkbn254.G1Affine {
+	jac := gpuJacToGnark(in)
+	var aff gnarkbn254.G1Affine
+	aff.FromJacobian(&jac)
+	return aff
 }
 
 func limbsToFpElement(in curvegpu.U32x8) gnarkfp.Element {

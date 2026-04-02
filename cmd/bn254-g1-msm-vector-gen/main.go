@@ -149,23 +149,13 @@ func encodeScalarBatch(in []gnarkfr.Element) []string {
 }
 
 func scalarToHex(v gnarkfr.Element) string {
-	var out [32]byte
-	for i, word := range [4]uint64(v) {
-		base := i * 8
-		out[base+0] = byte(word)
-		out[base+1] = byte(word >> 8)
-		out[base+2] = byte(word >> 16)
-		out[base+3] = byte(word >> 24)
-		out[base+4] = byte(word >> 32)
-		out[base+5] = byte(word >> 40)
-		out[base+6] = byte(word >> 48)
-		out[base+7] = byte(word >> 56)
-	}
-	return hex.EncodeToString(out[:])
+	bytesBE := v.Bytes()
+	return hex.EncodeToString(regularToLittleEndian(bytesBE[:]))
 }
 
 func scalarToBig(v gnarkfr.Element) *big.Int {
-	return new(big.Int).SetBytes(regularLEBytes(words4ToBytes(v[:])))
+	var out big.Int
+	return v.BigInt(&out)
 }
 
 func words4ToBytes(words []uint64) []byte {
@@ -184,7 +174,7 @@ func words4ToBytes(words []uint64) []byte {
 	return out
 }
 
-func regularLEBytes(in []byte) []byte {
+func regularToLittleEndian(in []byte) []byte {
 	out := make([]byte, len(in))
 	for i := range in {
 		out[len(in)-1-i] = in[i]

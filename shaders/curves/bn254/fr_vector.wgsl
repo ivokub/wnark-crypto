@@ -14,8 +14,10 @@ struct Params {
 }
 
 const FR_VECTOR_OP_COPY: u32 = 0u;
-const FR_VECTOR_OP_MUL_FACTORS: u32 = 1u;
-const FR_VECTOR_OP_BIT_REVERSE_COPY: u32 = 2u;
+const FR_VECTOR_OP_ADD: u32 = 1u;
+const FR_VECTOR_OP_SUB: u32 = 2u;
+const FR_VECTOR_OP_MUL_FACTORS: u32 = 3u;
+const FR_VECTOR_OP_BIT_REVERSE_COPY: u32 = 4u;
 const FR_LIMB16_MASK: u32 = 0xffffu;
 const FR_QINV_NEG_16: u32 = 0xffffu;
 
@@ -48,6 +50,19 @@ fn fr_zero() -> Fr {
   return z;
 }
 
+fn fr_modulus() -> Fr {
+  var z: Fr;
+  z.limbs[0] = 0xf0000001u;
+  z.limbs[1] = 0x43e1f593u;
+  z.limbs[2] = 0x79b97091u;
+  z.limbs[3] = 0x2833e848u;
+  z.limbs[4] = 0x8181585du;
+  z.limbs[5] = 0xb85045b6u;
+  z.limbs[6] = 0xe131a029u;
+  z.limbs[7] = 0x30644e72u;
+  return z;
+}
+
 fn adc(a: u32, b: u32, carry: u32) -> vec2<u32> {
   let sum0 = a + b;
   let carry0 = select(0u, 1u, sum0 < a);
@@ -62,6 +77,155 @@ fn sbb(a: u32, b: u32, borrow: u32) -> vec2<u32> {
   let diff1 = diff0 - borrow;
   let borrow1 = select(0u, 1u, diff1 > diff0);
   return vec2<u32>(diff1, borrow0 | borrow1);
+}
+
+fn fr_gte(x: Fr, y: Fr) -> bool {
+  if (x.limbs[7] != y.limbs[7]) {
+    return x.limbs[7] > y.limbs[7];
+  }
+  if (x.limbs[6] != y.limbs[6]) {
+    return x.limbs[6] > y.limbs[6];
+  }
+  if (x.limbs[5] != y.limbs[5]) {
+    return x.limbs[5] > y.limbs[5];
+  }
+  if (x.limbs[4] != y.limbs[4]) {
+    return x.limbs[4] > y.limbs[4];
+  }
+  if (x.limbs[3] != y.limbs[3]) {
+    return x.limbs[3] > y.limbs[3];
+  }
+  if (x.limbs[2] != y.limbs[2]) {
+    return x.limbs[2] > y.limbs[2];
+  }
+  if (x.limbs[1] != y.limbs[1]) {
+    return x.limbs[1] > y.limbs[1];
+  }
+  return x.limbs[0] >= y.limbs[0];
+}
+
+fn fr_add_modulus(x: Fr) -> Fr {
+  let q = fr_modulus();
+  var z: Fr;
+  var carry = 0u;
+  var lane = adc(x.limbs[0], q.limbs[0], carry);
+  z.limbs[0] = lane.x;
+  carry = lane.y;
+  lane = adc(x.limbs[1], q.limbs[1], carry);
+  z.limbs[1] = lane.x;
+  carry = lane.y;
+  lane = adc(x.limbs[2], q.limbs[2], carry);
+  z.limbs[2] = lane.x;
+  carry = lane.y;
+  lane = adc(x.limbs[3], q.limbs[3], carry);
+  z.limbs[3] = lane.x;
+  carry = lane.y;
+  lane = adc(x.limbs[4], q.limbs[4], carry);
+  z.limbs[4] = lane.x;
+  carry = lane.y;
+  lane = adc(x.limbs[5], q.limbs[5], carry);
+  z.limbs[5] = lane.x;
+  carry = lane.y;
+  lane = adc(x.limbs[6], q.limbs[6], carry);
+  z.limbs[6] = lane.x;
+  carry = lane.y;
+  lane = adc(x.limbs[7], q.limbs[7], carry);
+  z.limbs[7] = lane.x;
+  return z;
+}
+
+fn fr_sub_modulus(x: Fr) -> Fr {
+  let q = fr_modulus();
+  var z: Fr;
+  var borrow = 0u;
+  var lane = sbb(x.limbs[0], q.limbs[0], borrow);
+  z.limbs[0] = lane.x;
+  borrow = lane.y;
+  lane = sbb(x.limbs[1], q.limbs[1], borrow);
+  z.limbs[1] = lane.x;
+  borrow = lane.y;
+  lane = sbb(x.limbs[2], q.limbs[2], borrow);
+  z.limbs[2] = lane.x;
+  borrow = lane.y;
+  lane = sbb(x.limbs[3], q.limbs[3], borrow);
+  z.limbs[3] = lane.x;
+  borrow = lane.y;
+  lane = sbb(x.limbs[4], q.limbs[4], borrow);
+  z.limbs[4] = lane.x;
+  borrow = lane.y;
+  lane = sbb(x.limbs[5], q.limbs[5], borrow);
+  z.limbs[5] = lane.x;
+  borrow = lane.y;
+  lane = sbb(x.limbs[6], q.limbs[6], borrow);
+  z.limbs[6] = lane.x;
+  borrow = lane.y;
+  lane = sbb(x.limbs[7], q.limbs[7], borrow);
+  z.limbs[7] = lane.x;
+  return z;
+}
+
+fn fr_add(x: Fr, y: Fr) -> Fr {
+  var z: Fr;
+  var carry = 0u;
+  var lane = adc(x.limbs[0], y.limbs[0], carry);
+  z.limbs[0] = lane.x;
+  carry = lane.y;
+  lane = adc(x.limbs[1], y.limbs[1], carry);
+  z.limbs[1] = lane.x;
+  carry = lane.y;
+  lane = adc(x.limbs[2], y.limbs[2], carry);
+  z.limbs[2] = lane.x;
+  carry = lane.y;
+  lane = adc(x.limbs[3], y.limbs[3], carry);
+  z.limbs[3] = lane.x;
+  carry = lane.y;
+  lane = adc(x.limbs[4], y.limbs[4], carry);
+  z.limbs[4] = lane.x;
+  carry = lane.y;
+  lane = adc(x.limbs[5], y.limbs[5], carry);
+  z.limbs[5] = lane.x;
+  carry = lane.y;
+  lane = adc(x.limbs[6], y.limbs[6], carry);
+  z.limbs[6] = lane.x;
+  carry = lane.y;
+  lane = adc(x.limbs[7], y.limbs[7], carry);
+  z.limbs[7] = lane.x;
+  if ((lane.y != 0u) || fr_gte(z, fr_modulus())) {
+    return fr_sub_modulus(z);
+  }
+  return z;
+}
+
+fn fr_sub(x: Fr, y: Fr) -> Fr {
+  var z: Fr;
+  var borrow = 0u;
+  var lane = sbb(x.limbs[0], y.limbs[0], borrow);
+  z.limbs[0] = lane.x;
+  borrow = lane.y;
+  lane = sbb(x.limbs[1], y.limbs[1], borrow);
+  z.limbs[1] = lane.x;
+  borrow = lane.y;
+  lane = sbb(x.limbs[2], y.limbs[2], borrow);
+  z.limbs[2] = lane.x;
+  borrow = lane.y;
+  lane = sbb(x.limbs[3], y.limbs[3], borrow);
+  z.limbs[3] = lane.x;
+  borrow = lane.y;
+  lane = sbb(x.limbs[4], y.limbs[4], borrow);
+  z.limbs[4] = lane.x;
+  borrow = lane.y;
+  lane = sbb(x.limbs[5], y.limbs[5], borrow);
+  z.limbs[5] = lane.x;
+  borrow = lane.y;
+  lane = sbb(x.limbs[6], y.limbs[6], borrow);
+  z.limbs[6] = lane.x;
+  borrow = lane.y;
+  lane = sbb(x.limbs[7], y.limbs[7], borrow);
+  z.limbs[7] = lane.x;
+  if (lane.y != 0u) {
+    return fr_add_modulus(z);
+  }
+  return z;
 }
 
 fn fr_unpack16(x: Fr) -> Fr16 {
@@ -193,6 +357,12 @@ fn fr_store(index: u32, value: Fr) {
 fn fr_dispatch(index: u32) -> Fr {
   if (params.opcode == FR_VECTOR_OP_COPY) {
     return fr_load_from(0u, index);
+  }
+  if (params.opcode == FR_VECTOR_OP_ADD) {
+    return fr_add(fr_load_from(0u, index), fr_load_from(1u, index));
+  }
+  if (params.opcode == FR_VECTOR_OP_SUB) {
+    return fr_sub(fr_load_from(0u, index), fr_load_from(1u, index));
   }
   if (params.opcode == FR_VECTOR_OP_MUL_FACTORS) {
     return fr_mul(fr_load_from(0u, index), fr_load_from(1u, index));

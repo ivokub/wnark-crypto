@@ -148,11 +148,13 @@ func newScalarBig(v *big.Int) gnarkfr.Element {
 }
 
 func scalarToBig(v gnarkfr.Element) *big.Int {
-	return new(big.Int).SetBytes(regularLEBytes(words4ToBytes(v[:])))
+	var out big.Int
+	return v.BigInt(&out)
 }
 
 func scalarToHex(v gnarkfr.Element) string {
-	return hex.EncodeToString(words4ToBytes(v[:]))
+	bytesBE := v.Bytes()
+	return hex.EncodeToString(regularToLittleEndian(bytesBE[:]))
 }
 
 func affineToJSON(p *gnarkbn254.G1Affine) affinePoint {
@@ -197,7 +199,7 @@ func words4ToBytes(words []uint64) []byte {
 	return out
 }
 
-func regularLEBytes(in []byte) []byte {
+func regularToLittleEndian(in []byte) []byte {
 	out := make([]byte, len(in))
 	for i := range in {
 		out[len(in)-1-i] = in[i]

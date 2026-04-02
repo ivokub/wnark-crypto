@@ -1,6 +1,6 @@
 # Pairing-Friendly Curve WebGPU Primitive Plan
 
-Status: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, Phase 6, Phase 7, and Phase 8 completed; Phase 9 next
+Status: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, Phase 6, Phase 7, and Phase 8 completed; Performance Tracks 1 and 2 benchmarked; Performance Track 3 checkpointed; Phase 9 deferred
 Last updated: 2026-04-02
 
 ## Goal
@@ -527,6 +527,113 @@ Notes from implementation:
 - A manual headed-Chrome browser smoke exists in `web/static/bn254_g1_msm.html`, and it passes on Apple Silicon with adapter diagnostics reporting `vendor = apple` and `architecture = metal-3`.
 - The Go validation for this slice lives in `go/curvegpu/bn254_g1_msm_test.go` and checks the MSM outputs against the shared vectors.
 - A helper split in `shaders/curves/bn254/g1_arith.wgsl` now exposes the Jacobian-returning `g1_scalar_mul_affine_jac`, which keeps the scalar-multiplication logic reusable for future optimized MSM kernels.
+
+## Performance track
+
+This track intentionally deviates from the original ordering before Phase 9.
+
+The immediate goal is no longer just primitive correctness. It is to measure whether the current BN254 primitives can be accelerated meaningfully when we lean on WebGPU-native parallel execution and use larger workloads.
+
+This track should reuse the decomposition ideas already present in `gnark-crypto`:
+
+- vector operations: per-slice parallel work split
+- FFT / NTT: stage-oriented butterfly parallelism with threshold-based splitting
+- MSM: windowed Pippenger decomposition with chunked bucket processing
+
+Benchmark policy for this track:
+
+- compare WebGPU Metal timings against native `gnark-crypto` Go timings
+- benchmark browser WebGPU separately and compare those numbers against the native Go timings
+- measure the full WebGPU path:
+  - device and pipeline initialization
+  - input upload
+  - kernel execution
+  - result readback
+- start with sizes `2^10` through `2^20` when memory permits
+- if a backend or device limit prevents a target size, record the largest passing size instead of silently shrinking scope
+- report both correctness status and timing, not timing alone
+
+### Performance Track 1: Parallel `fr` vector operations
+
+- [x] extend the vector kernel for large batched elementwise `add`, `sub`, `mul`, and bit-reverse copy
+- [x] add native Go benchmarks against `gnark-crypto` vector operations
+- [x] add Metal WebGPU benchmarks on the same inputs and sizes
+- [x] add manual headed-Chrome browser benchmarks
+- [ ] measure `2^10` through `2^20` when feasible
+- [ ] identify the first size where GPU becomes competitive
+
+Deliverable:
+
+- timing table for BN254 `fr` vector operations across native Go, Metal WebGPU, and browser WebGPU
+
+Notes from implementation:
+
+- The vector kernel in `shaders/curves/bn254/fr_vector.wgsl` now includes dedicated opcodes for elementwise `add` and `sub` in addition to `mul` and bit-reverse copy.
+- The Go wrapper in `go/curvegpu/bn254/fr_vector.go` now exposes `Add`, `Sub`, `MulFactors`, and `BitReverseCopy`.
+- The native benchmark command lives in `cmd/bn254-fr-vector-bench` and reports:
+  - one-time GPU initialization cost
+  - per-op `cold` and `warm` full-path timings
+  - explicit `upload`, `kernel`, `readback`, and `total` timing components
+  - exact output verification against `gnark-crypto`
+- The manual browser benchmark page lives in `web/static/bn254_fr_vector_bench.html` and follows the same timing model.
+- Interpretation note:
+  - `cold_total` is the main end-to-end usefulness metric for this track.
+  - In the browser, the apparent `kernel` timing is only host-side encode/submit overhead. The actual GPU wait mostly appears in `readback`, because WebGPU completion is observed at `mapAsync`.
+- Initial measurements on Apple Silicon show that the current full-path WebGPU vector implementation is still slower than native `gnark-crypto` through `2^20`, even though scaling is smooth and correctness holds at each tested size.
+
+### Performance Track 2: Parallel BN254 `fr` NTT
+
+- [x] move from the current correctness-first stage flow to a benchmarkable large-input NTT path
+- [ ] follow `gnark-crypto`'s stage-structured parallelism for butterfly work decomposition
+- [x] benchmark forward and inverse NTT for power-of-two sizes starting at `2^10`
+- [x] compare Metal WebGPU against native `gnark-crypto/fft`
+- [x] benchmark browser WebGPU separately
+
+Deliverable:
+
+- timing table for BN254 `fr` NTT across native Go, Metal WebGPU, and browser WebGPU
+
+Notes from implementation:
+
+- The native benchmark command now lives in `cmd/bn254-fr-ntt-bench` and reports `cold` and `warm` end-to-end timings together with stage-level timing splits.
+- The current Metal backend remains unstable when sweeping many large NTT sizes in a single long-lived process, so `bench-fr-ntt-range.sh` runs one benchmark process per size.
+- A browser benchmark page now exists at `web/static/bn254_fr_ntt_bench.html` and follows the same full-path timing model as the vector benchmark.
+- Initial measurements on Apple Silicon show the same qualitative result as the vector benchmark: the current full-path WebGPU NTT implementation is still slower than native `gnark-crypto` through the tested sizes.
+- The first headed-Chrome browser run for `2^10 .. 2^14` completed successfully on the Apple Metal adapter, with forward and inverse NTT both scaling smoothly and with readback dominating the observable browser-side wait time.
+
+### Performance Track 3: BN254 MSM with Pippenger
+
+- [x] replace the current naive host-orchestrated MSM baseline with a correctness-first Pippenger implementation
+- [ ] mirror the windowing and chunk-partition strategy used in `gnark-crypto`
+- [x] benchmark the current naive MSM baseline before replacing it
+- [ ] benchmark MSM sizes starting at `2^10` points where practical
+- [ ] compare Metal WebGPU against native `gnark-crypto MultiExp`
+- [x] benchmark browser WebGPU separately
+- [x] identify which substeps stay on host and which move to GPU in the first optimized design
+
+Deliverable:
+
+- timing table and architecture notes for BN254 MSM with a WebGPU Pippenger baseline
+
+Notes from implementation:
+
+- The initial Phase 8 baseline remained the host-orchestrated MSM from `go/curvegpu/bn254/g1_msm.go`, composed from GPU `ScalarMulAffine` and pairwise `AffineAdd`.
+- A browser-only correctness-first Pippenger path was then added in `shaders/curves/bn254/g1_arith.wgsl`, `web/static/bn254_g1_msm.html`, and `web/static/bn254_g1_msm_bench.html`.
+- The first dedicated GPU-native Pippenger attempt was incorrect in two places:
+  - the extra MSM kernel parameters needed a safer uniform layout on Metal/WebGPU
+  - the fast window reducer initially skipped empty-bucket running-sum contributions, which changed the effective bucket weights
+- The current browser Pippenger design is now correctness-validated and uses:
+  - GPU bucket accumulation
+  - GPU bucket weighting
+  - GPU tree reduction across weighted buckets
+  - GPU final window combination
+  - a benchmark path that keeps intermediate buffers on device and performs only one final readback
+- Stable native Metal benchmarking for the optimized G1 path is still blocked by `gogpu/wgpu` instability under repeated G1 dispatch churn, so the headed-Chrome browser path is the reliable benchmark environment for this checkpoint.
+- Current browser measurements on Apple Silicon show:
+  - Pippenger beats naive MSM at small sizes such as `2^7` and `2^8`
+  - Pippenger is close to naive around `2^9`
+  - naive MSM still wins from `2^10` upward in the current implementation
+  - the major earlier bottlenecks from stage-by-stage readback and scalar-weighted window reduction were removed, and the next optimization target is bucket accumulation itself
 
 ## Phase 9: Multi-curve extension
 

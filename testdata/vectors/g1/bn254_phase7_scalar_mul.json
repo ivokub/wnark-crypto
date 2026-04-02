@@ -24,10 +24,10 @@
         "x_bytes_le": "9d0d8fc58d435dd33d0bc7f528eb780a2c4679786fa36e662fdf079ac1770a0e",
         "y_bytes_le": "3a1b1e8b1b87baa67b168eeb51d6f114588cf2f0de46ddcc5ebe0f3483ef141c"
       },
-      "scalar_bytes_le": "fbffff4f1c3496ac29cd609f9576fc362e4679786fa36e662fdf079ac1770a0e",
+      "scalar_bytes_le": "0100000000000000000000000000000000000000000000000000000000000000",
       "scalar_mul_affine": {
-        "x_bytes_le": "7b5a75d238b1401924cdd84001c4fad8a153b1d97f00ea0ab78eba827d0f6419",
-        "y_bytes_le": "a8be8125035e563ba8ce9e18c6fa6648286ebf28e0423eb61dd2890360577710",
+        "x_bytes_le": "9d0d8fc58d435dd33d0bc7f528eb780a2c4679786fa36e662fdf079ac1770a0e",
+        "y_bytes_le": "3a1b1e8b1b87baa67b168eeb51d6f114588cf2f0de46ddcc5ebe0f3483ef141c",
         "z_bytes_le": "9d0d8fc58d435dd33d0bc7f528eb780a2c4679786fa36e662fdf079ac1770a0e"
       }
     },
@@ -37,23 +37,23 @@
         "x_bytes_le": "9d0d8fc58d435dd33d0bc7f528eb780a2c4679786fa36e662fdf079ac1770a0e",
         "y_bytes_le": "3a1b1e8b1b87baa67b168eeb51d6f114588cf2f0de46ddcc5ebe0f3483ef141c"
       },
-      "scalar_bytes_le": "f6ffff9f38682c59539ac13e2bedf86d5c8cf2f0de46ddcc5ebe0f3483ef141c",
+      "scalar_bytes_le": "0200000000000000000000000000000000000000000000000000000000000000",
       "scalar_mul_affine": {
-        "x_bytes_le": "82ba90fb587ea71a98ae1c485e8679fb8fe84388763590a26d17f0e56a842f10",
-        "y_bytes_le": "261b78ebf310c01d710adc8224cc15ef3e38f6e45c45ca19f3e7058b032ceb12",
+        "x_bytes_le": "38eae7c3b66004e169548e438b540bbcecc20a0cb42d82c24d018d0997732213",
+        "y_bytes_le": "47fd7cd8168c203c8dca7168916a81975d588181b64550b829a031e1724e6404",
         "z_bytes_le": "9d0d8fc58d435dd33d0bc7f528eb780a2c4679786fa36e662fdf079ac1770a0e"
       }
     },
     {
       "name": "five_gen_times_seventeen",
       "base_affine": {
-        "x_bytes_le": "70604de6cf54bef2c7438e81248f3492bef84c77ec219b60e13de42e7bf1e629",
-        "y_bytes_le": "b40195a86f0202958824e4bfa4f1a1cda4af2af5ec0c67bf28509658be7a6902"
+        "x_bytes_le": "692f920f8e45bf52e769441cb56c440d632dcdede97ebc8c3cc60aa67a5e4e2b",
+        "y_bytes_le": "0180edf7287bdcf8e87ecd754f7cac8d12cda619f401bdffddc4a726c9a21716"
       },
-      "scalar_bytes_le": "a7ffff8f919f71667fdd87aecd3ef4059d4708fa8cc317ec7e51bfb50fba202d",
+      "scalar_bytes_le": "1100000000000000000000000000000000000000000000000000000000000000",
       "scalar_mul_affine": {
-        "x_bytes_le": "b1d64304ce0601d45bf13b156de9c5109c0a6d299bc239e96517705d07433104",
-        "y_bytes_le": "01ce30de463b19635c452f514fa8b8255424af52459bfb4715bd5a2f8242271b",
+        "x_bytes_le": "7298cc5419193f989d84faf1d180aa71537e70c73d908e03c3fbb4d68930b617",
+        "y_bytes_le": "2bea62e0a7fbcb5705d1ac143f69a4155236add0719d9541b173e3e14d199d06",
         "z_bytes_le": "9d0d8fc58d435dd33d0bc7f528eb780a2c4679786fa36e662fdf079ac1770a0e"
       }
     },
@@ -63,7 +63,7 @@
         "x_bytes_le": "0000000000000000000000000000000000000000000000000000000000000000",
         "y_bytes_le": "0000000000000000000000000000000000000000000000000000000000000000"
       },
-      "scalar_bytes_le": "76fdff9f607646a4292f28effa3734ec77a3952d9bfe2e041256ff3750d05021",
+      "scalar_bytes_le": "7b00000000000000000000000000000000000000000000000000000000000000",
       "scalar_mul_affine": {
         "x_bytes_le": "0000000000000000000000000000000000000000000000000000000000000000",
         "y_bytes_le": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -73,13 +73,13 @@
     {
       "name": "one_twenty_three_times_forty_two",
       "base_affine": {
-        "x_bytes_le": "61eff9ed8b9dbf9ea0be9bb748be27757a93231e692b2dc4ea39409984a32a13",
-        "y_bytes_le": "749fae638c041d7f785e0cbada41665a2830955d444cf8a4b8a5dc707a69ae10"
+        "x_bytes_le": "51635170f86e35d88d8342ae7123bee39f15003d9842e694d3b47b63969a3b27",
+        "y_bytes_le": "5f363b893454d0ede2656c0c2f378007255dd4158095063c63fc7acf6408910f"
       },
-      "scalar_bytes_le": "22ffffdfb5090d22076230712691fc22375fd5b1bb8b632ad21bf7b660f80309",
+      "scalar_bytes_le": "2a00000000000000000000000000000000000000000000000000000000000000",
       "scalar_mul_affine": {
-        "x_bytes_le": "d20aca755a5d8ccbe5dd518195d2ec654498bdd8d84adcd07cb6b3985f834a0d",
-        "y_bytes_le": "a62a88a33974fc0541fab1bff57aeebf3c507dd430df776fa11939dbc719172a",
+        "x_bytes_le": "086c9dcc0d4cf10900935e4645e339b8475af784459dee0b59f72604a561fe2c",
+        "y_bytes_le": "73aab4d1dfe70edb5426ba0bcc6c6d07d3012ce62c7283f924aff2cadb57cc29",
         "z_bytes_le": "9d0d8fc58d435dd33d0bc7f528eb780a2c4679786fa36e662fdf079ac1770a0e"
       }
     },
@@ -89,10 +89,10 @@
         "x_bytes_le": "9d0d8fc58d435dd33d0bc7f528eb780a2c4679786fa36e662fdf079ac1770a0e",
         "y_bytes_le": "3a1b1e8b1b87baa67b168eeb51d6f114588cf2f0de46ddcc5ebe0f3483ef141c"
       },
-      "scalar_bytes_le": "060000a077c14b9767a358dab27137f12e12080947a2e151fac02947b1d65922",
+      "scalar_bytes_le": "000000f093f5e1439170b97948e833285d588181b64550b829a031e1724e6430",
       "scalar_mul_affine": {
-        "x_bytes_le": "7b5a75d238b1401924cdd84001c4fad8a153b1d97f00ea0ab78eba827d0f6419",
-        "y_bytes_le": "9f3efbb2132eca00e5fbd24fcb6f1a4f35eac158d60212020ccea7dd12f7ec1f",
+        "x_bytes_le": "9d0d8fc58d435dd33d0bc7f528eb780a2c4679786fa36e662fdf079ac1770a0e",
+        "y_bytes_le": "0de25e4dfb04669511b4e37c3f948f8205cc8e90d7fe72ebcae121adef5e4f14",
         "z_bytes_le": "9d0d8fc58d435dd33d0bc7f528eb780a2c4679786fa36e662fdf079ac1770a0e"
       }
     }
@@ -109,37 +109,37 @@
     },
     {
       "name": "base_one",
-      "scalar_bytes_le": "fbffff4f1c3496ac29cd609f9576fc362e4679786fa36e662fdf079ac1770a0e",
+      "scalar_bytes_le": "0100000000000000000000000000000000000000000000000000000000000000",
       "scalar_mul_base_affine": {
-        "x_bytes_le": "7b5a75d238b1401924cdd84001c4fad8a153b1d97f00ea0ab78eba827d0f6419",
-        "y_bytes_le": "a8be8125035e563ba8ce9e18c6fa6648286ebf28e0423eb61dd2890360577710",
+        "x_bytes_le": "9d0d8fc58d435dd33d0bc7f528eb780a2c4679786fa36e662fdf079ac1770a0e",
+        "y_bytes_le": "3a1b1e8b1b87baa67b168eeb51d6f114588cf2f0de46ddcc5ebe0f3483ef141c",
         "z_bytes_le": "9d0d8fc58d435dd33d0bc7f528eb780a2c4679786fa36e662fdf079ac1770a0e"
       }
     },
     {
       "name": "base_two",
-      "scalar_bytes_le": "f6ffff9f38682c59539ac13e2bedf86d5c8cf2f0de46ddcc5ebe0f3483ef141c",
+      "scalar_bytes_le": "0200000000000000000000000000000000000000000000000000000000000000",
       "scalar_mul_base_affine": {
-        "x_bytes_le": "82ba90fb587ea71a98ae1c485e8679fb8fe84388763590a26d17f0e56a842f10",
-        "y_bytes_le": "261b78ebf310c01d710adc8224cc15ef3e38f6e45c45ca19f3e7058b032ceb12",
+        "x_bytes_le": "38eae7c3b66004e169548e438b540bbcecc20a0cb42d82c24d018d0997732213",
+        "y_bytes_le": "47fd7cd8168c203c8dca7168916a81975d588181b64550b829a031e1724e6404",
         "z_bytes_le": "9d0d8fc58d435dd33d0bc7f528eb780a2c4679786fa36e662fdf079ac1770a0e"
       }
     },
     {
       "name": "base_one_twenty_three",
-      "scalar_bytes_le": "76fdff9f607646a4292f28effa3734ec77a3952d9bfe2e041256ff3750d05021",
+      "scalar_bytes_le": "7b00000000000000000000000000000000000000000000000000000000000000",
       "scalar_mul_base_affine": {
-        "x_bytes_le": "61eff9ed8b9dbf9ea0be9bb748be27757a93231e692b2dc4ea39409984a32a13",
-        "y_bytes_le": "749fae638c041d7f785e0cbada41665a2830955d444cf8a4b8a5dc707a69ae10",
+        "x_bytes_le": "51635170f86e35d88d8342ae7123bee39f15003d9842e694d3b47b63969a3b27",
+        "y_bytes_le": "5f363b893454d0ede2656c0c2f378007255dd4158095063c63fc7acf6408910f",
         "z_bytes_le": "9d0d8fc58d435dd33d0bc7f528eb780a2c4679786fa36e662fdf079ac1770a0e"
       }
     },
     {
       "name": "base_q_minus_one",
-      "scalar_bytes_le": "060000a077c14b9767a358dab27137f12e12080947a2e151fac02947b1d65922",
+      "scalar_bytes_le": "000000f093f5e1439170b97948e833285d588181b64550b829a031e1724e6430",
       "scalar_mul_base_affine": {
-        "x_bytes_le": "7b5a75d238b1401924cdd84001c4fad8a153b1d97f00ea0ab78eba827d0f6419",
-        "y_bytes_le": "9f3efbb2132eca00e5fbd24fcb6f1a4f35eac158d60212020ccea7dd12f7ec1f",
+        "x_bytes_le": "9d0d8fc58d435dd33d0bc7f528eb780a2c4679786fa36e662fdf079ac1770a0e",
+        "y_bytes_le": "0de25e4dfb04669511b4e37c3f948f8205cc8e90d7fe72ebcae121adef5e4f14",
         "z_bytes_le": "9d0d8fc58d435dd33d0bc7f528eb780a2c4679786fa36e662fdf079ac1770a0e"
       }
     }

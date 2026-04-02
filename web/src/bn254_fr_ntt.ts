@@ -31,8 +31,8 @@ declare const GPUMapMode: {
   READ: number;
 };
 
-const FR_VECTOR_OP_MUL_FACTORS = 1;
-const FR_VECTOR_OP_BIT_REVERSE_COPY = 2;
+const FR_VECTOR_OP_MUL_FACTORS = 3;
+const FR_VECTOR_OP_BIT_REVERSE_COPY = 4;
 const ELEMENT_BYTES = 32;
 const UNIFORM_BYTES = 32;
 

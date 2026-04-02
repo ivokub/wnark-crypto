@@ -88,24 +88,33 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if err := verifyBatch("msm_naive_affine", got, want); err != nil {
+		return err
+	}
+	fmt.Println("4. msm_naive_affine... OK")
+	fmt.Println()
+	fmt.Println("PASS: BN254 G1 Phase 8 Metal smoke succeeded")
+	return nil
+}
+
+func verifyBatch(label string, got, want []bn254gpu.G1Jac) error {
 	if len(got) != len(want) {
-		return fmt.Errorf("msm length mismatch: got=%d want=%d", len(got), len(want))
+		return fmt.Errorf("%s length mismatch: got=%d want=%d", label, len(got), len(want))
 	}
 	for i := range got {
-		if got[i] != want[i] {
-			return fmt.Errorf("msm mismatch at index %d: got=%+v want=%+v", i, got[i], want[i])
+		gotAff := gpuJacToGnarkAffine(got[i])
+		wantAff := gpuJacToGnarkAffine(want[i])
+		if !gotAff.Equal(&wantAff) {
+			return fmt.Errorf("%s mismatch at index %d: got=%+v want=%+v", label, i, got[i], want[i])
 		}
 		if got[i].IsInfinity() {
 			continue
 		}
 		p := gpuJacToGnark(got[i])
 		if !p.IsOnCurve() {
-			return fmt.Errorf("msm result at index %d is not on curve", i)
+			return fmt.Errorf("%s result at index %d is not on curve", label, i)
 		}
 	}
-	fmt.Println("4. msm_naive_affine... OK")
-	fmt.Println()
-	fmt.Println("PASS: BN254 G1 Phase 8 Metal smoke succeeded")
 	return nil
 }
 
@@ -166,4 +175,11 @@ func gpuJacToGnark(in bn254gpu.G1Jac) gnarkbn254.G1Jac {
 		Y: gnarkfp.Element(curvegpu.JoinWords8(in.Y)),
 		Z: gnarkfp.Element(curvegpu.JoinWords8(in.Z)),
 	}
+}
+
+func gpuJacToGnarkAffine(in bn254gpu.G1Jac) gnarkbn254.G1Affine {
+	jac := gpuJacToGnark(in)
+	var aff gnarkbn254.G1Affine
+	aff.FromJacobian(&jac)
+	return aff
 }
