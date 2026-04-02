@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BN254 G1 Phase 6 Browser Smoke</title>
+    <style>
+      body {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        margin: 24px;
+        background: #f5f1e8;
+        color: #1f1a14;
+      }
+      button {
+        font: inherit;
+        padding: 10px 14px;
+        margin-right: 12px;
+      }
+      #status {
+        font-weight: 700;
+      }
+      pre {
+        white-space: pre-wrap;
+        background: #fffaf0;
+        border: 1px solid #d7c8ae;
+        padding: 16px;
+      }
+    </style>
+  </head>
+  <body data-status="idle">
+    <p>
+      <button id="run">Run</button>
+      <span id="status">Idle</span>
+    </p>
+    <pre id="log"></pre>
+    <script src="./bn254_g1_ops.js"></script>
+  </body>
+</html>

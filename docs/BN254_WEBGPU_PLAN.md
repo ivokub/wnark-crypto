@@ -1,6 +1,6 @@
 # Pairing-Friendly Curve WebGPU Primitive Plan
 
-Status: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, and Phase 5 completed; Phase 6 next
+Status: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, and Phase 6 completed; Phase 7 next
 Last updated: 2026-04-02
 
 ## Goal
@@ -433,29 +433,40 @@ Initial curve scope should be G1 only.
 
 Representations to support:
 
-- [ ] affine
-- [ ] Jacobian
+- [x] affine
+- [x] Jacobian
 
 Operations:
 
-- [ ] affine infinity encoding policy
-- [ ] affine/jacobian conversion
-- [ ] point equality
-- [ ] affine add
-- [ ] mixed add
-- [ ] Jacobian double
-- [ ] negation
-- [ ] on-curve checks in host-side tests
+- [x] affine infinity encoding policy
+- [x] affine/jacobian conversion
+- [x] point equality in host-side validation
+- [x] affine add
+- [x] mixed add
+- [x] Jacobian double
+- [x] negation
+- [x] on-curve checks in host-side tests
 
 Testing:
 
-- [ ] compare with gnark-crypto G1 outputs
-- [ ] include infinity and same-point cases
-- [ ] include `P + (-P)` and doubling corner cases
+- [x] compare with gnark-crypto G1 outputs
+- [x] include infinity and same-point cases
+- [x] include `P + (-P)` and doubling corner cases
 
 Deliverable:
 
 - correctness-first G1 arithmetic baseline
+
+Notes from implementation:
+
+- The first Phase 6 slice implements BN254 G1 affine and Jacobian point layouts in Go and WGSL, with Jacobian-valued GPU outputs used as the canonical point transport format.
+- The G1 arithmetic kernel lives in `shaders/curves/bn254/g1_arith.wgsl`, and the Go wrapper lives in `go/curvegpu/bn254/g1.go`.
+- The current GPU opcode set covers `copy`, `jac_infinity`, `affine_to_jac`, `neg_jac`, `jac_to_affine`, `double_jac`, `add_mixed`, and `affine_add`.
+- Shared Phase 6 vectors are generated from `gnark-crypto` in `testdata/vectors/g1/bn254_phase6_g1_ops.json`, covering infinity, same-point, opposite-point, and deterministic subgroup-point cases.
+- A native Metal smoke command exists in `cmd/bn254-g1-metal-smoke`, and it passes on Apple Silicon for the current G1 baseline.
+- A manual headed-Chrome browser smoke exists in `web/static/bn254_g1_ops.html`, and it passes on Apple Silicon with adapter diagnostics reporting `vendor = apple` and `architecture = metal-3`.
+- The Go differential test for this slice lives in `go/curvegpu/bn254_g1_test.go`; it isolates GPU-heavy subtests onto fresh devices to avoid Metal backend instability during long shared test lifetimes.
+- Dedicated point-equality logic is still host-side in this baseline. There is no separate GPU equality opcode yet.
 
 ## Phase 7: Scalar multiplication
 
