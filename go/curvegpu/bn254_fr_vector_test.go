@@ -12,27 +12,10 @@ import (
 )
 
 func TestBN254FrVectorHelpersAgainstGnarkCrypto(t *testing.T) {
-	deviceSet, err := bn254gpu.NewHeadlessDevice()
-	if err != nil {
-		t.Skipf("WebGPU device unavailable: %v", err)
-	}
-	defer deviceSet.Close()
-
-	scalarKernel, err := bn254gpu.NewFrKernel(deviceSet.Device)
-	if err != nil {
-		t.Fatalf("NewFrKernel: %v", err)
-	}
-	defer scalarKernel.Close()
-
-	vectorKernel, err := bn254gpu.NewFrVectorKernel(deviceSet.Device)
-	if err != nil {
-		t.Fatalf("NewFrVectorKernel: %v", err)
-	}
-	defer vectorKernel.Close()
-
 	rng := rand.New(rand.NewSource(3))
 
 	t.Run("batched wrappers", func(t *testing.T) {
+		_, scalarKernel, _ := newFrVectorTestKernels(t)
 		cases := make([]randomCase, 16)
 		for i := range cases {
 			cases[i] = newRandomCase(rng)
@@ -69,6 +52,7 @@ func TestBN254FrVectorHelpersAgainstGnarkCrypto(t *testing.T) {
 	})
 
 	t.Run("batched conversions", func(t *testing.T) {
+		_, scalarKernel, _ := newFrVectorTestKernels(t)
 		cases := make([]randomCase, 16)
 		for i := range cases {
 			cases[i] = newRandomCase(rng)
@@ -84,6 +68,7 @@ func TestBN254FrVectorHelpersAgainstGnarkCrypto(t *testing.T) {
 	})
 
 	t.Run("mul_factors", func(t *testing.T) {
+		_, _, vectorKernel := newFrVectorTestKernels(t)
 		size := 16
 		input := make([]curvegpu.U32x8, size)
 		factors := make([]curvegpu.U32x8, size)
@@ -105,6 +90,7 @@ func TestBN254FrVectorHelpersAgainstGnarkCrypto(t *testing.T) {
 	})
 
 	t.Run("bit_reverse_copy", func(t *testing.T) {
+		_, _, vectorKernel := newFrVectorTestKernels(t)
 		size := 16
 		input := make([]curvegpu.U32x8, size)
 		want := make([]curvegpu.U32x8, size)
@@ -123,6 +109,30 @@ func TestBN254FrVectorHelpersAgainstGnarkCrypto(t *testing.T) {
 		}
 		mustEqualBatch(t, "bit_reverse_copy", got, want)
 	})
+}
+
+func newFrVectorTestKernels(t *testing.T) (*bn254gpu.DeviceSet, *bn254gpu.FrKernel, *bn254gpu.FrVectorKernel) {
+	t.Helper()
+
+	deviceSet, err := bn254gpu.NewHeadlessDevice()
+	if err != nil {
+		t.Skipf("WebGPU device unavailable: %v", err)
+	}
+	t.Cleanup(deviceSet.Close)
+
+	scalarKernel, err := bn254gpu.NewFrKernel(deviceSet.Device)
+	if err != nil {
+		t.Fatalf("NewFrKernel: %v", err)
+	}
+	t.Cleanup(scalarKernel.Close)
+
+	vectorKernel, err := bn254gpu.NewFrVectorKernel(deviceSet.Device)
+	if err != nil {
+		t.Fatalf("NewFrVectorKernel: %v", err)
+	}
+	t.Cleanup(vectorKernel.Close)
+
+	return deviceSet, scalarKernel, vectorKernel
 }
 
 func mustMatchDirect(t *testing.T, name string, fn func([]curvegpu.U32x8, []curvegpu.U32x8) ([]curvegpu.U32x8, error), a, b, want []curvegpu.U32x8) {

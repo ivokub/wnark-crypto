@@ -18,11 +18,14 @@ type phase5Vectors struct {
 }
 
 type nttCase struct {
-	Name              string     `json:"name"`
-	Size              int        `json:"size"`
-	InputMontLE       []string   `json:"input_mont_le"`
-	ForwardExpectedLE []string   `json:"forward_expected_le"`
-	StageTwiddlesLE   [][]string `json:"stage_twiddles_le"`
+	Name                   string     `json:"name"`
+	Size                   int        `json:"size"`
+	InputMontLE            []string   `json:"input_mont_le"`
+	ForwardExpectedLE      []string   `json:"forward_expected_le"`
+	InverseExpectedLE      []string   `json:"inverse_expected_le"`
+	StageTwiddlesLE        [][]string `json:"stage_twiddles_le"`
+	InverseStageTwiddlesLE [][]string `json:"inverse_stage_twiddles_le"`
+	InverseScaleLE         string     `json:"inverse_scale_le"`
 }
 
 func main() {
@@ -58,6 +61,8 @@ func run() error {
 		fmt.Printf("3. %s (n=%d)... ", tc.Name, tc.Size)
 		input := mustBatch(tc.InputMontLE)
 		stageTwiddles := mustStageTwiddles(tc.StageTwiddlesLE)
+		inverseStageTwiddles := mustStageTwiddles(tc.InverseStageTwiddlesLE)
+		scale := mustU32x8(tc.InverseScaleLE)
 
 		forward, err := kernel.ForwardDIT(input, stageTwiddles)
 		if err != nil {
@@ -65,6 +70,14 @@ func run() error {
 		}
 		if err := verifyBatch(forward, tc.ForwardExpectedLE); err != nil {
 			return fmt.Errorf("%s forward mismatch: %w", tc.Name, err)
+		}
+
+		inverse, err := kernel.InverseDIT(forward, inverseStageTwiddles, scale)
+		if err != nil {
+			return fmt.Errorf("%s inverse: %w", tc.Name, err)
+		}
+		if err := verifyBatch(inverse, tc.InverseExpectedLE); err != nil {
+			return fmt.Errorf("%s inverse mismatch: %w", tc.Name, err)
 		}
 		fmt.Println("OK")
 	}

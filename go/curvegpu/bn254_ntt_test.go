@@ -17,11 +17,14 @@ type phase5Vectors struct {
 }
 
 type nttCase struct {
-	Name              string     `json:"name"`
-	Size              int        `json:"size"`
-	InputMontLE       []string   `json:"input_mont_le"`
-	ForwardExpectedLE []string   `json:"forward_expected_le"`
-	StageTwiddlesLE   [][]string `json:"stage_twiddles_le"`
+	Name                   string     `json:"name"`
+	Size                   int        `json:"size"`
+	InputMontLE            []string   `json:"input_mont_le"`
+	ForwardExpectedLE      []string   `json:"forward_expected_le"`
+	InverseExpectedLE      []string   `json:"inverse_expected_le"`
+	StageTwiddlesLE        [][]string `json:"stage_twiddles_le"`
+	InverseStageTwiddlesLE [][]string `json:"inverse_stage_twiddles_le"`
+	InverseScaleLE         string     `json:"inverse_scale_le"`
 }
 
 func TestBN254FrNTTAgainstGnarkCrypto(t *testing.T) {
@@ -47,12 +50,20 @@ func TestBN254FrNTTAgainstGnarkCrypto(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			input := mustBatch(tc.InputMontLE)
 			stageTwiddles := mustStageTwiddles(tc.StageTwiddlesLE)
+			inverseStageTwiddles := mustStageTwiddles(tc.InverseStageTwiddlesLE)
+			scale := mustU32x8Phase5(tc.InverseScaleLE)
 
 			forward, err := kernel.ForwardDIT(input, stageTwiddles)
 			if err != nil {
 				t.Fatalf("ForwardDIT: %v", err)
 			}
 			mustEqualHexBatch(t, "forward", forward, tc.ForwardExpectedLE)
+
+			inverse, err := kernel.InverseDIT(forward, inverseStageTwiddles, scale)
+			if err != nil {
+				t.Fatalf("InverseDIT: %v", err)
+			}
+			mustEqualHexBatch(t, "inverse", inverse, tc.InverseExpectedLE)
 		})
 	}
 }

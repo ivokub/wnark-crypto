@@ -124,7 +124,6 @@ func (k *FrNTTKernel) RunStage(input, twiddles []curvegpu.U32x8, m int) ([]curve
 	if len(twiddles) != m {
 		return nil, fmt.Errorf("twiddle length mismatch: got=%d want=%d", len(twiddles), m)
 	}
-
 	dataSize := uint64(count * frElementBytes)
 	twiddleSize := uint64(len(twiddles) * frElementBytes)
 
@@ -256,4 +255,29 @@ func (k *FrNTTKernel) ForwardDIT(input []curvegpu.U32x8, stageTwiddles [][]curve
 		}
 	}
 	return state, nil
+}
+
+func (k *FrNTTKernel) InverseDIT(input []curvegpu.U32x8, inverseStageTwiddles [][]curvegpu.U32x8, scale curvegpu.U32x8) ([]curvegpu.U32x8, error) {
+	if len(input) == 0 {
+		return nil, nil
+	}
+	state, err := k.vectorKernel.BitReverseCopy(input)
+	if err != nil {
+		return nil, fmt.Errorf("bit reverse inverse input: %w", err)
+	}
+	for _, twiddles := range inverseStageTwiddles {
+		state, err = k.RunStage(state, twiddles, len(twiddles))
+		if err != nil {
+			return nil, err
+		}
+	}
+	scaleBatch := make([]curvegpu.U32x8, len(state))
+	for i := range scaleBatch {
+		scaleBatch[i] = scale
+	}
+	scaled, err := k.vectorKernel.MulFactors(state, scaleBatch)
+	if err != nil {
+		return nil, fmt.Errorf("scale inverse output: %w", err)
+	}
+	return scaled, nil
 }

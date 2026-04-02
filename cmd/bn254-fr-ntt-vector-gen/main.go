@@ -22,11 +22,14 @@ type phase5Vectors struct {
 }
 
 type nttCase struct {
-	Name              string     `json:"name"`
-	Size              int        `json:"size"`
-	InputMontLE       []string   `json:"input_mont_le"`
-	ForwardExpectedLE []string   `json:"forward_expected_le"`
-	StageTwiddlesLE   [][]string `json:"stage_twiddles_le"`
+	Name                   string     `json:"name"`
+	Size                   int        `json:"size"`
+	InputMontLE            []string   `json:"input_mont_le"`
+	ForwardExpectedLE      []string   `json:"forward_expected_le"`
+	InverseExpectedLE      []string   `json:"inverse_expected_le"`
+	StageTwiddlesLE        [][]string `json:"stage_twiddles_le"`
+	InverseStageTwiddlesLE [][]string `json:"inverse_stage_twiddles_le"`
+	InverseScaleLE         string     `json:"inverse_scale_le"`
 }
 
 func main() {
@@ -60,6 +63,10 @@ func buildCase(name string, size int, rng *rand.Rand) nttCase {
 	if err != nil {
 		panic(err)
 	}
+	twiddlesInv, err := domain.TwiddlesInv()
+	if err != nil {
+		panic(err)
+	}
 
 	input := make([]gnarkfr.Element, size)
 	for i := range input {
@@ -71,23 +78,35 @@ func buildCase(name string, size int, rng *rand.Rand) nttCase {
 	utils.BitReverse(forward)
 	domain.FFT(forward, gnarkfft.DIT)
 
+	inverse := make([]gnarkfr.Element, size)
+	copy(inverse, forward)
+	utils.BitReverse(inverse)
+	domain.FFTInverse(inverse, gnarkfft.DIT)
+
 	logN := bits.Len(uint(size)) - 1
 	stageTwiddles := make([][]string, logN)
+	inverseStageTwiddles := make([][]string, logN)
 	for stage := 1; stage <= logN; stage++ {
 		m := 1 << (stage - 1)
 		src := twiddles[logN-stage]
+		srcInv := twiddlesInv[logN-stage]
 		stageTwiddles[stage-1] = make([]string, m)
+		inverseStageTwiddles[stage-1] = make([]string, m)
 		for i := 0; i < m; i++ {
 			stageTwiddles[stage-1][i] = elementToHex(src[i])
+			inverseStageTwiddles[stage-1][i] = elementToHex(srcInv[i])
 		}
 	}
 
 	out := nttCase{
-		Name:              name,
-		Size:              size,
-		InputMontLE:       encodeBatch(input),
-		ForwardExpectedLE: encodeBatch(forward),
-		StageTwiddlesLE:   stageTwiddles,
+		Name:                   name,
+		Size:                   size,
+		InputMontLE:            encodeBatch(input),
+		ForwardExpectedLE:      encodeBatch(forward),
+		InverseExpectedLE:      encodeBatch(inverse),
+		StageTwiddlesLE:        stageTwiddles,
+		InverseStageTwiddlesLE: inverseStageTwiddles,
+		InverseScaleLE:         elementToHex(domain.CardinalityInv),
 	}
 	return out
 }

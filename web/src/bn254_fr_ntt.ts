@@ -5,7 +5,10 @@ type NTTCase = {
   size: number;
   input_mont_le: string[];
   forward_expected_le: string[];
+  inverse_expected_le: string[];
   stage_twiddles_le: string[][];
+  inverse_stage_twiddles_le: string[][];
+  inverse_scale_le: string;
 };
 
 type Phase5Vectors = {
@@ -28,6 +31,7 @@ declare const GPUMapMode: {
   READ: number;
 };
 
+const FR_VECTOR_OP_MUL_FACTORS = 1;
 const FR_VECTOR_OP_BIT_REVERSE_COPY = 2;
 const ELEMENT_BYTES = 32;
 const UNIFORM_BYTES = 32;
@@ -210,6 +214,71 @@ async function runBitReverse(
   return out
 }
 
+async function runMulFactors(
+  device: GPUDevice,
+  kernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
+  inputHex: readonly string[],
+  factorHex: string,
+): Promise<string[]> {
+  const count = inputHex.length;
+  const dataBytes = count * ELEMENT_BYTES;
+  const factorsHex = inputHex.map(() => factorHex);
+  const inputA = createStorageBuffer(device, "input-a", dataBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  const inputB = createStorageBuffer(device, "input-b", dataBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  const output = createStorageBuffer(device, "output", dataBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
+  const staging = createStorageBuffer(device, "staging", dataBytes, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
+  const uniform = device.createBuffer({
+    label: "params",
+    size: UNIFORM_BYTES,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+
+  const inputBytes = packHexBatch(inputHex);
+  const factorBytes = packHexBatch(factorsHex);
+  device.queue.writeBuffer(inputA, 0, inputBytes.buffer.slice(inputBytes.byteOffset, inputBytes.byteOffset + inputBytes.byteLength));
+  device.queue.writeBuffer(inputB, 0, factorBytes.buffer.slice(factorBytes.byteOffset, factorBytes.byteOffset + factorBytes.byteLength));
+  const params = new Uint32Array(UNIFORM_BYTES / 4);
+  params[0] = count;
+  params[1] = FR_VECTOR_OP_MUL_FACTORS;
+  device.queue.writeBuffer(uniform, 0, params.buffer);
+
+  const bindGroup = device.createBindGroup({
+    label: "bind-group",
+    layout: kernel.bindGroupLayout,
+    entries: [
+      { binding: 0, resource: { buffer: inputA } },
+      { binding: 1, resource: { buffer: inputB } },
+      { binding: 2, resource: { buffer: output } },
+      { binding: 3, resource: { buffer: uniform } },
+    ],
+  });
+
+  const encoder = device.createCommandEncoder({ label: "encoder" });
+  const pass = encoder.beginComputePass({ label: "pass" });
+  pass.setPipeline(kernel.pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.dispatchWorkgroups(Math.ceil(count / 64));
+  pass.end();
+  encoder.copyBufferToBuffer(output, 0, staging, 0, dataBytes);
+  device.queue.submit([encoder.finish()]);
+
+  await staging.mapAsync(GPUMapMode.READ);
+  const view = new Uint8Array(staging.getMappedRange()).slice();
+  staging.unmap();
+
+  inputA.destroy();
+  inputB.destroy();
+  output.destroy();
+  staging.destroy();
+  uniform.destroy();
+
+  const out: string[] = [];
+  for (let i = 0; i < count; i += 1) {
+    out.push(bytesToHex(view.slice(i * ELEMENT_BYTES, (i + 1) * ELEMENT_BYTES)));
+  }
+  return out;
+}
+
 async function runNTTStage(
   device: GPUDevice,
   kernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
@@ -301,6 +370,21 @@ async function runForwardNTT(
   return state;
 }
 
+async function runInverseNTT(
+  device: GPUDevice,
+  vectorKernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
+  nttKernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
+  inputHex: readonly string[],
+  inverseStageTwiddles: readonly string[][],
+  inverseScaleHex: string,
+): Promise<string[]> {
+  let state = await runBitReverse(device, vectorKernel, inputHex);
+  for (const twiddles of inverseStageTwiddles) {
+    state = await runNTTStage(device, nttKernel, state, twiddles, twiddles.length);
+  }
+  return runMulFactors(device, vectorKernel, state, inverseScaleHex);
+}
+
 async function runSmoke(): Promise<void> {
   const lines = ["=== BN254 fr Phase 5 Browser Smoke ===", ""];
   writeLog(lines);
@@ -334,11 +418,22 @@ async function runSmoke(): Promise<void> {
     lines.push("4. Creating pipelines... OK");
 
     for (const nttCase of vectors.ntt_cases) {
-      const got = await runForwardNTT(device, vectorKernel, nttKernel, nttCase.input_mont_le, nttCase.stage_twiddles_le);
-      expectBatch(`${nttCase.name}:forward`, got, nttCase.forward_expected_le);
+      const forward = await runForwardNTT(device, vectorKernel, nttKernel, nttCase.input_mont_le, nttCase.stage_twiddles_le);
+      expectBatch(`${nttCase.name}:forward`, forward, nttCase.forward_expected_le);
+
+      const inverse = await runInverseNTT(
+        device,
+        vectorKernel,
+        nttKernel,
+        forward,
+        nttCase.inverse_stage_twiddles_le,
+        nttCase.inverse_scale_le,
+      );
+      expectBatch(`${nttCase.name}:inverse`, inverse, nttCase.inverse_expected_le);
     }
 
     lines.push("forward_ntt: OK");
+    lines.push("inverse_ntt: OK");
     lines.push("");
     lines.push("PASS: BN254 fr Phase 5 browser smoke succeeded");
     writeLog(lines);
