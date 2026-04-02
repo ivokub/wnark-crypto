@@ -1,6 +1,6 @@
 # Pairing-Friendly Curve WebGPU Primitive Plan
 
-Status: Phase 0, Phase 1, and Phase 2 completed; Phase 3 next
+Status: Phase 0, Phase 1, Phase 2, and Phase 3 completed; Phase 4 next
 Last updated: 2026-04-02
 
 ## Goal
@@ -341,14 +341,26 @@ Notes from implementation:
 
 Implement the same operation set as `fr`, but over `fp`.
 
-- [ ] replicate WGSL field logic with `fp` constants
-- [ ] host wrappers for `fp`
-- [ ] differential tests against gnark-crypto `fp`
-- [ ] shared reducer and carry helpers where possible
+- [x] replicate WGSL field logic with `fp` constants
+- [x] host wrappers for `fp`
+- [x] differential tests against gnark-crypto `fp`
+- [x] shared reducer and carry helpers where possible
 
 Deliverable:
 
 - stable `fp` arithmetic layer verified in Metal and browser
+
+Notes from implementation:
+
+- A correctness-first BN254 `fp` WGSL kernel exists for `copy`, `zero`, `one`, `equal`, `add`, `sub`, `neg`, `double`, `mul`, `square`, `to_mont`, `from_mont`, and `normalize`.
+- Metal verification is in place via `CGO_ENABLED=0 go run ./cmd/bn254-fp-metal-smoke`, using shared vectors and direct `gnark-crypto` cross-checks for the reduced-element ops.
+- A Go differential test batches deterministic random BN254 `fp` cases through the WebGPU kernel and checks `copy`, `equal`, `zero`, `one`, `add`, `sub`, `neg`, `double`, `mul`, `square`, `to_mont`, and `from_mont` against `gnark-crypto`.
+- Shared BN254 `fp` vectors now cover sanity cases, carry and reduction edge cases, deterministic differential cases, normalize cases, and Montgomery conversion cases.
+- Shared browser assets exist (`web/src/bn254_fp_ops.ts`, `web/static/bn254_fp_ops.html`).
+- Headed Chrome on Apple Silicon validates the Phase 3 browser smoke successfully across all currently implemented ops, with adapter diagnostics reporting `vendor = apple` and `architecture = metal-3`.
+- After adding new browser ops, manual headed-Chrome validation is still required before treating them as browser-verified.
+- Headless Chrome on macOS/Metal should still be treated as a browser automation limitation rather than a correctness signal for the WGSL arithmetic pages.
+- For now, browser validation for Phase 3 is manual via `web/static/bn254_fp_ops.html`; Metal remains the automated local verification path.
 
 ## Phase 4: `fr` vector operations and basic kernels
 

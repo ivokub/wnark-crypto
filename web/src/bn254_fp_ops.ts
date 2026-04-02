@@ -25,7 +25,7 @@ type ConvertCase = {
   mont_bytes_le: string;
 };
 
-type Phase2Vectors = {
+type Phase3Vectors = {
   element_cases: ElementCase[];
   edge_cases: ElementCase[];
   differential_cases: ElementCase[];
@@ -49,23 +49,23 @@ declare const GPUMapMode: {
   READ: number;
 };
 
-const FR_OP_COPY = 0;
-const FR_OP_ZERO = 1;
-const FR_OP_ONE = 2;
-const FR_OP_ADD = 3;
-const FR_OP_SUB = 4;
-const FR_OP_NEG = 5;
-const FR_OP_DOUBLE = 6;
-const FR_OP_NORMALIZE = 7;
-const FR_OP_EQUAL = 8;
-const FR_OP_MUL = 9;
-const FR_OP_SQUARE = 10;
-const FR_OP_TO_MONT = 11;
-const FR_OP_FROM_MONT = 12;
+const FP_OP_COPY = 0;
+const FP_OP_ZERO = 1;
+const FP_OP_ONE = 2;
+const FP_OP_ADD = 3;
+const FP_OP_SUB = 4;
+const FP_OP_NEG = 5;
+const FP_OP_DOUBLE = 6;
+const FP_OP_NORMALIZE = 7;
+const FP_OP_EQUAL = 8;
+const FP_OP_MUL = 9;
+const FP_OP_SQUARE = 10;
+const FP_OP_TO_MONT = 11;
+const FP_OP_FROM_MONT = 12;
 
-const FR_ELEMENT_BYTES = 32;
-const FR_UNIFORM_BYTES = 32;
-const FR_ZERO_HEX = "0000000000000000000000000000000000000000000000000000000000000000";
+const FP_ELEMENT_BYTES = 32;
+const FP_UNIFORM_BYTES = 32;
+const FP_ZERO_HEX = "0000000000000000000000000000000000000000000000000000000000000000";
 
 const runButton = document.getElementById("run") as HTMLButtonElement;
 const statusEl = document.getElementById("status") as HTMLSpanElement;
@@ -98,35 +98,14 @@ function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function bytesToLimbs(bytes: Uint8Array): Uint32Array {
-  if (bytes.length % 4 !== 0) {
-    throw new Error(`invalid byte length ${bytes.length}`);
-  }
-  const out = new Uint32Array(bytes.length / 4);
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  for (let i = 0; i < out.length; i += 1) {
-    out[i] = view.getUint32(i * 4, true);
-  }
-  return out;
-}
-
-function limbsToBytes(limbs: Uint32Array): Uint8Array {
-  const out = new Uint8Array(limbs.length * 4);
-  const view = new DataView(out.buffer);
-  for (let i = 0; i < limbs.length; i += 1) {
-    view.setUint32(i * 4, limbs[i], true);
-  }
-  return out;
-}
-
 function packHexBatch(hexValues: readonly string[]): Uint8Array {
-  const out = new Uint8Array(hexValues.length * FR_ELEMENT_BYTES);
+  const out = new Uint8Array(hexValues.length * FP_ELEMENT_BYTES);
   hexValues.forEach((hex, index) => {
     const bytes = hexToBytes(hex);
-    if (bytes.length !== FR_ELEMENT_BYTES) {
-      throw new Error(`expected ${FR_ELEMENT_BYTES} bytes, got ${bytes.length}`);
+    if (bytes.length !== FP_ELEMENT_BYTES) {
+      throw new Error(`expected ${FP_ELEMENT_BYTES} bytes, got ${bytes.length}`);
     }
-    out.set(bytes, index * FR_ELEMENT_BYTES);
+    out.set(bytes, index * FP_ELEMENT_BYTES);
   });
   return out;
 }
@@ -139,9 +118,9 @@ async function fetchText(path: string): Promise<string> {
   return response.text();
 }
 
-async function fetchVectors(): Promise<Phase2Vectors> {
-  const text = await fetchText("/testdata/vectors/fr/bn254_phase2_ops.json");
-  return JSON.parse(text) as Phase2Vectors;
+async function fetchVectors(): Promise<Phase3Vectors> {
+  const text = await fetchText("/testdata/vectors/fp/bn254_phase3_ops.json");
+  return JSON.parse(text) as Phase3Vectors;
 }
 
 async function getAdapterInfo(adapter: GPUAdapter): Promise<GPUAdapterInfo | null> {
@@ -213,11 +192,11 @@ function createKernel(device: GPUDevice, shaderCode: string): {
   bindGroupLayout: GPUBindGroupLayout;
 } {
   const shaderModule = device.createShaderModule({
-    label: "bn254-fr-shader",
+    label: "bn254-fp-shader",
     code: shaderCode,
   });
   const bindGroupLayout = device.createBindGroupLayout({
-    label: "bn254-fr-bgl",
+    label: "bn254-fp-bgl",
     entries: [
       { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
       { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
@@ -226,15 +205,15 @@ function createKernel(device: GPUDevice, shaderCode: string): {
     ],
   });
   const pipelineLayout = device.createPipelineLayout({
-    label: "bn254-fr-pl",
+    label: "bn254-fp-pl",
     bindGroupLayouts: [bindGroupLayout],
   });
   const pipeline = device.createComputePipeline({
-    label: "bn254-fr-pipeline",
+    label: "bn254-fp-pipeline",
     layout: pipelineLayout,
     compute: {
       module: shaderModule,
-      entryPoint: "fr_ops_main",
+      entryPoint: "fp_ops_main",
     },
   });
   return { pipeline, bindGroupLayout };
@@ -248,41 +227,41 @@ async function runOp(
   inputBHex: readonly string[],
 ): Promise<string[]> {
   const count = Math.max(inputAHex.length, inputBHex.length);
-  const zeros = Array.from({ length: count }, () => FR_ZERO_HEX);
+  const zeros = Array.from({ length: count }, () => FP_ZERO_HEX);
   const aHex = inputAHex.length === 0 ? zeros : inputAHex;
   const bHex = inputBHex.length === 0 ? zeros : inputBHex;
   if (aHex.length !== count || bHex.length !== count) {
     throw new Error("mismatched batch lengths");
   }
 
-  const inputBytes = count * FR_ELEMENT_BYTES;
-  const paramsBytes = new Uint8Array(FR_UNIFORM_BYTES);
+  const inputBytes = count * FP_ELEMENT_BYTES;
+  const paramsBytes = new Uint8Array(FP_UNIFORM_BYTES);
   const paramsView = new DataView(paramsBytes.buffer);
   paramsView.setUint32(0, count, true);
   paramsView.setUint32(4, opcode, true);
 
-  const inputABuffer = createStorageBuffer(device, "bn254-fr-input-a", inputBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-  const inputBBuffer = createStorageBuffer(device, "bn254-fr-input-b", inputBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-  const outputBuffer = createStorageBuffer(device, "bn254-fr-output", inputBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
-  const readbackBuffer = createStorageBuffer(device, "bn254-fr-readback", inputBytes, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
-  const uniformBuffer = createStorageBuffer(device, "bn254-fr-params", FR_UNIFORM_BYTES, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
+  const inputABuffer = createStorageBuffer(device, "bn254-fp-input-a", inputBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  const inputBBuffer = createStorageBuffer(device, "bn254-fp-input-b", inputBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  const outputBuffer = createStorageBuffer(device, "bn254-fp-output", inputBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
+  const readbackBuffer = createStorageBuffer(device, "bn254-fp-readback", inputBytes, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
+  const uniformBuffer = createStorageBuffer(device, "bn254-fp-params", FP_UNIFORM_BYTES, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
 
   device.queue.writeBuffer(inputABuffer, 0, packHexBatch(aHex));
   device.queue.writeBuffer(inputBBuffer, 0, packHexBatch(bHex));
   device.queue.writeBuffer(uniformBuffer, 0, paramsBytes);
 
   const bindGroup = device.createBindGroup({
-    label: "bn254-fr-bg",
+    label: "bn254-fp-bg",
     layout: kernel.bindGroupLayout,
     entries: [
       { binding: 0, resource: { buffer: inputABuffer, size: inputBytes } },
       { binding: 1, resource: { buffer: inputBBuffer, size: inputBytes } },
       { binding: 2, resource: { buffer: outputBuffer, size: inputBytes } },
-      { binding: 3, resource: { buffer: uniformBuffer, size: FR_UNIFORM_BYTES } },
+      { binding: 3, resource: { buffer: uniformBuffer, size: FP_UNIFORM_BYTES } },
     ],
   });
 
-  const encoder = device.createCommandEncoder({ label: "bn254-fr-encoder" });
+  const encoder = device.createCommandEncoder({ label: "bn254-fp-encoder" });
   const pass = encoder.beginComputePass();
   pass.setPipeline(kernel.pipeline);
   pass.setBindGroup(0, bindGroup);
@@ -299,7 +278,7 @@ async function runOp(
 
   const out: string[] = [];
   for (let i = 0; i < count; i += 1) {
-    const slice = bytes.slice(i * FR_ELEMENT_BYTES, (i + 1) * FR_ELEMENT_BYTES);
+    const slice = bytes.slice(i * FP_ELEMENT_BYTES, (i + 1) * FP_ELEMENT_BYTES);
     out.push(bytesToHex(slice));
   }
   return out;
@@ -325,7 +304,7 @@ function mustFindConvertCase(cases: readonly ConvertCase[], name: string): Conve
   return found;
 }
 
-function combineElementCases(vectors: Phase2Vectors): ElementCase[] {
+function combineElementCases(vectors: Phase3Vectors): ElementCase[] {
   return [
     ...vectors.element_cases,
     ...vectors.edge_cases,
@@ -334,23 +313,14 @@ function combineElementCases(vectors: Phase2Vectors): ElementCase[] {
 }
 
 async function runBrowserSmoke(): Promise<string[]> {
-  const lines: string[] = ["=== BN254 fr Phase 2 Browser Smoke ===", ""];
+  const lines: string[] = ["=== BN254 fp Phase 3 Browser Smoke ===", ""];
   writeLog(lines);
 
   if (!("gpu" in navigator)) {
     throw new Error("WebGPU is not available in this browser.");
   }
 
-  lines.push("1. Loading shader and vectors...");
-  writeLog(lines);
-  const [shaderCode, vectors] = await Promise.all([
-    fetchText("/shaders/curves/bn254/fr_arith.wgsl"),
-    fetchVectors(),
-  ]);
-  lines[lines.length - 1] += " OK";
-  writeLog(lines);
-
-  lines.push("2. Requesting adapter...");
+  lines.push("1. Requesting adapter...");
   writeLog(lines);
   const adapter = await withTimeout(navigator.gpu.requestAdapter(), 10000, "requestAdapter");
   if (!adapter) {
@@ -360,9 +330,18 @@ async function runBrowserSmoke(): Promise<string[]> {
   await appendAdapterDiagnostics(adapter, lines);
   writeLog(lines);
 
-  lines.push("3. Requesting device...");
+  lines.push("2. Requesting device...");
   writeLog(lines);
   const device = await withTimeout(adapter.requestDevice(), 10000, "requestDevice");
+  lines[lines.length - 1] += " OK";
+  writeLog(lines);
+
+  lines.push("3. Loading shader and vectors...");
+  writeLog(lines);
+  const [shaderCode, vectors] = await Promise.all([
+    fetchText("/shaders/curves/bn254/fp_arith.wgsl"),
+    fetchVectors(),
+  ]);
   lines[lines.length - 1] += " OK";
   writeLog(lines);
 
@@ -380,37 +359,37 @@ async function runBrowserSmoke(): Promise<string[]> {
   const elementCases = combineElementCases(vectors);
   const aHex = elementCases.map((item) => item.a_bytes_le);
   const bHex = elementCases.map((item) => item.b_bytes_le);
-  const zeros = Array.from({ length: elementCases.length }, () => FR_ZERO_HEX);
+  const zeros = Array.from({ length: elementCases.length }, () => FP_ZERO_HEX);
   const oneMontHex = mustFindConvertCase(vectors.convert_cases, "one").mont_bytes_le;
 
-  verifyBatch("copy", await runOp(device, kernel, FR_OP_COPY, aHex, bHex), aHex, lines);
+  verifyBatch("copy", await runOp(device, kernel, FP_OP_COPY, aHex, bHex), aHex, lines);
   writeLog(lines);
-  verifyBatch("equal", await runOp(device, kernel, FR_OP_EQUAL, aHex, bHex), elementCases.map((item) => item.equal_bytes_le), lines);
+  verifyBatch("equal", await runOp(device, kernel, FP_OP_EQUAL, aHex, bHex), elementCases.map((item) => item.equal_bytes_le), lines);
   writeLog(lines);
-  verifyBatch("zero", await runOp(device, kernel, FR_OP_ZERO, zeros, zeros), zeros, lines);
+  verifyBatch("zero", await runOp(device, kernel, FP_OP_ZERO, zeros, zeros), zeros, lines);
   writeLog(lines);
-  verifyBatch("one", await runOp(device, kernel, FR_OP_ONE, zeros, zeros), Array.from({ length: elementCases.length }, () => oneMontHex), lines);
+  verifyBatch("one", await runOp(device, kernel, FP_OP_ONE, zeros, zeros), Array.from({ length: elementCases.length }, () => oneMontHex), lines);
   writeLog(lines);
-  verifyBatch("add", await runOp(device, kernel, FR_OP_ADD, aHex, bHex), elementCases.map((item) => item.add_bytes_le), lines);
+  verifyBatch("add", await runOp(device, kernel, FP_OP_ADD, aHex, bHex), elementCases.map((item) => item.add_bytes_le), lines);
   writeLog(lines);
-  verifyBatch("sub", await runOp(device, kernel, FR_OP_SUB, aHex, bHex), elementCases.map((item) => item.sub_bytes_le), lines);
+  verifyBatch("sub", await runOp(device, kernel, FP_OP_SUB, aHex, bHex), elementCases.map((item) => item.sub_bytes_le), lines);
   writeLog(lines);
-  verifyBatch("neg", await runOp(device, kernel, FR_OP_NEG, aHex, zeros), elementCases.map((item) => item.neg_a_bytes_le), lines);
+  verifyBatch("neg", await runOp(device, kernel, FP_OP_NEG, aHex, zeros), elementCases.map((item) => item.neg_a_bytes_le), lines);
   writeLog(lines);
-  verifyBatch("double", await runOp(device, kernel, FR_OP_DOUBLE, aHex, zeros), elementCases.map((item) => item.double_a_bytes_le), lines);
+  verifyBatch("double", await runOp(device, kernel, FP_OP_DOUBLE, aHex, zeros), elementCases.map((item) => item.double_a_bytes_le), lines);
   writeLog(lines);
-  verifyBatch("mul", await runOp(device, kernel, FR_OP_MUL, aHex, bHex), elementCases.map((item) => item.mul_bytes_le), lines);
+  verifyBatch("mul", await runOp(device, kernel, FP_OP_MUL, aHex, bHex), elementCases.map((item) => item.mul_bytes_le), lines);
   writeLog(lines);
-  verifyBatch("square", await runOp(device, kernel, FR_OP_SQUARE, aHex, zeros), elementCases.map((item) => item.square_a_bytes_le), lines);
+  verifyBatch("square", await runOp(device, kernel, FP_OP_SQUARE, aHex, zeros), elementCases.map((item) => item.square_a_bytes_le), lines);
   writeLog(lines);
   verifyBatch(
     "to_mont",
     await runOp(
       device,
       kernel,
-      FR_OP_TO_MONT,
+      FP_OP_TO_MONT,
       vectors.convert_cases.map((item) => item.regular_bytes_le),
-      Array.from({ length: vectors.convert_cases.length }, () => FR_ZERO_HEX),
+      Array.from({ length: vectors.convert_cases.length }, () => FP_ZERO_HEX),
     ),
     vectors.convert_cases.map((item) => item.mont_bytes_le),
     lines,
@@ -421,9 +400,9 @@ async function runBrowserSmoke(): Promise<string[]> {
     await runOp(
       device,
       kernel,
-      FR_OP_FROM_MONT,
+      FP_OP_FROM_MONT,
       vectors.convert_cases.map((item) => item.mont_bytes_le),
-      Array.from({ length: vectors.convert_cases.length }, () => FR_ZERO_HEX),
+      Array.from({ length: vectors.convert_cases.length }, () => FP_ZERO_HEX),
     ),
     vectors.convert_cases.map((item) => item.regular_bytes_le),
     lines,
@@ -434,9 +413,9 @@ async function runBrowserSmoke(): Promise<string[]> {
     await runOp(
       device,
       kernel,
-      FR_OP_NORMALIZE,
+      FP_OP_NORMALIZE,
       vectors.normalize_cases.map((item) => item.input_bytes_le),
-      Array.from({ length: vectors.normalize_cases.length }, () => FR_ZERO_HEX),
+      Array.from({ length: vectors.normalize_cases.length }, () => FP_ZERO_HEX),
     ),
     vectors.normalize_cases.map((item) => item.expected_bytes_le),
     lines,
@@ -444,7 +423,7 @@ async function runBrowserSmoke(): Promise<string[]> {
   writeLog(lines);
 
   lines.push("");
-  lines.push("PASS: BN254 fr browser smoke succeeded");
+  lines.push("PASS: BN254 fp browser smoke succeeded");
   writeLog(lines);
   return lines;
 }
@@ -461,7 +440,7 @@ async function main(): Promise<void> {
     setStatus("Pass");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    writeLog(["=== BN254 fr Phase 2 Browser Smoke ===", "", `FAIL: ${message}`]);
+    writeLog(["=== BN254 fp Phase 3 Browser Smoke ===", "", `FAIL: ${message}`]);
     setPageState("fail");
     setStatus("Fail");
     throw error;
@@ -479,8 +458,8 @@ if (params.get("autorun") === "1") {
   void main();
 } else {
   writeLog([
-    "=== BN254 fr Phase 2 Browser Smoke ===",
+    "=== BN254 fp Phase 3 Browser Smoke ===",
     "",
-    "Press Run to execute the BN254 fr smoke test in browser WebGPU.",
+    "Press Run to execute the BN254 fp smoke test in browser WebGPU.",
   ]);
 }

@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BN254 fp WebGPU Smoke</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #10161d;
+      --panel: #17212b;
+      --text: #e7edf4;
+      --muted: #94a3b8;
+      --accent: #16a34a;
+      --border: #314154;
+    }
+
+    body {
+      margin: 0;
+      font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: radial-gradient(circle at top, #223042, var(--bg) 60%);
+      color: var(--text);
+    }
+
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+
+    p {
+      margin: 0 0 20px;
+      color: var(--muted);
+    }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    button {
+      border: 1px solid var(--border);
+      background: #052e16;
+      color: #dcfce7;
+      padding: 10px 14px;
+      border-radius: 10px;
+      cursor: pointer;
+      font: inherit;
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: 0.7;
+    }
+
+    .status {
+      color: var(--muted);
+    }
+
+    pre {
+      margin: 0;
+      padding: 16px;
+      background: color-mix(in srgb, var(--panel) 92%, black);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: auto;
+      min-height: 320px;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body data-status="idle">
+  <main>
+    <h1>BN254 fp WebGPU Smoke</h1>
+    <p>
+      This browser smoke test runs the BN254 base-field Phase 3 WGSL kernel against
+      shared JSON vectors for copy, zero, one, equality, add, sub, neg, double, mul,
+      square, Montgomery conversions, and normalize.
+    </p>
+
+    <div class="controls">
+      <button id="run">Run Smoke</button>
+      <span id="status" class="status">Idle</span>
+    </div>
+
+    <pre id="log"></pre>
+  </main>
+
+  <script type="module" src="./bn254_fp_ops.js"></script>
+</body>
+</html>
