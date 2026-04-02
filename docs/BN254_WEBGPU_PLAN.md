@@ -1,6 +1,6 @@
 # Pairing-Friendly Curve WebGPU Primitive Plan
 
-Status: Phase 0, Phase 1, Phase 2, and Phase 3 completed; Phase 4 next
+Status: Phase 0, Phase 1, Phase 2, Phase 3, and Phase 4 completed; Phase 5 next
 Last updated: 2026-04-02
 
 ## Goal
@@ -366,14 +366,25 @@ Notes from implementation:
 
 Once scalar operations are stable:
 
-- [ ] vector add / sub / mul kernels
-- [ ] batched Montgomery conversions
-- [ ] batched scalar multiply by constants
-- [ ] permutation / copy / bit-reversal helpers relevant to FFT
+- [x] vector add / sub / mul kernels
+- [x] batched Montgomery conversions
+- [x] batched scalar multiply by constants
+- [x] permutation / copy / bit-reversal helpers relevant to FFT
 
 Deliverable:
 
 - enough array-oriented `fr` support to support FFT experiments
+
+Notes from implementation:
+
+- The existing BN254 `fr` arithmetic kernel now exposes named batched wrapper methods for `copy`, `add`, `sub`, `mul`, `to_mont`, and `from_mont`, so the scalar field layer is directly usable for vector-sized batches from Go.
+- A dedicated BN254 `fr` vector WGSL kernel exists in `shaders/curves/bn254/fr_vector.wgsl` with an initial Phase 4 opcode set covering per-element scaling by factors and bit-reversal copy.
+- A Go wrapper for the vector kernel exists in `go/curvegpu/bn254/fr_vector.go`, with `MulFactors` and `BitReverseCopy` entry points.
+- A deterministic Go differential test validates the Phase 4 vector slice against CPU expectations in `go/curvegpu/bn254_fr_vector_test.go`.
+- A native Metal smoke command exists in `cmd/bn254-fr-vector-metal-smoke`, and it passes on Apple Silicon across `copy`, `add`, `sub`, `mul`, `to_mont`, `from_mont`, `mul_factors`, and `bit_reverse_copy`.
+- Shared Phase 4 browser vectors are generated from Go in `testdata/vectors/fr/bn254_phase4_vector_ops.json`.
+- A manual headed-Chrome browser smoke exists in `web/static/bn254_fr_vector_ops.html`, and it passes on Apple Silicon with adapter diagnostics reporting `vendor = apple` and `architecture = metal-3`.
+- As in earlier phases, headed Chrome is the accepted browser validation path for these WebGPU pages; headless Chrome on macOS/Metal is still treated as an automation limitation rather than a correctness signal.
 
 ## Phase 5: FFT / NTT over `fr`
 

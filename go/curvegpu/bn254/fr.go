@@ -307,6 +307,30 @@ func (k *FrKernel) Run(op FrOp, a, b []curvegpu.U32x8) ([]curvegpu.U32x8, error)
 	return unflattenBatch(data, count), nil
 }
 
+func (k *FrKernel) Copy(a []curvegpu.U32x8) ([]curvegpu.U32x8, error) {
+	return k.Run(FrOpCopy, a, ZeroBatch(len(a)))
+}
+
+func (k *FrKernel) Add(a, b []curvegpu.U32x8) ([]curvegpu.U32x8, error) {
+	return k.Run(FrOpAdd, a, b)
+}
+
+func (k *FrKernel) Sub(a, b []curvegpu.U32x8) ([]curvegpu.U32x8, error) {
+	return k.Run(FrOpSub, a, b)
+}
+
+func (k *FrKernel) Mul(a, b []curvegpu.U32x8) ([]curvegpu.U32x8, error) {
+	return k.Run(FrOpMul, a, b)
+}
+
+func (k *FrKernel) ToMont(a []curvegpu.U32x8) ([]curvegpu.U32x8, error) {
+	return k.Run(FrOpToMont, a, ZeroBatch(len(a)))
+}
+
+func (k *FrKernel) FromMont(a []curvegpu.U32x8) ([]curvegpu.U32x8, error) {
+	return k.Run(FrOpFromMont, a, ZeroBatch(len(a)))
+}
+
 func inferCount(a, b []curvegpu.U32x8) (int, error) {
 	switch {
 	case len(a) == 0 && len(b) == 0:
