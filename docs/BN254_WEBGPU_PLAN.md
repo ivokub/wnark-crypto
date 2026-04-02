@@ -1,6 +1,6 @@
 # Pairing-Friendly Curve WebGPU Primitive Plan
 
-Status: Phase 0, Phase 1, Phase 2, Phase 3, and Phase 4 completed; Phase 5 next
+Status: Phase 0, Phase 1, Phase 2, Phase 3, and Phase 4 completed; Phase 5 in progress
 Last updated: 2026-04-02
 
 ## Goal
@@ -394,25 +394,35 @@ Initial goal:
 
 Tasks:
 
-- [ ] mirror domain generation and twiddle handling from gnark-crypto
+- [x] mirror domain generation and twiddle handling from gnark-crypto
 - [ ] choose first implementation shape:
   - simple iterative DIT/DIF
-  - explicit stage-by-stage kernels
-- [ ] implement bit-reversal strategy
-- [ ] implement forward NTT
+  - [x] explicit stage-by-stage kernels
+- [x] implement bit-reversal strategy
+- [x] implement forward NTT
 - [ ] implement inverse NTT
-- [ ] verify on multiple domain sizes
-- [ ] compare against gnark-crypto FFT outputs
+- [x] verify on multiple domain sizes
+- [x] compare against gnark-crypto FFT outputs
 
 Testing:
 
-- [ ] small exact cases
-- [ ] random vectors
+- [x] small exact cases
+- [x] random vectors
 - [ ] coset and inverse cases if needed later
 
 Deliverable:
 
 - browser and Metal NTT compatible with gnark-crypto for supported domain sizes
+
+Notes from implementation:
+
+- The first Phase 5 slice is a correctness-first forward BN254 `fr` DIT NTT for small power-of-two domains, built as explicit stage-by-stage kernels rather than a fused FFT pipeline.
+- The NTT stage kernel lives in `shaders/curves/bn254/fr_ntt.wgsl`, and the Go wrapper lives in `go/curvegpu/bn254/ntt.go`.
+- The current supported validation sizes are `n=8` and `n=16`.
+- Shared Phase 5 vectors are generated from `gnark-crypto` in `testdata/vectors/fr/bn254_phase5_ntt.json`, including bit-reversed-input forward expectations and per-stage twiddle tables.
+- A native Metal smoke command exists in `cmd/bn254-fr-ntt-metal-smoke`, and it passes on Apple Silicon for the current forward-NTT cases.
+- A manual headed-Chrome browser smoke exists in `web/static/bn254_fr_ntt.html`, and it passes on Apple Silicon with adapter diagnostics reporting `vendor = apple` and `architecture = metal-3`.
+- The inverse DIT path was intentionally deferred after hitting a Metal backend crash during the follow-up scaling path. It should be treated as the next open item in Phase 5, not as implemented-but-unstable functionality.
 
 ## Phase 6: G1 point representation and basic arithmetic
 
