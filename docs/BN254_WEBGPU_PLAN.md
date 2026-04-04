@@ -1,7 +1,7 @@
 # Pairing-Friendly Curve WebGPU Primitive Plan
 
-Status: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, Phase 6, Phase 7, and Phase 8 completed; Performance Tracks 1 and 2 benchmarked; Performance Track 3 checkpointed; Phase 9 deferred
-Last updated: 2026-04-02
+Status: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, Phase 6, Phase 7, and Phase 8 completed; Performance Tracks 1, 2, and 3 benchmarked; Phase 9 deferred
+Last updated: 2026-04-04
 
 ## Goal
 
@@ -606,7 +606,7 @@ Notes from implementation:
 - [x] replace the current naive host-orchestrated MSM baseline with a correctness-first Pippenger implementation
 - [ ] mirror the windowing and chunk-partition strategy used in `gnark-crypto`
 - [x] benchmark the current naive MSM baseline before replacing it
-- [ ] benchmark MSM sizes starting at `2^10` points where practical
+- [x] benchmark MSM sizes starting at `2^10` points where practical
 - [ ] compare Metal WebGPU against native `gnark-crypto MultiExp`
 - [x] benchmark browser WebGPU separately
 - [x] identify which substeps stay on host and which move to GPU in the first optimized design
@@ -623,17 +623,25 @@ Notes from implementation:
   - the extra MSM kernel parameters needed a safer uniform layout on Metal/WebGPU
   - the fast window reducer initially skipped empty-bucket running-sum contributions, which changed the effective bucket weights
 - The current browser Pippenger design is now correctness-validated and uses:
-  - GPU bucket accumulation
-  - GPU bucket weighting
-  - GPU tree reduction across weighted buckets
+  - signed sparse bucket metadata
+  - chunked sparse bucket aggregation on GPU
+  - parallel sparse per-window subsum on GPU
   - GPU final window combination
   - a benchmark path that keeps intermediate buffers on device and performs only one final readback
 - Stable native Metal benchmarking for the optimized G1 path is still blocked by `gogpu/wgpu` instability under repeated G1 dispatch churn, so the headed-Chrome browser path is the reliable benchmark environment for this checkpoint.
-- Current browser measurements on Apple Silicon show:
-  - Pippenger beats naive MSM at small sizes such as `2^7` and `2^8`
-  - Pippenger is close to naive around `2^9`
-  - naive MSM still wins from `2^10` upward in the current implementation
-  - the major earlier bottlenecks from stage-by-stage readback and scalar-weighted window reduction were removed, and the next optimization target is bucket accumulation itself
+- Current browser measurements on Apple Silicon now show a clear large-size win for the optimized Pippenger path:
+  - `2^10`: naive `72.6 ms`, Pippenger `65.2 ms`
+  - `2^11`: naive `97.8 ms`, Pippenger `63.9 ms`
+  - `2^12`: naive `143.5 ms`, Pippenger `142.7 ms`
+  - `2^13`: naive `281.3 ms`, Pippenger `157.0 ms`
+  - `2^14`: naive `535.6 ms`, Pippenger `317.2 ms`
+  - `2^15`: naive `1006.3 ms`, Pippenger `608.5 ms`
+  - `2^16`: naive `1949.2 ms`, Pippenger `736.1 ms`
+  - `2^17`: naive `3826.6 ms`, Pippenger `1004.9 ms`
+  - `2^18`: naive `7573.7 ms`, Pippenger `1523.1 ms`
+- The host-side metadata bottleneck was substantially reduced by switching the benchmark path from hex-to-`BigInt` signed-window decomposition to packed `u32` scalar words:
+  - at `2^18`, `partition_ms` dropped from about `1955.8 ms` to `168.1 ms`
+  - the dominant remaining costs are now GPU bucket and window reduction rather than host metadata construction
 
 ## Phase 9: Multi-curve extension
 

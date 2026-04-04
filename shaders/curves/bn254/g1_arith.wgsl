@@ -17,6 +17,8 @@ struct Params {
   lane1: vec4<u32>,
 }
 
+var<workgroup> g1_window_shared: array<G1Point, 64>;
+
 const FP_OP_COPY: u32 = 0u;
 const FP_OP_ZERO: u32 = 1u;
 const FP_OP_ONE: u32 = 2u;
@@ -68,6 +70,9 @@ const FP_MODULUS_MINUS_TWO: array<u32, 8> = array<u32, 8>(
 @group(0) @binding(1) var<storage, read> input_b: array<u32>;
 @group(0) @binding(2) var<storage, read_write> output: array<u32>;
 @group(0) @binding(3) var<uniform> params: Params;
+@group(0) @binding(4) var<storage, read> input_meta0: array<u32>;
+@group(0) @binding(5) var<storage, read> input_meta1: array<u32>;
+@group(0) @binding(6) var<storage, read> input_meta2: array<u32>;
 
 fn params_count() -> u32 {
   return params.lane0.x;
@@ -508,6 +513,15 @@ fn g1_jac_to_affine(p: G1Point) -> G1Point {
   return out;
 }
 
+fn g1_neg_affine(q: G1Point) -> G1Point {
+  if (g1_affine_is_infinity(q)) {
+    return q;
+  }
+  var p = q;
+  p.y = fp_neg(q.y);
+  return p;
+}
+
 fn g1_neg_jac(q: G1Point) -> G1Point {
   var p = q;
   p.y = fp_neg(q.y);
@@ -592,6 +606,10 @@ fn g1_add_mixed(p: G1Point, a: G1Point) -> G1Point {
   out.z = fp_sub(out.z, z1z1);
   out.z = fp_sub(out.z, hh);
   return out;
+}
+
+fn g1_add_affine(a: G1Point, b: G1Point) -> G1Point {
+  return g1_jac_to_affine(g1_add_mixed(g1_affine_to_jac(a), b));
 }
 
 fn g1_scalar_bit(words: Fp, bit: u32) -> bool {
@@ -784,6 +802,28 @@ fn g1_msm_bucket_main(@builtin(global_invocation_id) id: vec3<u32>) {
 }
 
 @compute @workgroup_size(64)
+fn g1_msm_bucket_sparse_main(@builtin(global_invocation_id) id: vec3<u32>) {
+  let i = id.x;
+  if (i >= params_count()) {
+    return;
+  }
+  let start = input_meta1[i];
+  let size = input_meta2[i];
+  var acc = g1_jac_infinity();
+  for (var j = 0u; j < size; j = j + 1u) {
+    let raw = input_meta0[start + j];
+    let idx = raw & 0x7fffffffu;
+    let neg = (raw & 0x80000000u) != 0u;
+    var point = g1_load_from(0u, idx);
+    if (neg) {
+      point = g1_neg_affine(point);
+    }
+    acc = g1_add_mixed(acc, point);
+  }
+  g1_store(i, g1_jac_to_affine(acc));
+}
+
+@compute @workgroup_size(64)
 fn g1_msm_window_weight_main(@builtin(global_invocation_id) id: vec3<u32>) {
   let i = id.x;
   if (i >= params_count()) {
@@ -821,6 +861,52 @@ fn g1_msm_window_reduce_main(@builtin(global_invocation_id) id: vec3<u32>) {
     right.z = fp_zero();
   }
   g1_store(i, g1_jac_to_affine(g1_add_mixed(g1_affine_to_jac(left), right)));
+}
+
+@compute @workgroup_size(64)
+fn g1_msm_window_sparse_main(
+  @builtin(local_invocation_id) local_id: vec3<u32>,
+  @builtin(workgroup_id) wg_id: vec3<u32>,
+) {
+  let i = wg_id.x;
+  let tid = local_id.x;
+  if (i >= params_count()) {
+    return;
+  }
+  let start = input_meta1[i];
+  let count = input_meta2[i];
+  var local_sum = g1_jac_infinity();
+  var j = tid;
+  loop {
+    if (j >= count) {
+      break;
+    }
+    let slot = start + j;
+    let point = g1_load_from(0u, slot);
+    let value = input_meta0[slot];
+    if (!g1_affine_is_infinity(point) && value != 0u) {
+      let weighted = g1_scalar_mul_affine_small(point, value);
+      local_sum = g1_add_mixed(local_sum, weighted);
+    }
+    j = j + 64u;
+  }
+  g1_window_shared[tid] = g1_jac_to_affine(local_sum);
+  workgroupBarrier();
+
+  var stride = 32u;
+  loop {
+    if (stride == 0u) {
+      break;
+    }
+    if (tid < stride) {
+      g1_window_shared[tid] = g1_add_affine(g1_window_shared[tid], g1_window_shared[tid + stride]);
+    }
+    workgroupBarrier();
+    stride = stride >> 1u;
+  }
+  if (tid == 0u) {
+    g1_store(i, g1_window_shared[0u]);
+  }
 }
 
 @compute @workgroup_size(64)

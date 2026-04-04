@@ -3,6 +3,7 @@ const SCALAR_BYTES = 32;
 const POINT_BYTES = 96;
 const UNIFORM_BYTES = 32;
 const ZERO_HEX = "0000000000000000000000000000000000000000000000000000000000000000";
+const INDEX_SIGN_BIT = 0x80000000;
 const G1_OP_DOUBLE_JAC = 4;
 const G1_OP_ADD_MIXED = 5;
 const G1_OP_JAC_TO_AFFINE = 6;
@@ -93,6 +94,9 @@ function createKernel(device, shaderCode, entryPoint = "g1_ops_main") {
       { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
       { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
       { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+      { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+      { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+      { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
     ],
   });
   const pipelineLayout = device.createPipelineLayout({
@@ -220,6 +224,139 @@ function buildBucketLists(bases, scalars, count, termsPerInstance, window) {
   return bucketLists;
 }
 
+function buildSparseBucketMetadata(scalars, count, termsPerInstance, window) {
+  const numWindows = Math.ceil(256 / window);
+  const bucketCount = (1 << window) - 1;
+  const totalBuckets = count * numWindows * bucketCount;
+  const bucketSizes = new Uint32Array(totalBuckets);
+  const scalarBigs = scalars.map((scalar) => scalarHexLEToBigInt(scalar));
+  for (let instance = 0; instance < count; instance += 1) {
+    const baseOffset = instance * termsPerInstance;
+    for (let term = 0; term < termsPerInstance; term += 1) {
+      const idx = baseOffset + term;
+      const scalar = scalarBigs[idx];
+      for (let win = 0; win < numWindows; win += 1) {
+        const digit = extractWindowDigit(scalar, win * window, window);
+        if (digit === 0) {
+          continue;
+        }
+        const bucketIndex = ((instance * numWindows + win) * bucketCount) + (digit - 1);
+        bucketSizes[bucketIndex] += 1;
+      }
+    }
+  }
+  const bucketPointers = new Uint32Array(totalBuckets);
+  let totalEntries = 0;
+  for (let i = 0; i < totalBuckets; i += 1) {
+    bucketPointers[i] = totalEntries;
+    totalEntries += bucketSizes[i];
+  }
+  const fill = new Uint32Array(totalBuckets);
+  const baseIndices = new Uint32Array(totalEntries);
+  for (let instance = 0; instance < count; instance += 1) {
+    const baseOffset = instance * termsPerInstance;
+    for (let term = 0; term < termsPerInstance; term += 1) {
+      const idx = baseOffset + term;
+      const scalar = scalarBigs[idx];
+      for (let win = 0; win < numWindows; win += 1) {
+        const digit = extractWindowDigit(scalar, win * window, window);
+        if (digit === 0) {
+          continue;
+        }
+        const bucketIndex = ((instance * numWindows + win) * bucketCount) + (digit - 1);
+        const entryOffset = bucketPointers[bucketIndex] + fill[bucketIndex];
+        baseIndices[entryOffset] = idx;
+        fill[bucketIndex] += 1;
+      }
+    }
+  }
+  return { baseIndices, bucketPointers, bucketSizes };
+}
+
+function decomposeSignedWindows(scalar, window) {
+  const numUnsigned = Math.ceil(256 / window);
+  const half = 1n << BigInt(window - 1);
+  const full = 1n << BigInt(window);
+  const out = [];
+  let carry = 0n;
+  for (let win = 0; win < numUnsigned; win += 1) {
+    const unsigned = BigInt(extractWindowDigit(scalar, win * window, window));
+    const value = unsigned + carry;
+    carry = 0n;
+    if (value >= half) {
+      const abs = Number(full - value);
+      out.push({ abs, neg: abs !== 0 });
+      carry = 1n;
+    } else {
+      out.push({ abs: Number(value), neg: false });
+    }
+  }
+  if (carry > 0n) {
+    out.push({ abs: 1, neg: false });
+  }
+  return out;
+}
+
+function buildSparseSignedBucketMetadata(scalars, count, termsPerInstance, window) {
+  let maxChunkSize = arguments.length > 4 && arguments[4] !== undefined ? arguments[4] : 256;
+  const scalarWindows = scalars.map((scalar) => decomposeSignedWindows(scalarHexLEToBigInt(scalar), window));
+  const numWindows = scalarWindows.reduce((max, windows) => Math.max(max, windows.length), 0);
+  const bucketCount = 1 << (window - 1);
+  const baseIndices = [];
+  const bucketPointers = [];
+  const bucketSizes = [];
+  const bucketValues = [];
+  const windowStarts = [];
+  const windowCounts = [];
+
+  for (let instance = 0; instance < count; instance += 1) {
+    const baseOffset = instance * termsPerInstance;
+    for (let win = 0; win < numWindows; win += 1) {
+      const byValue = new Map();
+      for (let term = 0; term < termsPerInstance; term += 1) {
+        const idx = baseOffset + term;
+        const entry = win < scalarWindows[idx].length ? scalarWindows[idx][win] : { abs: 0, neg: false };
+        if (entry.abs === 0) {
+          continue;
+        }
+        const raw = entry.neg ? ((idx | INDEX_SIGN_BIT) >>> 0) : idx;
+        const bucket = byValue.get(entry.abs);
+        if (bucket) {
+          bucket.push(raw);
+        } else {
+          byValue.set(entry.abs, [raw]);
+        }
+      }
+      const values = Array.from(byValue.keys()).sort((a, b) => a - b);
+      windowStarts.push(bucketPointers.length);
+      let dispatchedInWindow = 0;
+      for (const value of values) {
+        const indices = byValue.get(value);
+        for (let offset = 0; offset < indices.length; offset += maxChunkSize) {
+          const chunk = indices.slice(offset, Math.min(indices.length, offset + maxChunkSize));
+          bucketPointers.push(baseIndices.length);
+          bucketSizes.push(chunk.length);
+          bucketValues.push(value);
+          baseIndices.push(...chunk);
+          dispatchedInWindow += 1;
+        }
+      }
+      windowCounts.push(dispatchedInWindow);
+    }
+  }
+
+  return {
+    baseIndices: Uint32Array.from(baseIndices),
+    bucketPointers: Uint32Array.from(bucketPointers),
+    bucketSizes: Uint32Array.from(bucketSizes),
+    bucketValues: Uint32Array.from(bucketValues),
+    windowStarts: Uint32Array.from(windowStarts),
+    windowCounts: Uint32Array.from(windowCounts),
+    numWindows,
+    bucketCount,
+  };
+}
+
 async function runOp(device, kernel, opcode, inputA, inputB, extraParams) {
   const count = (extraParams && extraParams.count) || inputA.length;
   if (count === 0) {
@@ -236,6 +373,7 @@ async function runOp(device, kernel, opcode, inputA, inputB, extraParams) {
   const outputBuffer = device.createBuffer({ label: "g1-output", size: outputByteSize, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
   const stagingBuffer = device.createBuffer({ label: "g1-staging", size: outputByteSize, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const uniformBuffer = device.createBuffer({ label: "g1-params", size: UNIFORM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const metaDummyBuffer = device.createBuffer({ label: "g1-meta-dummy", size: 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
 
   device.queue.writeBuffer(basesBuffer, 0, aBytes);
   device.queue.writeBuffer(scalarsBuffer, 0, bBytes);
@@ -257,6 +395,9 @@ async function runOp(device, kernel, opcode, inputA, inputB, extraParams) {
       { binding: 1, resource: { buffer: scalarsBuffer } },
       { binding: 2, resource: { buffer: outputBuffer } },
       { binding: 3, resource: { buffer: uniformBuffer } },
+      { binding: 4, resource: { buffer: metaDummyBuffer } },
+      { binding: 5, resource: { buffer: metaDummyBuffer } },
+      { binding: 6, resource: { buffer: metaDummyBuffer } },
     ],
   });
 
@@ -278,8 +419,179 @@ async function runOp(device, kernel, opcode, inputA, inputB, extraParams) {
   outputBuffer.destroy();
   stagingBuffer.destroy();
   uniformBuffer.destroy();
+  metaDummyBuffer.destroy();
 
   return unpackPointBatch(result, count);
+}
+
+async function runSparseBucketOp(device, kernel, bases, metadata, count) {
+  if (count === 0) {
+    return [];
+  }
+  const aBytes = packPointBatch(bases);
+  const outputByteSize = count * POINT_BYTES;
+  const basesBuffer = device.createBuffer({ label: "g1-sparse-bases", size: aBytes.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  const dummyBuffer = device.createBuffer({ label: "g1-sparse-dummy", size: 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  const outputBuffer = device.createBuffer({ label: "g1-sparse-output", size: outputByteSize, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  const stagingBuffer = device.createBuffer({ label: "g1-sparse-staging", size: outputByteSize, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const uniformBuffer = device.createBuffer({ label: "g1-sparse-params", size: UNIFORM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const baseIndicesBuffer = device.createBuffer({ label: "g1-sparse-base-indices", size: Math.max(4, metadata.baseIndices.byteLength), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  const bucketPointersBuffer = device.createBuffer({ label: "g1-sparse-bucket-pointers", size: Math.max(4, metadata.bucketPointers.byteLength), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  const bucketSizesBuffer = device.createBuffer({ label: "g1-sparse-bucket-sizes", size: Math.max(4, metadata.bucketSizes.byteLength), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+
+  device.queue.writeBuffer(basesBuffer, 0, aBytes);
+  if (metadata.baseIndices.byteLength > 0) {
+    device.queue.writeBuffer(baseIndicesBuffer, 0, metadata.baseIndices);
+  }
+  if (metadata.bucketPointers.byteLength > 0) {
+    device.queue.writeBuffer(bucketPointersBuffer, 0, metadata.bucketPointers);
+  }
+  if (metadata.bucketSizes.byteLength > 0) {
+    device.queue.writeBuffer(bucketSizesBuffer, 0, metadata.bucketSizes);
+  }
+  const params = new Uint32Array(UNIFORM_BYTES / 4);
+  params[0] = count;
+  device.queue.writeBuffer(uniformBuffer, 0, params);
+
+  const bindGroup = device.createBindGroup({
+    label: "g1-sparse-bucket-bind-group",
+    layout: kernel.bindGroupLayout,
+    entries: [
+      { binding: 0, resource: { buffer: basesBuffer } },
+      { binding: 1, resource: { buffer: dummyBuffer } },
+      { binding: 2, resource: { buffer: outputBuffer } },
+      { binding: 3, resource: { buffer: uniformBuffer } },
+      { binding: 4, resource: { buffer: baseIndicesBuffer } },
+      { binding: 5, resource: { buffer: bucketPointersBuffer } },
+      { binding: 6, resource: { buffer: bucketSizesBuffer } },
+    ],
+  });
+
+  const encoder = device.createCommandEncoder({ label: "g1-sparse-bucket-encoder" });
+  const pass = encoder.beginComputePass({ label: "g1-sparse-bucket-pass" });
+  pass.setPipeline(kernel.pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.dispatchWorkgroups(Math.ceil(count / 64));
+  pass.end();
+  encoder.copyBufferToBuffer(outputBuffer, 0, stagingBuffer, 0, outputByteSize);
+  device.queue.submit([encoder.finish()]);
+
+  await stagingBuffer.mapAsync(GPUMapMode.READ);
+  const result = new Uint8Array(stagingBuffer.getMappedRange()).slice();
+  stagingBuffer.unmap();
+
+  basesBuffer.destroy();
+  dummyBuffer.destroy();
+  outputBuffer.destroy();
+  stagingBuffer.destroy();
+  uniformBuffer.destroy();
+  baseIndicesBuffer.destroy();
+  bucketPointersBuffer.destroy();
+  bucketSizesBuffer.destroy();
+
+  return unpackPointBatch(result, count);
+}
+
+async function runSparseWindowOp(device, kernel, bucketSums, metadata, count) {
+  const totalWindows = count * metadata.numWindows;
+  if (totalWindows === 0) {
+    return [];
+  }
+  const aBytes = packPointBatch(bucketSums);
+  const outputByteSize = totalWindows * POINT_BYTES;
+  const bucketsBuffer = device.createBuffer({ label: "g1-sparse-window-in", size: Math.max(POINT_BYTES, aBytes.byteLength), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  const dummyBuffer = device.createBuffer({ label: "g1-sparse-window-dummy", size: 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  const outputBuffer = device.createBuffer({ label: "g1-sparse-window-out", size: outputByteSize, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  const stagingBuffer = device.createBuffer({ label: "g1-sparse-window-staging", size: outputByteSize, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const uniformBuffer = device.createBuffer({ label: "g1-sparse-window-params", size: UNIFORM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const bucketValuesBuffer = device.createBuffer({ label: "g1-sparse-window-values", size: Math.max(4, metadata.bucketValues.byteLength), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  const windowStartsBuffer = device.createBuffer({ label: "g1-sparse-window-starts", size: Math.max(4, metadata.windowStarts.byteLength), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  const windowCountsBuffer = device.createBuffer({ label: "g1-sparse-window-counts", size: Math.max(4, metadata.windowCounts.byteLength), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+
+  device.queue.writeBuffer(bucketsBuffer, 0, aBytes);
+  if (metadata.bucketValues.byteLength > 0) {
+    device.queue.writeBuffer(bucketValuesBuffer, 0, metadata.bucketValues);
+  }
+  if (metadata.windowStarts.byteLength > 0) {
+    device.queue.writeBuffer(windowStartsBuffer, 0, metadata.windowStarts);
+  }
+  if (metadata.windowCounts.byteLength > 0) {
+    device.queue.writeBuffer(windowCountsBuffer, 0, metadata.windowCounts);
+  }
+  const params = new Uint32Array(UNIFORM_BYTES / 4);
+  params[0] = totalWindows;
+  params[5] = metadata.bucketCount;
+  device.queue.writeBuffer(uniformBuffer, 0, params);
+
+  const bindGroup = device.createBindGroup({
+    label: "g1-sparse-window-bind-group",
+    layout: kernel.bindGroupLayout,
+    entries: [
+      { binding: 0, resource: { buffer: bucketsBuffer } },
+      { binding: 1, resource: { buffer: dummyBuffer } },
+      { binding: 2, resource: { buffer: outputBuffer } },
+      { binding: 3, resource: { buffer: uniformBuffer } },
+      { binding: 4, resource: { buffer: bucketValuesBuffer } },
+      { binding: 5, resource: { buffer: windowStartsBuffer } },
+      { binding: 6, resource: { buffer: windowCountsBuffer } },
+    ],
+  });
+
+  const encoder = device.createCommandEncoder({ label: "g1-sparse-window-encoder" });
+  const pass = encoder.beginComputePass({ label: "g1-sparse-window-pass" });
+  pass.setPipeline(kernel.pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.dispatchWorkgroups(totalWindows);
+  pass.end();
+  encoder.copyBufferToBuffer(outputBuffer, 0, stagingBuffer, 0, outputByteSize);
+  device.queue.submit([encoder.finish()]);
+
+  await stagingBuffer.mapAsync(GPUMapMode.READ);
+  const result = new Uint8Array(stagingBuffer.getMappedRange()).slice();
+  stagingBuffer.unmap();
+
+  bucketsBuffer.destroy();
+  dummyBuffer.destroy();
+  outputBuffer.destroy();
+  stagingBuffer.destroy();
+  uniformBuffer.destroy();
+  bucketValuesBuffer.destroy();
+  windowStartsBuffer.destroy();
+  windowCountsBuffer.destroy();
+
+  return unpackPointBatch(result, totalWindows);
+}
+
+async function runPippengerMSMSignedSparse(device, kernels, bases, scalars, count, termsPerInstance, window) {
+  const metadata = buildSparseSignedBucketMetadata(scalars, count, termsPerInstance, window);
+  const bucketSums = await runSparseBucketOp(
+    device,
+    kernels.bucketSparse,
+    bases,
+    metadata,
+    metadata.bucketPointers.length
+  );
+  const windowSums = await runSparseWindowOp(
+    device,
+    kernels.windowSparse,
+    bucketSums,
+    metadata,
+    count
+  );
+  return runOp(
+    device,
+    kernels.combine,
+    0,
+    windowSums,
+    [],
+    {
+      count,
+      termsPerInstance,
+      window,
+      numWindows: metadata.numWindows,
+      bucketCount: metadata.bucketCount,
+    }
+  );
 }
 
 async function runMSM(device, kernel, bases, scalars, count, termsPerInstance) {
@@ -521,6 +833,8 @@ async function runSmoke() {
     const kernel = {
       ops: createKernel(device, shaderText),
       bucket: createKernel(device, shaderText, "g1_msm_bucket_main"),
+      bucketSparse: createKernel(device, shaderText, "g1_msm_bucket_sparse_main"),
+      windowSparse: createKernel(device, shaderText, "g1_msm_window_sparse_main"),
       weight: createKernel(device, shaderText, "g1_msm_window_weight_main"),
       reduce: createKernel(device, shaderText, "g1_msm_window_reduce_main"),
       combine: createKernel(device, shaderText, "g1_msm_combine_main"),
@@ -546,6 +860,12 @@ async function runSmoke() {
     const window = bestPippengerWindow(vectors.terms_per_instance);
     const bucketCount = (1 << window) - 1;
     const numWindows = Math.ceil(256 / window);
+    const sparseMetadata = buildSparseBucketMetadata(
+      scalars,
+      vectors.msm_cases.length,
+      vectors.terms_per_instance,
+      window
+    );
     const hostPippenger = await runPippengerMSMHost(
       device,
       kernel.ops,
@@ -558,7 +878,7 @@ async function runSmoke() {
     expectPointBatch("msm_pippenger_host", hostPippenger.result, want);
     lines.push(`msm_pippenger_host (window=${window}): OK`);
 
-    const gpuBucketSums = await runOp(
+    const denseBucketSums = await runOp(
       device,
       kernel.bucket,
       0,
@@ -572,14 +892,24 @@ async function runSmoke() {
         bucketCount,
       },
     );
-    expectPointBatch("msm_pippenger_bucket_stage", gpuBucketSums, hostPippenger.bucketSums);
-    lines.push(`msm_pippenger_bucket_stage (window=${window}): OK`);
+    expectPointBatch("msm_pippenger_bucket_stage_dense", denseBucketSums, hostPippenger.bucketSums);
+    lines.push(`msm_pippenger_bucket_stage_dense (window=${window}): OK`);
+
+    const sparseBucketSums = await runSparseBucketOp(
+      device,
+      kernel.bucketSparse,
+      bases,
+      sparseMetadata,
+      vectors.msm_cases.length * numWindows * bucketCount
+    );
+    expectPointBatch("msm_pippenger_bucket_stage_sparse", sparseBucketSums, hostPippenger.bucketSums);
+    lines.push(`msm_pippenger_bucket_stage_sparse (window=${window}): OK`);
 
     let gpuWindowSums = await runOp(
       device,
       kernel.weight,
       0,
-      gpuBucketSums,
+      sparseBucketSums,
       [],
       {
         count: vectors.msm_cases.length * numWindows * bucketCount,
@@ -627,6 +957,45 @@ async function runSmoke() {
       want,
     );
     lines.push(`msm_pippenger_affine (window=${window}): OK`);
+
+    const signedChunkedMetadata = buildSparseSignedBucketMetadata(
+      scalars,
+      vectors.msm_cases.length,
+      vectors.terms_per_instance,
+      window,
+      2
+    );
+    expectPointBatch(
+      "msm_pippenger_signed_sparse_affine",
+      await runOp(
+        device,
+        kernel.combine,
+        0,
+        await runSparseWindowOp(
+          device,
+          kernel.windowSparse,
+          await runSparseBucketOp(
+            device,
+            kernel.bucketSparse,
+            bases,
+            signedChunkedMetadata,
+            signedChunkedMetadata.bucketPointers.length
+          ),
+          signedChunkedMetadata,
+          vectors.msm_cases.length
+        ),
+        [],
+        {
+          count: vectors.msm_cases.length,
+          termsPerInstance: vectors.terms_per_instance,
+          window,
+          numWindows: signedChunkedMetadata.numWindows,
+          bucketCount: signedChunkedMetadata.bucketCount,
+        }
+      ),
+      want
+    );
+    lines.push(`msm_pippenger_signed_sparse_affine (window=${window}): OK`);
 
     lines.push("");
     lines.push("PASS: BN254 G1 Phase 8 browser smoke succeeded");
