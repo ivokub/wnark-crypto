@@ -1,0 +1,19 @@
+[package]
+name = "heliax-browser-bench"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+blstrs = { package = "nam-blstrs", version = "0.7.1-nam.0" }
+console_error_panic_hook = "0.1"
+group = "0.13"
+serde = { version = "1.0", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+wasm-bindgen = "0.2.113"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Performance", "console"] }
+webgpu-groth16 = { path = "/Users/ivo/Work/consensys/repo/webgpu/webgpu-groth16" }
+pollster = "0.4"

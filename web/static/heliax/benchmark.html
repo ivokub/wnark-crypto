@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Heliax MSM Browser Benchmark</title>
+    <style>
+      body {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        margin: 24px;
+        line-height: 1.4;
+      }
+      .controls {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+      }
+      label {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      pre {
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Heliax MSM Browser Benchmark</h1>
+    <div class="controls">
+      <label>min log2 <input id="minLog2" type="number" value="10" min="1" max="20" /></label>
+      <label>max log2 <input id="maxLog2" type="number" value="17" min="1" max="20" /></label>
+      <label>iters <input id="iters" type="number" value="1" min="1" max="10" /></label>
+      <button id="runBtn">Run</button>
+    </div>
+    <pre id="log">Press Run.</pre>
+    <script type="module" src="./benchmark.js"></script>
+  </body>
+  </html>

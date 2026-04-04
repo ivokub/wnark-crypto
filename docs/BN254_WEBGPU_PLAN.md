@@ -1,6 +1,6 @@
 # Pairing-Friendly Curve WebGPU Primitive Plan
 
-Status: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, Phase 6, Phase 7, and Phase 8 completed; Performance Tracks 1, 2, and 3 benchmarked; Phase 9 deferred
+Status: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, Phase 6, Phase 7, and Phase 8 completed; Performance Tracks 1, 2, and 3 benchmarked; Heliax browser/native MSM wrapper benchmarked; Phase 9 started with codegen-backed multi-curve scaffolding
 Last updated: 2026-04-04
 
 ## Goal
@@ -53,6 +53,18 @@ Implications:
 - the scalar-field path can likely share a common 4-word backend across all three curves
 - the base-field path must support both 4-word and 6-word host representations
 - host wrappers, shader constants, and test harnesses must be curve-parameterized from the start
+
+## Current direction
+
+The next implementation step is an apples-to-apples multi-curve port, starting with BLS12-381 in this repo's framework.
+
+The first slice of that work is not arithmetic yet. It is:
+
+- one generated curve manifest shared by Go, TypeScript, and WGSL type layouts
+- BLS12-381 representation and conversion coverage in Go against `gnark-crypto`
+- keeping BN254 and BLS12-377 on the same generated shape path
+
+This mirrors the config-driven/code-generation style used by `gnark-crypto/internal/generator` and is intended to avoid hand-porting shape metadata curve by curve.
 
 ## Source references
 
