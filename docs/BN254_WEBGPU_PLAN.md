@@ -1,6 +1,6 @@
 # Pairing-Friendly Curve WebGPU Primitive Plan
 
-Status: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, Phase 6, Phase 7, and Phase 8 completed; Performance Tracks 1, 2, and 3 benchmarked; Heliax browser/native MSM wrapper benchmarked; Phase 9 started with codegen-backed multi-curve scaffolding
+Status: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, Phase 6, Phase 7, and Phase 8 completed; Performance Tracks 1, 2, and 3 benchmarked; Heliax browser/native MSM wrapper benchmarked; Phase 9 started with codegen-backed multi-curve scaffolding and the first BLS12-381 `fr` baseline validated on Metal and browser
 Last updated: 2026-04-04
 
 ## Goal
@@ -58,10 +58,11 @@ Implications:
 
 The next implementation step is an apples-to-apples multi-curve port, starting with BLS12-381 in this repo's framework.
 
-The first slice of that work is not arithmetic yet. It is:
+The first slice of that work is:
 
 - one generated curve manifest shared by Go, TypeScript, and WGSL type layouts
 - BLS12-381 representation and conversion coverage in Go against `gnark-crypto`
+- first BLS12-381 `fr` field baseline wired through shared vectors, Go Metal smoke, and browser smoke assets
 - keeping BN254 and BLS12-377 on the same generated shape path
 
 This mirrors the config-driven/code-generation style used by `gnark-crypto/internal/generator` and is intended to avoid hand-porting shape metadata curve by curve.
@@ -660,6 +661,9 @@ Notes from implementation:
 Only after BN254 primitive layers are stable:
 
 - [ ] factor common 4-word field code for reuse by BLS12-381 / BLS12-377 scalar fields
+- [x] add codegen-backed multi-curve shape metadata shared by Go, TypeScript, and WGSL type files
+- [x] add BLS12-381 layout / conversion coverage in Go
+- [x] finish validating the first BLS12-381 `fr` baseline on Metal and browser
 - [ ] implement 6-word base-field backend
 - [ ] add BLS12-381 `fr` / `fp` support
 - [ ] add BLS12-377 `fr` / `fp` support
