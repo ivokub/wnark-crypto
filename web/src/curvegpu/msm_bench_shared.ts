@@ -11,6 +11,12 @@ export type MSMProfile = {
   totalMs: number;
 };
 
+export type SizeBenchmarkEntry = {
+  label: string;
+  window: number;
+  run: () => Promise<MSMProfile>;
+};
+
 export function zeroMSMProfile(): MSMProfile {
   return {
     partitionMs: 0,
@@ -105,4 +111,40 @@ export function formatMSMBenchmarkRow(options: {
     warm.totalMs.toFixed(3),
   );
   return fields.join(",");
+}
+
+export async function appendMSMBenchmarkRows(options: {
+  lines: string[];
+  initMs: number;
+  minLog: number;
+  maxLog: number;
+  iters: number;
+  writeLog: (lines: string[]) => void;
+  makeSizeBenchmarks: (args: { logSize: number; size: number }) => Promise<{
+    prepMs?: number;
+    includePrepMs?: boolean;
+    entries: SizeBenchmarkEntry[];
+  }>;
+}): Promise<void> {
+  const { lines, initMs, minLog, maxLog, iters, writeLog, makeSizeBenchmarks } = options;
+  for (let logSize = minLog; logSize <= maxLog; logSize += 1) {
+    const size = 1 << logSize;
+    const benchSet = await makeSizeBenchmarks({ logSize, size });
+    const prepMs = benchSet.prepMs ?? 0;
+    const includePrepMs = benchSet.includePrepMs ?? false;
+    for (const bench of benchSet.entries) {
+      const benchmark = await benchmarkMSM(iters, bench.run);
+      lines.push(formatMSMBenchmarkRow({
+        size,
+        label: bench.label,
+        window: bench.window,
+        initMs,
+        prepMs,
+        includePrepMs,
+        cold: benchmark.cold,
+        warm: benchmark.warm,
+      }));
+      writeLog(lines);
+    }
+  }
 }

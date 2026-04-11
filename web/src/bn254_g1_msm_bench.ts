@@ -4,24 +4,25 @@ import {
   bestPippengerWindow as sharedBestPippengerWindow,
   buildSparseSignedBucketMetadataWords,
   makeRandomScalarBatch,
-} from "./curvegpu/msm_shared";
+} from "./curvegpu/msm_shared.js";
 import {
+  appendMSMBenchmarkRows,
   benchmarkMSM,
-  formatMSMBenchmarkRow,
   MSMProfile,
-} from "./curvegpu/msm_bench_shared";
-import { runMSMBenchmarkPage } from "./curvegpu/msm_page_runner";
+} from "./curvegpu/msm_bench_shared.js";
+import { runMSMBenchmarkPage } from "./curvegpu/msm_page_runner.js";
 import {
   createBindGroupForBuffers as sharedCreateBindGroupForBuffers,
   createEmptyPointStorageBuffer as sharedCreateEmptyPointStorageBuffer,
   createMSMKernel as sharedCreateMSMKernel,
+  createMSMKernelSet,
   createParamsBuffer as sharedCreateParamsBuffer,
   createStorageBufferFromBytes,
   createU32StorageBuffer as sharedCreateU32StorageBuffer,
   Kernel,
   readbackBufferProfiled,
   submitKernelProfiled as sharedSubmitKernelProfiled,
-} from "./curvegpu/msm_gpu_runtime";
+} from "./curvegpu/msm_gpu_runtime.js";
 
 type AffinePoint = {
   x_bytes_le: string;
@@ -973,53 +974,56 @@ async function runBenchmark(): Promise<void> {
       ]);
       lines.push("3. Loading shader and generator metadata... OK");
       const kernel = createKernel(device, shaderText);
-      const pippengerKernels = {
-        bucket: createKernel(device, shaderText, "g1_msm_bucket_sparse_main"),
-        windowSparse: createKernel(device, shaderText, "g1_msm_window_sparse_main"),
-        combine: createKernel(device, shaderText, "g1_msm_combine_main"),
-      };
+      const pippengerKernels = createMSMKernelSet(device, shaderText, "bn254-g1", {
+        bucket: "g1_msm_bucket_sparse_main",
+        windowSparse: "g1_msm_window_sparse_main",
+        combine: "g1_msm_combine_main",
+      });
       return {
         context: { device, kernel, phase7, pippengerKernels },
         preMetricLines: ["4. Creating pipeline... OK"],
       };
     },
     runSizes: async ({ context, lines, initMs, minLog, maxLog, iters, writeLog }) => {
-      for (let logSize = minLog; logSize <= maxLog; logSize += 1) {
-        const size = 1 << logSize;
-        const bases = await buildBases(context.device, context.kernel, context.phase7.generator_affine, context.phase7.one_mont_z, size);
-        const scalars = makeMSMScalars(size);
-        const benchmarks = [
-          {
-            label: "msm_naive_affine",
-            window: 0,
-            run: () => runMSMProfiled(context.device, context.kernel, bases, scalars.hexes),
-          },
-          {
-            label: "msm_pippenger_affine",
-            window: bestPippengerWindow(size),
-            run: () =>
-              runPippengerMSMProfiled(
-                context.device,
-                context.pippengerKernels,
-                bases,
-                scalars,
-                bestPippengerWindow(size),
-              ),
-          },
-        ];
-        for (const bench of benchmarks) {
-          const benchmark = await benchmarkMSM(iters, bench.run);
-          lines.push(formatMSMBenchmarkRow({
+      await appendMSMBenchmarkRows({
+        lines,
+        initMs,
+        minLog,
+        maxLog,
+        iters,
+        writeLog,
+        makeSizeBenchmarks: async ({ size }) => {
+          const bases = await buildBases(
+            context.device,
+            context.kernel,
+            context.phase7.generator_affine,
+            context.phase7.one_mont_z,
             size,
-            label: bench.label,
-            window: bench.window,
-            initMs,
-            cold: benchmark.cold,
-            warm: benchmark.warm,
-          }));
-          writeLog(lines);
-        }
-      }
+          );
+          const scalars = makeMSMScalars(size);
+          return {
+            entries: [
+              {
+                label: "msm_naive_affine",
+                window: 0,
+                run: () => runMSMProfiled(context.device, context.kernel, bases, scalars.hexes),
+              },
+              {
+                label: "msm_pippenger_affine",
+                window: bestPippengerWindow(size),
+                run: () =>
+                  runPippengerMSMProfiled(
+                    context.device,
+                    context.pippengerKernels,
+                    bases,
+                    scalars,
+                    bestPippengerWindow(size),
+                  ),
+              },
+            ],
+          };
+        },
+      });
     },
   });
 }

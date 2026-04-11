@@ -1,4 +1,4 @@
-import { loadFieldKernel } from "./curvegpu/kernels";
+import { loadFieldKernel } from "./curvegpu/kernels.js";
 
 async function main(): Promise<void> {
   const log = document.getElementById("log");

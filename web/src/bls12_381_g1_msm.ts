@@ -4,7 +4,7 @@ import {
   bestPippengerWindow as sharedBestPippengerWindow,
   buildSparseSignedBucketMetadataWords,
   hexesToScalarWords,
-} from "./curvegpu/msm_shared";
+} from "./curvegpu/msm_shared.js";
 import {
   createBindGroupForBuffers as sharedCreateBindGroupForBuffers,
   createEmptyPointStorageBuffer as sharedCreateEmptyPointStorageBuffer,
@@ -15,7 +15,7 @@ import {
   Kernel as SharedMSMKernel,
   readbackBufferProfiled,
   submitKernelProfiled as sharedSubmitKernelProfiled,
-} from "./curvegpu/msm_gpu_runtime";
+} from "./curvegpu/msm_gpu_runtime.js";
 
 type AffinePoint = {
   x_bytes_le: string;

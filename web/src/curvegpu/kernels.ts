@@ -1,6 +1,6 @@
-import type { CurveID, FieldID, FieldShape } from "./types";
-import { shapeFor } from "./types";
-import { fetchShaderText } from "./shaders";
+import type { CurveID, FieldID, FieldShape } from "./types.js";
+import { shapeFor } from "./types.js";
+import { fetchShaderText } from "./shaders.js";
 
 export interface KernelDescriptor {
   curve: CurveID;

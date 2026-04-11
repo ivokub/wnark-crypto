@@ -47,6 +47,19 @@ export function createMSMKernel(
   return { pipeline, bindGroupLayout };
 }
 
+export function createMSMKernelSet<T extends Record<string, string>>(
+  device: GPUDevice,
+  shaderCode: string,
+  labelPrefix: string,
+  entryPoints: T,
+): { [K in keyof T]: Kernel } {
+  const out = {} as { [K in keyof T]: Kernel };
+  for (const [name, entryPoint] of Object.entries(entryPoints)) {
+    out[name as keyof T] = createMSMKernel(device, shaderCode, labelPrefix, entryPoint);
+  }
+  return out;
+}
+
 export function createStorageBufferFromBytes(
   device: GPUDevice,
   label: string,

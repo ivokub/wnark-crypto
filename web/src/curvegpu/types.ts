@@ -1,4 +1,4 @@
-import { GENERATED_SHAPES } from "./curve_shapes_gen";
+import { GENERATED_SHAPES } from "./curve_shapes_gen.js";
 
 export type CurveID = "bn254" | "bls12_381" | "bls12_377";
 export type FieldID = "fr" | "fp";
