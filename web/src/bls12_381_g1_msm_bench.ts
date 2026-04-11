@@ -10,6 +10,7 @@ import {
   formatMSMBenchmarkRow,
   MSMProfile,
 } from "./curvegpu/msm_bench_shared";
+import { runMSMBenchmarkPage } from "./curvegpu/msm_page_runner";
 import {
   createBindGroupForBuffers as sharedCreateBindGroupForBuffers,
   createEmptyPointStorageBuffer as sharedCreateEmptyPointStorageBuffer,
@@ -1058,104 +1059,85 @@ async function runPippengerMSMProfiled(
 }
 
 async function runBenchmark(): Promise<void> {
-  const lines = ["=== BLS12-381 G1 MSM Browser Benchmark ===", ""];
-  writeLog(lines);
-  setStatus("Running");
-  setPageState("running");
-  mustElement(runButton, "run").disabled = true;
-
-  try {
-    const minLog = Number.parseInt(mustElement(minLogEl, "min-log").value, 10);
-    const maxLog = Number.parseInt(mustElement(maxLogEl, "max-log").value, 10);
-    const iters = Number.parseInt(mustElement(itersEl, "iters").value, 10);
-    if (!Number.isInteger(minLog) || !Number.isInteger(maxLog) || !Number.isInteger(iters) || minLog < 1 || maxLog < minLog || iters < 1) {
-      throw new Error("invalid benchmark controls");
-    }
-    if (!navigator.gpu) {
-      throw new Error("WebGPU is not available in this browser");
-    }
-
-    const initStart = performance.now();
-    lines.push("1. Requesting adapter... OK");
-    const adapter = await navigator.gpu.requestAdapter();
-    if (!adapter) {
-      throw new Error("requestAdapter returned null");
-    }
-    await appendAdapterDiagnostics(adapter, lines);
-    lines.push("2. Requesting device... OK");
-    const device = await adapter.requestDevice();
-
-    const [shaderText, fixtureMeta] = await Promise.all([
-      fetchText("/shaders/curves/bls12_381/g1_msm.wgsl?v=1"),
-      fetchJSON<FixtureMetadata>("/testdata/fixtures/g1/bls12_381_bases_2pow19_jacobian.json?v=1"),
-    ]);
-    const fixtureLoadStart = performance.now();
-    const baseFixture = await fetchBytes("/testdata/fixtures/g1/bls12_381_bases_2pow19_jacobian.bin?v=1");
-    const fixtureLoadMs = performance.now() - fixtureLoadStart;
-    if (fixtureMeta.point_bytes !== POINT_BYTES) {
-      throw new Error(`unexpected fixture point size: ${fixtureMeta.point_bytes}`);
-    }
-    if (baseFixture.byteLength !== fixtureMeta.count * fixtureMeta.point_bytes) {
-      throw new Error(`fixture length mismatch: got ${baseFixture.byteLength}, want ${fixtureMeta.count * fixtureMeta.point_bytes}`);
-    }
-    lines.push("3. Loading shader and base fixture... OK");
-
-    const kernel = createKernel(device, shaderText);
-    const pippengerKernels = {
-      bucket: createKernel(device, shaderText, "g1_msm_bucket_sparse_main"),
-      weightBuckets: createKernel(device, shaderText, "g1_msm_weight_buckets_main"),
-      subsumPhase1: createKernel(device, shaderText, "g1_msm_subsum_phase1_main"),
-      combine: createKernel(device, shaderText, "g1_msm_combine_main"),
-    };
-    const initMs = performance.now() - initStart;
-    lines.push("4. Creating pipeline... OK");
-    lines.push(`init_ms = ${initMs.toFixed(3)}`);
-    lines.push(`fixture_load_ms = ${fixtureLoadMs.toFixed(3)}`);
-    lines.push("");
-    lines.push("size,op,window,init_ms,prep_ms,cold_partition_ms,cold_upload_ms,cold_kernel_ms,cold_readback_ms,cold_scalar_mul_total_ms,cold_bucket_reduction_ms,cold_window_reduction_ms,cold_final_reduction_ms,cold_reduction_total_ms,cold_total_ms,cold_with_init_prep_ms,warm_partition_ms,warm_upload_ms,warm_kernel_ms,warm_readback_ms,warm_scalar_mul_total_ms,warm_bucket_reduction_ms,warm_window_reduction_ms,warm_final_reduction_ms,warm_reduction_total_ms,warm_total_ms");
-
-    for (let logSize = minLog; logSize <= maxLog; logSize += 1) {
-      const size = 1 << logSize;
-      const prepStart = performance.now();
-      const bases = sliceBaseFixture(baseFixture, size);
-      const prepMs = performance.now() - prepStart;
-      const scalars = makeMSMScalars(size);
-      const benchmarks = [
-        {
-          label: "msm_pippenger_affine",
-          window: bestPippengerWindow(size),
-          run: () => runPippengerMSMProfiled(device, pippengerKernels, bases, scalars, bestPippengerWindow(size)),
-        },
-      ];
-      for (const bench of benchmarks) {
-        const benchmark = await benchmarkMSM(iters, bench.run);
-        lines.push(formatMSMBenchmarkRow({
-          size,
-          label: bench.label,
-          window: bench.window,
-          initMs,
-          prepMs,
-          includePrepMs: true,
-          cold: benchmark.cold,
-          warm: benchmark.warm,
-        }));
-        writeLog(lines);
+  await runMSMBenchmarkPage({
+    title: "BLS12-381 G1 MSM Browser Benchmark",
+    successMessage: "BLS12-381 G1 MSM browser benchmark completed",
+    tableHeader:
+      "size,op,window,init_ms,prep_ms,cold_partition_ms,cold_upload_ms,cold_kernel_ms,cold_readback_ms,cold_scalar_mul_total_ms,cold_bucket_reduction_ms,cold_window_reduction_ms,cold_final_reduction_ms,cold_reduction_total_ms,cold_total_ms,cold_with_init_prep_ms,warm_partition_ms,warm_upload_ms,warm_kernel_ms,warm_readback_ms,warm_scalar_mul_total_ms,warm_bucket_reduction_ms,warm_window_reduction_ms,warm_final_reduction_ms,warm_reduction_total_ms,warm_total_ms",
+    elements: {
+      minLogEl: mustElement(minLogEl, "min-log"),
+      maxLogEl: mustElement(maxLogEl, "max-log"),
+      itersEl: mustElement(itersEl, "iters"),
+      runButton: mustElement(runButton, "run"),
+    },
+    ui: { setStatus, setPageState, writeLog },
+    appendAdapterDiagnostics,
+    init: async ({ device, lines }) => {
+      const [shaderText, fixtureMeta] = await Promise.all([
+        fetchText("/shaders/curves/bls12_381/g1_msm.wgsl?v=1"),
+        fetchJSON<FixtureMetadata>("/testdata/fixtures/g1/bls12_381_bases_2pow19_jacobian.json?v=1"),
+      ]);
+      const fixtureLoadStart = performance.now();
+      const baseFixture = await fetchBytes("/testdata/fixtures/g1/bls12_381_bases_2pow19_jacobian.bin?v=1");
+      const fixtureLoadMs = performance.now() - fixtureLoadStart;
+      if (fixtureMeta.point_bytes !== POINT_BYTES) {
+        throw new Error(`unexpected fixture point size: ${fixtureMeta.point_bytes}`);
       }
-    }
-
-    lines.push("");
-    lines.push("PASS: BLS12-381 G1 MSM browser benchmark completed");
-    writeLog(lines);
-    setStatus("Pass");
-    setPageState("pass");
-  } catch (error) {
-    lines.push(`FAIL: ${error instanceof Error ? error.message : String(error)}`);
-    writeLog(lines);
-    setStatus("Fail");
-    setPageState("fail");
-  } finally {
-    mustElement(runButton, "run").disabled = false;
-  }
+      if (baseFixture.byteLength !== fixtureMeta.count * fixtureMeta.point_bytes) {
+        throw new Error(`fixture length mismatch: got ${baseFixture.byteLength}, want ${fixtureMeta.count * fixtureMeta.point_bytes}`);
+      }
+      lines.push("3. Loading shader and base fixture... OK");
+      const kernel = createKernel(device, shaderText);
+      const pippengerKernels = {
+        bucket: createKernel(device, shaderText, "g1_msm_bucket_sparse_main"),
+        weightBuckets: createKernel(device, shaderText, "g1_msm_weight_buckets_main"),
+        subsumPhase1: createKernel(device, shaderText, "g1_msm_subsum_phase1_main"),
+        combine: createKernel(device, shaderText, "g1_msm_combine_main"),
+      };
+      return {
+        context: { device, baseFixture, pippengerKernels },
+        preMetricLines: ["4. Creating pipeline... OK"],
+        postMetricLines: [`fixture_load_ms = ${fixtureLoadMs.toFixed(3)}`],
+      };
+    },
+    runSizes: async ({ context, lines, initMs, minLog, maxLog, iters, writeLog }) => {
+      for (let logSize = minLog; logSize <= maxLog; logSize += 1) {
+        const size = 1 << logSize;
+        const prepStart = performance.now();
+        const bases = sliceBaseFixture(context.baseFixture, size);
+        const prepMs = performance.now() - prepStart;
+        const scalars = makeMSMScalars(size);
+        const benchmarks = [
+          {
+            label: "msm_pippenger_affine",
+            window: bestPippengerWindow(size),
+            run: () =>
+              runPippengerMSMProfiled(
+                context.device,
+                context.pippengerKernels,
+                bases,
+                scalars,
+                bestPippengerWindow(size),
+              ),
+          },
+        ];
+        for (const bench of benchmarks) {
+          const benchmark = await benchmarkMSM(iters, bench.run);
+          lines.push(formatMSMBenchmarkRow({
+            size,
+            label: bench.label,
+            window: bench.window,
+            initMs,
+            prepMs,
+            includePrepMs: true,
+            cold: benchmark.cold,
+            warm: benchmark.warm,
+          }));
+          writeLog(lines);
+        }
+      }
+    },
+  });
 }
 
 mustElement(runButton, "run").addEventListener("click", () => {
