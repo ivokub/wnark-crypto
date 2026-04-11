@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BLS12-381 G1 Phase 8 Browser Smoke</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        background: #f5f1e8;
+        color: #1d232b;
+      }
+      body { margin: 0; padding: 32px; }
+      main {
+        max-width: 900px;
+        margin: 0 auto;
+        background: #fffaf0;
+        border: 1px solid #d8cdb9;
+        border-radius: 16px;
+        padding: 24px;
+      }
+      h1 { margin-top: 0; font-size: 24px; }
+      button {
+        font: inherit;
+        padding: 10px 16px;
+        border-radius: 10px;
+        border: 1px solid #8b7355;
+        background: #efe1c6;
+        cursor: pointer;
+      }
+      #status { margin-left: 12px; font-weight: 700; }
+      pre {
+        margin: 20px 0 0;
+        padding: 16px;
+        border-radius: 12px;
+        background: #1f2430;
+        color: #e6edf3;
+        overflow: auto;
+      }
+      body[data-status="pass"] #status { color: #1a7f37; }
+      body[data-status="fail"] #status { color: #cf222e; }
+    </style>
+  </head>
+  <body data-status="idle">
+    <main>
+      <h1>BLS12-381 G1 Phase 8 Browser Smoke</h1>
+      <p>This browser smoke test runs the BLS12-381 G1 naive and optimized MSM paths against shared vectors on WebGPU.</p>
+      <button id="run" type="button">Run</button><span id="status">Idle</span>
+      <pre id="log"></pre>
+    </main>
+    <script type="module" src="/web/dist/bls12_381_g1_msm.js?v=2"></script>
+  </body>
+</html>
