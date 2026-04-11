@@ -18,7 +18,7 @@ type ScalarMulCase = {
   scalar_mul_affine: JacobianPoint;
 };
 
-type ScalarMulBaseCase = {
+type BaseMulCase = {
   name: string;
   scalar_bytes_le: string;
   scalar_mul_base_affine: JacobianPoint;
@@ -26,15 +26,22 @@ type ScalarMulBaseCase = {
 
 type Phase7Vectors = {
   generator_affine: AffinePoint;
-  one_mont_z: string;
   scalar_cases: ScalarMulCase[];
-  base_cases: ScalarMulBaseCase[];
+  base_cases: BaseMulCase[];
 };
 
-declare const GPUShaderStage: {
-  COMPUTE: number;
+type G1ScalarConfig = {
+  curve: string;
+  title: string;
+  vectorPath: string;
+  shaderPath: string;
+  labelPrefix: string;
+  fpBytes: number;
+  pointBytes: number;
+  zeroHex: string;
 };
 
+declare const GPUShaderStage: { COMPUTE: number };
 declare const GPUBufferUsage: {
   STORAGE: number;
   COPY_DST: number;
@@ -42,21 +49,49 @@ declare const GPUBufferUsage: {
   MAP_READ: number;
   UNIFORM: number;
 };
+declare const GPUMapMode: { READ: number };
 
-declare const GPUMapMode: {
-  READ: number;
-};
-
-const G1_OP_SCALAR_MUL_AFFINE = 8;
-
-const FP_BYTES = 32;
-const POINT_BYTES = 96;
+const G1_OP_JAC_INFINITY = 1;
+const G1_OP_DOUBLE_JAC = 4;
+const G1_OP_ADD_MIXED = 5;
+const G1_OP_JAC_TO_AFFINE = 6;
 const UNIFORM_BYTES = 32;
-const ZERO_HEX = "0000000000000000000000000000000000000000000000000000000000000000";
+
+const CONFIGS: Record<string, G1ScalarConfig> = {
+  bn254: {
+    curve: "bn254",
+    title: "BN254 G1 Phase 7 Browser Smoke",
+    vectorPath: "/testdata/vectors/g1/bn254_phase7_scalar_mul.json",
+    shaderPath: "/shaders/curves/bn254/g1_arith.wgsl",
+    labelPrefix: "bn254-g1",
+    fpBytes: 32,
+    pointBytes: 96,
+    zeroHex: "0000000000000000000000000000000000000000000000000000000000000000",
+  },
+  bls12_381: {
+    curve: "bls12_381",
+    title: "BLS12-381 G1 Phase 7 Browser Smoke",
+    vectorPath: "/testdata/vectors/g1/bls12_381_phase7_scalar_mul.json?v=1",
+    shaderPath: "/shaders/curves/bls12_381/g1_arith.wgsl?v=1",
+    labelPrefix: "bls12-381-g1",
+    fpBytes: 48,
+    pointBytes: 144,
+    zeroHex: "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+  },
+};
 
 const runButton = document.getElementById("run") as HTMLButtonElement;
 const statusEl = document.getElementById("status") as HTMLSpanElement;
 const logEl = document.getElementById("log") as HTMLPreElement;
+
+function getConfig(): G1ScalarConfig {
+  const curve = new URLSearchParams(window.location.search).get("curve") ?? "bn254";
+  const config = CONFIGS[curve];
+  if (!config) {
+    throw new Error(`unsupported curve: ${curve}`);
+  }
+  return config;
+}
 
 function setStatus(text: string): void {
   statusEl.textContent = text;
@@ -78,8 +113,8 @@ async function fetchText(path: string): Promise<string> {
   return response.text();
 }
 
-async function fetchVectors(): Promise<Phase7Vectors> {
-  const text = await fetchText("/testdata/vectors/g1/bn254_phase7_scalar_mul.json");
+async function fetchVectors(config: G1ScalarConfig): Promise<Phase7Vectors> {
+  const text = await fetchText(config.vectorPath);
   return JSON.parse(text) as Phase7Vectors;
 }
 
@@ -87,9 +122,7 @@ async function getAdapterInfo(adapter: GPUAdapter): Promise<GPUAdapterInfo | nul
   if ("info" in adapter && adapter.info) {
     return adapter.info;
   }
-  const compatAdapter = adapter as GPUAdapter & {
-    requestAdapterInfo?: () => Promise<GPUAdapterInfo>;
-  };
+  const compatAdapter = adapter as GPUAdapter & { requestAdapterInfo?: () => Promise<GPUAdapterInfo> };
   if (typeof compatAdapter.requestAdapterInfo === "function") {
     try {
       return await compatAdapter.requestAdapterInfo();
@@ -109,12 +142,8 @@ async function appendAdapterDiagnostics(adapter: GPUAdapter, lines: string[]): P
     lines.push("adapter.info = unavailable");
     return;
   }
-  if (info.vendor) {
-    lines.push(`adapter.vendor = ${info.vendor}`);
-  }
-  if (info.architecture) {
-    lines.push(`adapter.architecture = ${info.architecture}`);
-  }
+  if (info.vendor) lines.push(`adapter.vendor = ${info.vendor}`);
+  if (info.architecture) lines.push(`adapter.architecture = ${info.architecture}`);
 }
 
 function hexToBytes(hex: string): Uint8Array {
@@ -133,16 +162,16 @@ function createStorageBuffer(device: GPUDevice, label: string, size: number, usa
   return device.createBuffer({ label, size, usage });
 }
 
-function createKernel(device: GPUDevice, shaderCode: string): {
+function createKernel(device: GPUDevice, shaderCode: string, config: G1ScalarConfig): {
   pipeline: GPUComputePipeline;
   bindGroupLayout: GPUBindGroupLayout;
 } {
   const shaderModule = device.createShaderModule({
-    label: "bn254-g1-shader",
+    label: `${config.labelPrefix}-shader`,
     code: shaderCode,
   });
   const bindGroupLayout = device.createBindGroupLayout({
-    label: "bn254-g1-bgl",
+    label: `${config.labelPrefix}-bgl`,
     entries: [
       { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
       { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
@@ -151,60 +180,81 @@ function createKernel(device: GPUDevice, shaderCode: string): {
     ],
   });
   const pipelineLayout = device.createPipelineLayout({
-    label: "bn254-g1-pl",
+    label: `${config.labelPrefix}-pl`,
     bindGroupLayouts: [bindGroupLayout],
   });
   const pipeline = device.createComputePipeline({
-    label: "bn254-g1-pipeline",
+    label: `${config.labelPrefix}-pipeline`,
     layout: pipelineLayout,
     compute: { module: shaderModule, entryPoint: "g1_ops_main" },
   });
   return { pipeline, bindGroupLayout };
 }
 
-function findOneMontZ(vectors: Phase7Vectors): string {
-  return vectors.one_mont_z;
-}
-
-function affineToKernelPoint(point: AffinePoint, oneMontZ: string): JacobianPoint {
-  const isInfinity = point.x_bytes_le === ZERO_HEX && point.y_bytes_le === ZERO_HEX;
+function affineToKernelPoint(point: AffinePoint, oneMontZ: string, zeroHex: string): JacobianPoint {
+  const isInfinity = point.x_bytes_le === zeroHex && point.y_bytes_le === zeroHex;
   return {
     x_bytes_le: point.x_bytes_le,
     y_bytes_le: point.y_bytes_le,
-    z_bytes_le: isInfinity ? ZERO_HEX : oneMontZ,
+    z_bytes_le: isInfinity ? zeroHex : oneMontZ,
   };
 }
 
-function scalarToKernelPoint(scalarHex: string): JacobianPoint {
-  return {
-    x_bytes_le: scalarHex,
-    y_bytes_le: ZERO_HEX,
-    z_bytes_le: ZERO_HEX,
-  };
-}
-
-function packPointBatch(points: readonly JacobianPoint[]): Uint8Array {
-  const out = new Uint8Array(points.length * POINT_BYTES);
+function packPointBatch(points: readonly JacobianPoint[], config: G1ScalarConfig): Uint8Array {
+  const out = new Uint8Array(points.length * config.pointBytes);
   points.forEach((point, index) => {
-    const base = index * POINT_BYTES;
+    const base = index * config.pointBytes;
     out.set(hexToBytes(point.x_bytes_le), base);
-    out.set(hexToBytes(point.y_bytes_le), base + FP_BYTES);
-    out.set(hexToBytes(point.z_bytes_le), base + 2 * FP_BYTES);
+    out.set(hexToBytes(point.y_bytes_le), base + config.fpBytes);
+    out.set(hexToBytes(point.z_bytes_le), base + 2 * config.fpBytes);
   });
   return out;
 }
 
-function unpackPointBatch(bytes: Uint8Array, count: number): JacobianPoint[] {
+function unpackPointBatch(bytes: Uint8Array, count: number, config: G1ScalarConfig): JacobianPoint[] {
   const out: JacobianPoint[] = [];
   for (let i = 0; i < count; i += 1) {
-    const base = i * POINT_BYTES;
+    const base = i * config.pointBytes;
     out.push({
-      x_bytes_le: bytesToHex(bytes.slice(base, base + FP_BYTES)),
-      y_bytes_le: bytesToHex(bytes.slice(base + FP_BYTES, base + 2 * FP_BYTES)),
-      z_bytes_le: bytesToHex(bytes.slice(base + 2 * FP_BYTES, base + 3 * FP_BYTES)),
+      x_bytes_le: bytesToHex(bytes.slice(base, base + config.fpBytes)),
+      y_bytes_le: bytesToHex(bytes.slice(base + config.fpBytes, base + 2 * config.fpBytes)),
+      z_bytes_le: bytesToHex(bytes.slice(base + 2 * config.fpBytes, base + 3 * config.fpBytes)),
     });
   }
   return out;
+}
+
+function findOneMontZ(vectors: Phase7Vectors, zeroHex: string): string {
+  for (const scalarCase of vectors.scalar_cases) {
+    if (scalarCase.scalar_mul_affine.z_bytes_le !== zeroHex) {
+      return scalarCase.scalar_mul_affine.z_bytes_le;
+    }
+  }
+  for (const baseCase of vectors.base_cases) {
+    if (baseCase.scalar_mul_base_affine.z_bytes_le !== zeroHex) {
+      return baseCase.scalar_mul_base_affine.z_bytes_le;
+    }
+  }
+  throw new Error("missing non-zero affine flag in vectors");
+}
+
+function zeroPoint(config: G1ScalarConfig): JacobianPoint {
+  return { x_bytes_le: config.zeroHex, y_bytes_le: config.zeroHex, z_bytes_le: config.zeroHex };
+}
+
+function scalarBit(scalarHexLE: string, bit: number): boolean {
+  const bytes = hexToBytes(scalarHexLE);
+  const byteIndex = Math.floor(bit / 8);
+  const bitIndex = bit % 8;
+  return ((bytes[byteIndex] >> bitIndex) & 1) !== 0;
+}
+
+function anyMask(mask: readonly boolean[]): boolean {
+  return mask.some(Boolean);
+}
+
+function maskedAffine(base: readonly JacobianPoint[], mask: readonly boolean[], config: G1ScalarConfig): JacobianPoint[] {
+  return base.map((point, index) => (mask[index] ? point : zeroPoint(config)));
 }
 
 function expectPointBatch(name: string, got: readonly JacobianPoint[], want: readonly JacobianPoint[]): void {
@@ -225,21 +275,22 @@ function expectPointBatch(name: string, got: readonly JacobianPoint[], want: rea
 async function runOp(
   device: GPUDevice,
   kernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
+  config: G1ScalarConfig,
   opcode: number,
   inputA: readonly JacobianPoint[],
   inputB: readonly JacobianPoint[],
 ): Promise<JacobianPoint[]> {
   const count = inputA.length;
-  const aBytes = packPointBatch(inputA);
-  const bBytes = packPointBatch(inputB);
-  const byteSize = count * POINT_BYTES;
+  const aBytes = packPointBatch(inputA, config);
+  const bBytes = packPointBatch(inputB, config);
+  const byteSize = count * config.pointBytes;
 
-  const inputABuffer = createStorageBuffer(device, "g1-input-a", byteSize, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-  const inputBBuffer = createStorageBuffer(device, "g1-input-b", byteSize, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-  const outputBuffer = createStorageBuffer(device, "g1-output", byteSize, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
-  const stagingBuffer = createStorageBuffer(device, "g1-staging", byteSize, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
+  const inputABuffer = createStorageBuffer(device, `${config.labelPrefix}-input-a`, byteSize, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  const inputBBuffer = createStorageBuffer(device, `${config.labelPrefix}-input-b`, byteSize, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  const outputBuffer = createStorageBuffer(device, `${config.labelPrefix}-output`, byteSize, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
+  const stagingBuffer = createStorageBuffer(device, `${config.labelPrefix}-staging`, byteSize, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
   const uniformBuffer = device.createBuffer({
-    label: "g1-params",
+    label: `${config.labelPrefix}-params`,
     size: UNIFORM_BYTES,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
@@ -252,7 +303,7 @@ async function runOp(
   device.queue.writeBuffer(uniformBuffer, 0, params.buffer);
 
   const bindGroup = device.createBindGroup({
-    label: "g1-bind-group",
+    label: `${config.labelPrefix}-bind-group`,
     layout: kernel.bindGroupLayout,
     entries: [
       { binding: 0, resource: { buffer: inputABuffer } },
@@ -262,8 +313,8 @@ async function runOp(
     ],
   });
 
-  const encoder = device.createCommandEncoder({ label: "g1-encoder" });
-  const pass = encoder.beginComputePass({ label: "g1-pass" });
+  const encoder = device.createCommandEncoder({ label: `${config.labelPrefix}-encoder` });
+  const pass = encoder.beginComputePass({ label: `${config.labelPrefix}-pass` });
   pass.setPipeline(kernel.pipeline);
   pass.setBindGroup(0, bindGroup);
   pass.dispatchWorkgroups(Math.ceil(count / 64));
@@ -281,11 +332,30 @@ async function runOp(
   stagingBuffer.destroy();
   uniformBuffer.destroy();
 
-  return unpackPointBatch(result, count);
+  return unpackPointBatch(result, count, config);
 }
 
-async function runSmoke(): Promise<void> {
-  const lines = ["=== BN254 G1 Phase 7 Browser Smoke ===", ""];
+async function runScalarMulAffine(
+  device: GPUDevice,
+  kernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
+  config: G1ScalarConfig,
+  base: readonly JacobianPoint[],
+  scalarsHexLE: readonly string[],
+): Promise<JacobianPoint[]> {
+  let acc = await runOp(device, kernel, config, G1_OP_JAC_INFINITY, base.map(() => zeroPoint(config)), base.map(() => zeroPoint(config)));
+  for (let bit = 255; bit >= 0; bit -= 1) {
+    acc = await runOp(device, kernel, config, G1_OP_DOUBLE_JAC, acc, acc.map(() => zeroPoint(config)));
+    const mask = scalarsHexLE.map((scalar) => scalarBit(scalar, bit));
+    if (!anyMask(mask)) {
+      continue;
+    }
+    acc = await runOp(device, kernel, config, G1_OP_ADD_MIXED, acc, maskedAffine(base, mask, config));
+  }
+  return runOp(device, kernel, config, G1_OP_JAC_TO_AFFINE, acc, acc.map(() => zeroPoint(config)));
+}
+
+async function runSmoke(config: G1ScalarConfig): Promise<void> {
+  const lines = [`=== ${config.title} ===`, ""];
   writeLog(lines);
   setStatus("Running");
   setPageState("running");
@@ -305,48 +375,42 @@ async function runSmoke(): Promise<void> {
     const device = await adapter.requestDevice();
     lines.push("2. Requesting device... OK");
 
-    const [shaderText, vectors] = await Promise.all([
-      fetchText("/shaders/curves/bn254/g1_arith.wgsl"),
-      fetchVectors(),
-    ]);
+    const [shaderText, vectors] = await Promise.all([fetchText(config.shaderPath), fetchVectors(config)]);
     lines.push("3. Loading shader and vectors... OK");
     lines.push(`cases.scalar = ${vectors.scalar_cases.length}`);
     lines.push(`cases.base = ${vectors.base_cases.length}`);
 
-    const kernel = createKernel(device, shaderText);
+    const kernel = createKernel(device, shaderText, config);
     lines.push("4. Creating pipeline... OK");
 
-    const oneMontZ = findOneMontZ(vectors);
-    const scalarBaseInputs = vectors.scalar_cases.map((item) => affineToKernelPoint(item.base_affine, oneMontZ));
-    const scalarInputs = vectors.scalar_cases.map((item) => scalarToKernelPoint(item.scalar_bytes_le));
+    const oneMontZ = findOneMontZ(vectors, config.zeroHex);
+    const scalarBaseInputs = vectors.scalar_cases.map((item) => affineToKernelPoint(item.base_affine, oneMontZ, config.zeroHex));
     const scalarWant = vectors.scalar_cases.map((item) => item.scalar_mul_affine);
 
     expectPointBatch(
       "scalar_mul_affine",
-      await runOp(device, kernel, G1_OP_SCALAR_MUL_AFFINE, scalarBaseInputs, scalarInputs),
+      await runScalarMulAffine(device, kernel, config, scalarBaseInputs, vectors.scalar_cases.map((item) => item.scalar_bytes_le)),
       scalarWant,
     );
     lines.push("scalar_mul_affine: OK");
 
-    const generatorKernel = affineToKernelPoint(vectors.generator_affine, oneMontZ);
+    const generatorKernel = affineToKernelPoint(vectors.generator_affine, oneMontZ, config.zeroHex);
     const baseInputs = vectors.base_cases.map(() => generatorKernel);
-    const baseScalarInputs = vectors.base_cases.map((item) => scalarToKernelPoint(item.scalar_bytes_le));
     const baseWant = vectors.base_cases.map((item) => item.scalar_mul_base_affine);
 
     expectPointBatch(
       "scalar_mul_base_affine",
-      await runOp(device, kernel, G1_OP_SCALAR_MUL_AFFINE, baseInputs, baseScalarInputs),
+      await runScalarMulAffine(device, kernel, config, baseInputs, vectors.base_cases.map((item) => item.scalar_bytes_le)),
       baseWant,
     );
     lines.push("scalar_mul_base_affine: OK");
 
     lines.push("");
-    lines.push("PASS: BN254 G1 Phase 7 browser smoke succeeded");
+    lines.push(`PASS: ${config.curve === "bn254" ? "BN254" : "BLS12-381"} G1 Phase 7 browser smoke succeeded`);
     writeLog(lines);
     setStatus("PASS");
     setPageState("pass");
   } catch (error) {
-    lines.push("");
     lines.push(`FAIL: ${error instanceof Error ? error.message : String(error)}`);
     writeLog(lines);
     setStatus("FAIL");
@@ -357,5 +421,5 @@ async function runSmoke(): Promise<void> {
 }
 
 runButton.addEventListener("click", () => {
-  void runSmoke();
+  void runSmoke(getConfig());
 });

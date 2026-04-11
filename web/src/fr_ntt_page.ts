@@ -1,5 +1,17 @@
 export {};
 
+type NTTConfig = {
+  curve: string;
+  title: string;
+  supported: boolean;
+  unsupportedReason?: string;
+  vectorPath?: string;
+  arithShaderPath?: string;
+  vectorShaderPath?: string;
+  nttShaderPath?: string;
+  labelPrefix?: string;
+};
+
 type NTTCase = {
   name: string;
   size: number;
@@ -15,10 +27,7 @@ type Phase5Vectors = {
   ntt_cases: NTTCase[];
 };
 
-declare const GPUShaderStage: {
-  COMPUTE: number;
-};
-
+declare const GPUShaderStage: { COMPUTE: number };
 declare const GPUBufferUsage: {
   STORAGE: number;
   COPY_DST: number;
@@ -26,19 +35,44 @@ declare const GPUBufferUsage: {
   MAP_READ: number;
   UNIFORM: number;
 };
-
-declare const GPUMapMode: {
-  READ: number;
-};
+declare const GPUMapMode: { READ: number };
 
 const FR_VECTOR_OP_MUL_FACTORS = 3;
 const FR_VECTOR_OP_BIT_REVERSE_COPY = 4;
 const ELEMENT_BYTES = 32;
 const UNIFORM_BYTES = 32;
 
+const CONFIGS: Record<string, NTTConfig> = {
+  bn254: {
+    curve: "bn254",
+    title: "BN254 fr NTT Browser Smoke",
+    supported: true,
+    vectorPath: "/testdata/vectors/fr/bn254_phase5_ntt.json",
+    arithShaderPath: "/shaders/curves/bn254/fr_arith.wgsl",
+    vectorShaderPath: "/shaders/curves/bn254/fr_vector.wgsl",
+    nttShaderPath: "/shaders/curves/bn254/fr_ntt.wgsl",
+    labelPrefix: "bn254-fr-ntt",
+  },
+  bls12_381: {
+    curve: "bls12_381",
+    title: "BLS12-381 fr NTT Browser Smoke",
+    supported: false,
+    unsupportedReason: "BLS12-381 NTT vectors and domain metadata are not implemented yet.",
+  },
+};
+
 const runButton = document.getElementById("run") as HTMLButtonElement;
 const statusEl = document.getElementById("status") as HTMLSpanElement;
 const logEl = document.getElementById("log") as HTMLPreElement;
+
+function getConfig(): NTTConfig {
+  const curve = new URLSearchParams(window.location.search).get("curve") ?? "bn254";
+  const config = CONFIGS[curve];
+  if (!config) {
+    throw new Error(`unsupported curve: ${curve}`);
+  }
+  return config;
+}
 
 function setStatus(text: string): void {
   statusEl.textContent = text;
@@ -60,18 +94,15 @@ async function fetchText(path: string): Promise<string> {
   return response.text();
 }
 
-async function fetchVectors(): Promise<Phase5Vectors> {
-  const text = await fetchText("/testdata/vectors/fr/bn254_phase5_ntt.json");
-  return JSON.parse(text) as Phase5Vectors;
+async function fetchVectors(config: NTTConfig): Promise<Phase5Vectors> {
+  return JSON.parse(await fetchText(config.vectorPath!)) as Phase5Vectors;
 }
 
 async function getAdapterInfo(adapter: GPUAdapter): Promise<GPUAdapterInfo | null> {
   if ("info" in adapter && adapter.info) {
     return adapter.info;
   }
-  const compatAdapter = adapter as GPUAdapter & {
-    requestAdapterInfo?: () => Promise<GPUAdapterInfo>;
-  };
+  const compatAdapter = adapter as GPUAdapter & { requestAdapterInfo?: () => Promise<GPUAdapterInfo> };
   if (typeof compatAdapter.requestAdapterInfo === "function") {
     try {
       return await compatAdapter.requestAdapterInfo();
@@ -91,12 +122,8 @@ async function appendAdapterDiagnostics(adapter: GPUAdapter, lines: string[]): P
     lines.push("adapter.info = unavailable");
     return;
   }
-  if (info.vendor) {
-    lines.push(`adapter.vendor = ${info.vendor}`);
-  }
-  if (info.architecture) {
-    lines.push(`adapter.architecture = ${info.architecture}`);
-  }
+  if (info.vendor) lines.push(`adapter.vendor = ${info.vendor}`);
+  if (info.architecture) lines.push(`adapter.architecture = ${info.architecture}`);
 }
 
 function hexToBytes(hex: string): Uint8Array {
@@ -137,10 +164,7 @@ function createKernel(device: GPUDevice, label: string, shaderCode: string, entr
       { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
     ],
   });
-  const pipelineLayout = device.createPipelineLayout({
-    label: `${label}-pl`,
-    bindGroupLayouts: [bindGroupLayout],
-  });
+  const pipelineLayout = device.createPipelineLayout({ label: `${label}-pl`, bindGroupLayouts: [bindGroupLayout] });
   const pipeline = device.createComputePipeline({
     label: `${label}-pipeline`,
     layout: pipelineLayout,
@@ -156,16 +180,13 @@ async function runBitReverse(
 ): Promise<string[]> {
   const count = inputHex.length;
   const dataBytes = count * ELEMENT_BYTES;
-  const zeros = inputHex.map(() => "0000000000000000000000000000000000000000000000000000000000000000");
+  const zeroHex = "0000000000000000000000000000000000000000000000000000000000000000";
+  const zeros = inputHex.map(() => zeroHex);
   const inputA = createStorageBuffer(device, "input-a", dataBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
   const inputB = createStorageBuffer(device, "input-b", dataBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
   const output = createStorageBuffer(device, "output", dataBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
   const staging = createStorageBuffer(device, "staging", dataBytes, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
-  const uniform = device.createBuffer({
-    label: "params",
-    size: UNIFORM_BYTES,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
+  const uniform = device.createBuffer({ label: "params", size: UNIFORM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
   const inputBytes = packHexBatch(inputHex);
   const zeroBytes = packHexBatch(zeros);
@@ -178,7 +199,6 @@ async function runBitReverse(
   device.queue.writeBuffer(uniform, 0, params.buffer);
 
   const bindGroup = device.createBindGroup({
-    label: "bind-group",
     layout: kernel.bindGroupLayout,
     entries: [
       { binding: 0, resource: { buffer: inputA } },
@@ -188,8 +208,8 @@ async function runBitReverse(
     ],
   });
 
-  const encoder = device.createCommandEncoder({ label: "encoder" });
-  const pass = encoder.beginComputePass({ label: "pass" });
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
   pass.setPipeline(kernel.pipeline);
   pass.setBindGroup(0, bindGroup);
   pass.dispatchWorkgroups(Math.ceil(count / 64));
@@ -211,7 +231,7 @@ async function runBitReverse(
   for (let i = 0; i < count; i += 1) {
     out.push(bytesToHex(view.slice(i * ELEMENT_BYTES, (i + 1) * ELEMENT_BYTES)));
   }
-  return out
+  return out;
 }
 
 async function runMulFactors(
@@ -227,11 +247,7 @@ async function runMulFactors(
   const inputB = createStorageBuffer(device, "input-b", dataBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
   const output = createStorageBuffer(device, "output", dataBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
   const staging = createStorageBuffer(device, "staging", dataBytes, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
-  const uniform = device.createBuffer({
-    label: "params",
-    size: UNIFORM_BYTES,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
+  const uniform = device.createBuffer({ label: "params", size: UNIFORM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
   const inputBytes = packHexBatch(inputHex);
   const factorBytes = packHexBatch(factorsHex);
@@ -243,7 +259,6 @@ async function runMulFactors(
   device.queue.writeBuffer(uniform, 0, params.buffer);
 
   const bindGroup = device.createBindGroup({
-    label: "bind-group",
     layout: kernel.bindGroupLayout,
     entries: [
       { binding: 0, resource: { buffer: inputA } },
@@ -253,8 +268,8 @@ async function runMulFactors(
     ],
   });
 
-  const encoder = device.createCommandEncoder({ label: "encoder" });
-  const pass = encoder.beginComputePass({ label: "pass" });
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
   pass.setPipeline(kernel.pipeline);
   pass.setBindGroup(0, bindGroup);
   pass.dispatchWorkgroups(Math.ceil(count / 64));
@@ -279,73 +294,70 @@ async function runMulFactors(
   return out;
 }
 
-async function runNTTStage(
+async function runNTTStages(
   device: GPUDevice,
-  kernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
+  nttKernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
   inputHex: readonly string[],
-  twiddlesHex: readonly string[],
-  m: number,
+  stageTwiddlesHex: readonly string[][],
 ): Promise<string[]> {
-  const count = inputHex.length;
-  const dataBytes = count * ELEMENT_BYTES;
-  const twiddleBytesSize = twiddlesHex.length * ELEMENT_BYTES;
-  const inputA = createStorageBuffer(device, "input-values", dataBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-  const inputB = createStorageBuffer(device, "input-twiddles", twiddleBytesSize, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-  const output = createStorageBuffer(device, "output", dataBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
-  const staging = createStorageBuffer(device, "staging", dataBytes, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
-  const uniform = device.createBuffer({
-    label: "params",
-    size: UNIFORM_BYTES,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
+  let state = [...inputHex];
+  for (let stage = 0; stage < stageTwiddlesHex.length; stage += 1) {
+    const count = state.length;
+    const dataBytes = count * ELEMENT_BYTES;
+    const twiddles = stageTwiddlesHex[stage];
+    const twiddleBytes = packHexBatch(twiddles);
+    const stateBytes = packHexBatch(state);
+    const inputA = createStorageBuffer(device, "ntt-input", dataBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    const inputB = createStorageBuffer(device, "ntt-twiddles", twiddleBytes.byteLength, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    const output = createStorageBuffer(device, "ntt-output", dataBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
+    const staging = createStorageBuffer(device, "ntt-staging", dataBytes, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
+    const uniform = device.createBuffer({ label: "ntt-params", size: UNIFORM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
-  const inputBytes = packHexBatch(inputHex);
-  const twiddleBytes = packHexBatch(twiddlesHex);
-  device.queue.writeBuffer(inputA, 0, inputBytes.buffer.slice(inputBytes.byteOffset, inputBytes.byteOffset + inputBytes.byteLength));
-  device.queue.writeBuffer(inputB, 0, twiddleBytes.buffer.slice(twiddleBytes.byteOffset, twiddleBytes.byteOffset + twiddleBytes.byteLength));
-  const params = new Uint32Array(UNIFORM_BYTES / 4);
-  params[0] = count;
-  params[1] = m;
-  device.queue.writeBuffer(uniform, 0, params.buffer);
+    device.queue.writeBuffer(inputA, 0, stateBytes.buffer.slice(stateBytes.byteOffset, stateBytes.byteOffset + stateBytes.byteLength));
+    device.queue.writeBuffer(inputB, 0, twiddleBytes.buffer.slice(twiddleBytes.byteOffset, twiddleBytes.byteOffset + twiddleBytes.byteLength));
+    const params = new Uint32Array(UNIFORM_BYTES / 4);
+    params[0] = count;
+    params[1] = stage;
+    device.queue.writeBuffer(uniform, 0, params.buffer);
 
-  const bindGroup = device.createBindGroup({
-    label: "bind-group",
-    layout: kernel.bindGroupLayout,
-    entries: [
-      { binding: 0, resource: { buffer: inputA } },
-      { binding: 1, resource: { buffer: inputB } },
-      { binding: 2, resource: { buffer: output } },
-      { binding: 3, resource: { buffer: uniform } },
-    ],
-  });
+    const bindGroup = device.createBindGroup({
+      layout: nttKernel.bindGroupLayout,
+      entries: [
+        { binding: 0, resource: { buffer: inputA } },
+        { binding: 1, resource: { buffer: inputB } },
+        { binding: 2, resource: { buffer: output } },
+        { binding: 3, resource: { buffer: uniform } },
+      ],
+    });
 
-  const encoder = device.createCommandEncoder({ label: "encoder" });
-  const pass = encoder.beginComputePass({ label: "pass" });
-  pass.setPipeline(kernel.pipeline);
-  pass.setBindGroup(0, bindGroup);
-  pass.dispatchWorkgroups(Math.ceil((count / 2) / 64));
-  pass.end();
-  encoder.copyBufferToBuffer(output, 0, staging, 0, dataBytes);
-  device.queue.submit([encoder.finish()]);
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(nttKernel.pipeline);
+    pass.setBindGroup(0, bindGroup);
+    pass.dispatchWorkgroups(Math.ceil(count / 64));
+    pass.end();
+    encoder.copyBufferToBuffer(output, 0, staging, 0, dataBytes);
+    device.queue.submit([encoder.finish()]);
 
-  await staging.mapAsync(GPUMapMode.READ);
-  const view = new Uint8Array(staging.getMappedRange()).slice();
-  staging.unmap();
+    await staging.mapAsync(GPUMapMode.READ);
+    const view = new Uint8Array(staging.getMappedRange()).slice();
+    staging.unmap();
 
-  inputA.destroy();
-  inputB.destroy();
-  output.destroy();
-  staging.destroy();
-  uniform.destroy();
+    inputA.destroy();
+    inputB.destroy();
+    output.destroy();
+    staging.destroy();
+    uniform.destroy();
 
-  const out: string[] = [];
-  for (let i = 0; i < count; i += 1) {
-    out.push(bytesToHex(view.slice(i * ELEMENT_BYTES, (i + 1) * ELEMENT_BYTES)));
+    state = [];
+    for (let i = 0; i < count; i += 1) {
+      state.push(bytesToHex(view.slice(i * ELEMENT_BYTES, (i + 1) * ELEMENT_BYTES)));
+    }
   }
-  return out;
+  return state;
 }
 
-function expectBatch(name: string, got: readonly string[], want: readonly string[]): void {
+function expectHexBatch(name: string, got: readonly string[], want: readonly string[]): void {
   if (got.length !== want.length) {
     throw new Error(`${name}: length mismatch got=${got.length} want=${want.length}`);
   }
@@ -356,43 +368,16 @@ function expectBatch(name: string, got: readonly string[], want: readonly string
   }
 }
 
-async function runForwardNTT(
-  device: GPUDevice,
-  vectorKernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
-  nttKernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
-  inputHex: readonly string[],
-  stageTwiddles: readonly string[][],
-): Promise<string[]> {
-  let state = await runBitReverse(device, vectorKernel, inputHex);
-  for (const twiddles of stageTwiddles) {
-    state = await runNTTStage(device, nttKernel, state, twiddles, twiddles.length);
-  }
-  return state;
-}
-
-async function runInverseNTT(
-  device: GPUDevice,
-  vectorKernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
-  nttKernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
-  inputHex: readonly string[],
-  inverseStageTwiddles: readonly string[][],
-  inverseScaleHex: string,
-): Promise<string[]> {
-  let state = await runBitReverse(device, vectorKernel, inputHex);
-  for (const twiddles of inverseStageTwiddles) {
-    state = await runNTTStage(device, nttKernel, state, twiddles, twiddles.length);
-  }
-  return runMulFactors(device, vectorKernel, state, inverseScaleHex);
-}
-
-async function runSmoke(): Promise<void> {
-  const lines = ["=== BN254 fr Phase 5 Browser Smoke ===", ""];
+async function runSmoke(config: NTTConfig): Promise<void> {
+  const lines = [`=== ${config.title} ===`, ""];
   writeLog(lines);
   setStatus("Running");
   setPageState("running");
   runButton.disabled = true;
-
   try {
+    if (!config.supported) {
+      throw new Error(config.unsupportedReason ?? `NTT is not implemented for ${config.curve}`);
+    }
     if (!navigator.gpu) {
       throw new Error("WebGPU is not available in this browser");
     }
@@ -402,40 +387,37 @@ async function runSmoke(): Promise<void> {
     }
     lines.push("1. Requesting adapter... OK");
     await appendAdapterDiagnostics(adapter, lines);
+
     const device = await adapter.requestDevice();
     lines.push("2. Requesting device... OK");
 
-    const [vectorShader, nttShader, vectors] = await Promise.all([
-      fetchText("/shaders/curves/bn254/fr_vector.wgsl"),
-      fetchText("/shaders/curves/bn254/fr_ntt.wgsl"),
-      fetchVectors(),
+    const [arithShader, vectorShader, nttShader, vectors] = await Promise.all([
+      fetchText(config.arithShaderPath!),
+      fetchText(config.vectorShaderPath!),
+      fetchText(config.nttShaderPath!),
+      fetchVectors(config),
     ]);
-    lines.push("3. Loading shaders and vectors... OK");
+    lines.push("3. Loading shader and vectors... OK");
     lines.push(`cases.ntt = ${vectors.ntt_cases.length}`);
 
-    const vectorKernel = createKernel(device, "bn254-fr-vector", vectorShader, "fr_vector_main");
-    const nttKernel = createKernel(device, "bn254-fr-ntt", nttShader, "fr_ntt_stage_main");
-    lines.push("4. Creating pipelines... OK");
+    const arithKernel = createKernel(device, `${config.labelPrefix}-arith`, arithShader, "fr_ops_main");
+    const vectorKernel = createKernel(device, `${config.labelPrefix}-vector`, vectorShader, "fr_vector_main");
+    const nttKernel = createKernel(device, `${config.labelPrefix}-ntt`, nttShader, "fr_ntt_stage_main");
+    lines.push("4. Creating pipeline... OK");
 
-    for (const nttCase of vectors.ntt_cases) {
-      const forward = await runForwardNTT(device, vectorKernel, nttKernel, nttCase.input_mont_le, nttCase.stage_twiddles_le);
-      expectBatch(`${nttCase.name}:forward`, forward, nttCase.forward_expected_le);
-
-      const inverse = await runInverseNTT(
-        device,
-        vectorKernel,
-        nttKernel,
-        forward,
-        nttCase.inverse_stage_twiddles_le,
-        nttCase.inverse_scale_le,
-      );
-      expectBatch(`${nttCase.name}:inverse`, inverse, nttCase.inverse_expected_le);
+    for (const item of vectors.ntt_cases) {
+      const bitReversed = await runBitReverse(device, vectorKernel, item.input_mont_le);
+      const forward = await runNTTStages(device, nttKernel, bitReversed, item.stage_twiddles_le);
+      expectHexBatch(`${item.name}: forward_ntt`, forward, item.forward_expected_le);
+      const inverseBitReversed = await runBitReverse(device, vectorKernel, forward);
+      const inverseStages = await runNTTStages(device, nttKernel, inverseBitReversed, item.inverse_stage_twiddles_le);
+      const inverse = await runMulFactors(device, vectorKernel, inverseStages, item.inverse_scale_le);
+      expectHexBatch(`${item.name}: inverse_ntt`, inverse, item.inverse_expected_le);
     }
-
     lines.push("forward_ntt: OK");
     lines.push("inverse_ntt: OK");
     lines.push("");
-    lines.push("PASS: BN254 fr Phase 5 browser smoke succeeded");
+    lines.push(`PASS: ${config.curve === "bn254" ? "BN254" : "BLS12-381"} fr NTT browser smoke succeeded`);
     writeLog(lines);
     setStatus("Pass");
     setPageState("pass");
@@ -450,5 +432,5 @@ async function runSmoke(): Promise<void> {
 }
 
 runButton.addEventListener("click", () => {
-  void runSmoke();
+  void runSmoke(getConfig());
 });
