@@ -42,6 +42,8 @@ type FixtureMetadata = {
   format: string;
 };
 
+type BaseSource = "fixture" | "server";
+
 type OpProfile = {
   uploadMs: number;
   kernelMs: number;
@@ -124,6 +126,25 @@ async function fetchBytes(path: string): Promise<Uint8Array> {
     throw new Error(`failed to load ${path}: ${response.status} ${response.statusText}`);
   }
   return new Uint8Array(await response.arrayBuffer());
+}
+
+function getBaseSource(): BaseSource {
+  const params = new URLSearchParams(window.location.search);
+  const source = params.get("base-source") ?? params.get("baseSource") ?? "fixture";
+  if (source === "server") {
+    return "server";
+  }
+  return "fixture";
+}
+
+function getBaseSeed(): number {
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get("seed");
+  if (!raw) {
+    return 1;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isInteger(parsed) ? parsed : 1;
 }
 
 async function getAdapterInfo(adapter: GPUAdapter): Promise<GPUAdapterInfo | null> {
@@ -927,6 +948,8 @@ async function runPippengerMSMProfiled(
 }
 
 async function runBenchmark(): Promise<void> {
+  const baseSource = getBaseSource();
+  const baseSeed = getBaseSeed();
   await runMSMBenchmarkPage({
     title: "BLS12-381 G1 MSM Browser Benchmark",
     successMessage: "BLS12-381 G1 MSM browser benchmark completed",
@@ -941,20 +964,28 @@ async function runBenchmark(): Promise<void> {
     ui: { setStatus, setPageState, writeLog },
     appendAdapterDiagnostics,
     init: async ({ device, lines }) => {
-      const [shaderText, fixtureMeta] = await Promise.all([
-        fetchText("/shaders/curves/bls12_381/g1_msm.wgsl?v=1"),
-        fetchJSON<FixtureMetadata>("/testdata/fixtures/g1/bls12_381_bases_2pow19_jacobian.json?v=1"),
-      ]);
-      const fixtureLoadStart = performance.now();
-      const baseFixture = await fetchBytes("/testdata/fixtures/g1/bls12_381_bases_2pow19_jacobian.bin?v=1");
-      const fixtureLoadMs = performance.now() - fixtureLoadStart;
-      if (fixtureMeta.point_bytes !== POINT_BYTES) {
-        throw new Error(`unexpected fixture point size: ${fixtureMeta.point_bytes}`);
+      const shaderText = await fetchText("/shaders/curves/bls12_381/g1_msm.wgsl?v=1");
+      let baseFixture: Uint8Array | null = null;
+      let fixtureMeta: FixtureMetadata | null = null;
+      let fixtureLoadMs = 0;
+      if (baseSource === "fixture") {
+        [fixtureMeta, baseFixture] = await Promise.all([
+          fetchJSON<FixtureMetadata>("/testdata/fixtures/g1/bls12_381_bases_2pow19_jacobian.json?v=1"),
+          (async () => {
+            const start = performance.now();
+            const bytes = await fetchBytes("/testdata/fixtures/g1/bls12_381_bases_2pow19_jacobian.bin?v=1");
+            fixtureLoadMs = performance.now() - start;
+            return bytes;
+          })(),
+        ]);
+        if (fixtureMeta.point_bytes !== POINT_BYTES) {
+          throw new Error(`unexpected fixture point size: ${fixtureMeta.point_bytes}`);
+        }
+        if (baseFixture.byteLength !== fixtureMeta.count * fixtureMeta.point_bytes) {
+          throw new Error(`fixture length mismatch: got ${baseFixture.byteLength}, want ${fixtureMeta.count * fixtureMeta.point_bytes}`);
+        }
       }
-      if (baseFixture.byteLength !== fixtureMeta.count * fixtureMeta.point_bytes) {
-        throw new Error(`fixture length mismatch: got ${baseFixture.byteLength}, want ${fixtureMeta.count * fixtureMeta.point_bytes}`);
-      }
-      lines.push("3. Loading shader and base fixture... OK");
+      lines.push(`3. Loading shader and base source... OK (${baseSource})`);
       const pippengerKernels = createMSMKernelSet(device, shaderText, "bls12-381-g1", {
         bucket: "g1_msm_bucket_sparse_main",
         weightBuckets: "g1_msm_weight_buckets_main",
@@ -962,9 +993,12 @@ async function runBenchmark(): Promise<void> {
         combine: "g1_msm_combine_main",
       });
       return {
-        context: { device, baseFixture, pippengerKernels },
+        context: { device, baseSource, baseSeed, baseFixture, fixtureMeta, pippengerKernels },
         preMetricLines: ["4. Creating pipeline... OK"],
-        postMetricLines: [`fixture_load_ms = ${fixtureLoadMs.toFixed(3)}`],
+        postMetricLines:
+          baseSource === "fixture"
+            ? [`fixture_load_ms = ${fixtureLoadMs.toFixed(3)}`]
+            : [`base_source = server`, `base_seed = ${baseSeed}`],
       };
     },
     runSizes: async ({ context, lines, initMs, minLog, maxLog, iters, writeLog }) => {
@@ -977,7 +1011,18 @@ async function runBenchmark(): Promise<void> {
         writeLog,
         makeSizeBenchmarks: async ({ size }) => {
           const prepStart = performance.now();
-          const bases = sliceBaseFixture(context.baseFixture, size);
+          let bases: Uint8Array;
+          if (context.baseSource === "fixture") {
+            if (!context.baseFixture || !context.fixtureMeta) {
+              throw new Error("fixture source selected but fixture was not loaded");
+            }
+            bases = sliceBaseFixture(context.baseFixture, size);
+          } else {
+            bases = await fetchBytes(`/api/bls12-381/g1/bases.bin?count=${size}&seed=${context.baseSeed}`);
+            if (bases.byteLength !== size * POINT_BYTES) {
+              throw new Error(`server base length mismatch: got ${bases.byteLength}, want ${size * POINT_BYTES}`);
+            }
+          }
           const prepMs = performance.now() - prepStart;
           const scalars = makeMSMScalars(size);
           return {
