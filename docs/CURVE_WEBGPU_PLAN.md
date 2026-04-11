@@ -30,6 +30,11 @@ This remains a primitive-layer project. It is not yet a Groth16 prover or pairin
   - benchmark helpers
   - benchmark page runner
   - sparse signed Pippenger benchmark driver
+- Shared browser benchmark base-source helpers now exist for both BN254 and BLS12-381.
+- A unified browser suite launcher now exists at `web/static/curvegpu.html`.
+- Unified MSM smoke and benchmark launchers now exist at:
+  - `web/static/msm.html`
+  - `web/static/msm_bench.html`
 
 ### BN254
 
@@ -63,6 +68,7 @@ This remains a primitive-layer project. It is not yet a Groth16 prover or pairin
 
 - Local Heliax `webgpu-groth16` MSM wrappers were benchmarked natively and in browser.
 - This gave an apples-to-apples BLS12-381 browser comparison against our framework.
+- A Go benchmark server now exists and serves deterministic BN254 and BLS12-381 base sets for browser MSM runs.
 
 ## Current Benchmark Picture
 
@@ -107,9 +113,9 @@ Continue reducing BN254/BLS12-381 duplication so the two paths differ mostly by 
 
 The target shape is a config-driven or generated MSM driver rather than handwritten per-curve benchmark pages.
 
-### 2. Add a Go-backed benchmark data server for large MSM runs
+### 2. Expand the Go-backed benchmark data server and fixture model
 
-The current BLS12-381 browser benchmark uses a static `2^19` base fixture. That is acceptable as a proving-key-style benchmark, but it has limits:
+The benchmark server is in place and already serves BN254 and BLS12-381 base sets, but the overall data-source model still needs refinement. The static `2^19` BLS12-381 fixture remains useful as a proving-key-style benchmark, but it has limits:
 
 - fixed maximum size
 - large static artifact
@@ -117,9 +123,9 @@ The current BLS12-381 browser benchmark uses a static `2^19` base fixture. That 
 
 Next benchmark infrastructure task:
 
-- add a small Go HTTP server that can serve benchmark assets
-- generate valid random or deterministic base points in Go via `gnark-crypto`
-- support large prefix slices on demand for browser benchmarks
+- keep growing the server-backed path as the primary large-run source
+- continue generating valid random or deterministic base points in Go via `gnark-crypto`
+- support larger prefix slices on demand for browser benchmarks
 - keep the existing static fixture path as a fallback
 
 This should better model the practical workflow of loading proving-key-like base sets without forcing us to check in larger and larger blobs.
@@ -144,6 +150,7 @@ There are still temporary or debugging artifacts in the repo that should be remo
 - stale one-off static harness copies
 - temporary benchmark/debug assets no longer used
 - placeholder files kept only for early bring-up
+- old per-suite page wrappers that are superseded by the unified launcher
 
 This cleanup should happen after the current shared-driver refactor is stable, so we do not delete files still serving as temporary references.
 
@@ -167,4 +174,4 @@ Current practical validation policy remains:
 
 ## Immediate Next Step
 
-Continue extracting the optimized browser MSM pipeline into a curve-config-driven shared driver, then add the Go-backed benchmark/base-point server for large BLS12-381 runs.
+Continue extracting the optimized browser MSM pipeline into a curve-config-driven shared driver, then start consolidating the remaining per-suite browser pages behind the unified launcher while cleaning out obsolete one-off harness files.
