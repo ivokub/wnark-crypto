@@ -33,10 +33,17 @@ type Phase3Vectors = {
   convert_cases: ConvertCase[];
 };
 
-declare const GPUShaderStage: {
-  COMPUTE: number;
+type FpOpsConfig = {
+  curve: string;
+  title: string;
+  vectorPath: string;
+  shaderPath: string;
+  labelPrefix: string;
+  elementBytes: number;
+  zeroHex: string;
 };
 
+declare const GPUShaderStage: { COMPUTE: number };
 declare const GPUBufferUsage: {
   STORAGE: number;
   COPY_DST: number;
@@ -44,10 +51,7 @@ declare const GPUBufferUsage: {
   MAP_READ: number;
   UNIFORM: number;
 };
-
-declare const GPUMapMode: {
-  READ: number;
-};
+declare const GPUMapMode: { READ: number };
 
 const FP_OP_COPY = 0;
 const FP_OP_ZERO = 1;
@@ -63,13 +67,41 @@ const FP_OP_SQUARE = 10;
 const FP_OP_TO_MONT = 11;
 const FP_OP_FROM_MONT = 12;
 
-const FP_ELEMENT_BYTES = 32;
 const FP_UNIFORM_BYTES = 32;
-const FP_ZERO_HEX = "0000000000000000000000000000000000000000000000000000000000000000";
+
+const CONFIGS: Record<string, FpOpsConfig> = {
+  bn254: {
+    curve: "bn254",
+    title: "BN254 fp Phase 3 Browser Smoke",
+    vectorPath: "/testdata/vectors/fp/bn254_phase3_ops.json",
+    shaderPath: "/shaders/curves/bn254/fp_arith.wgsl",
+    labelPrefix: "bn254-fp",
+    elementBytes: 32,
+    zeroHex: "0000000000000000000000000000000000000000000000000000000000000000",
+  },
+  bls12_381: {
+    curve: "bls12_381",
+    title: "BLS12-381 fp Phase 3 Browser Smoke",
+    vectorPath: "/testdata/vectors/fp/bls12_381_phase3_ops.json?v=1",
+    shaderPath: "/shaders/curves/bls12_381/fp_arith.wgsl?v=1",
+    labelPrefix: "bls12-381-fp",
+    elementBytes: 48,
+    zeroHex: "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+  },
+};
 
 const runButton = document.getElementById("run") as HTMLButtonElement;
 const statusEl = document.getElementById("status") as HTMLSpanElement;
 const logEl = document.getElementById("log") as HTMLPreElement;
+
+function getConfig(): FpOpsConfig {
+  const curve = new URLSearchParams(window.location.search).get("curve") ?? "bn254";
+  const config = CONFIGS[curve];
+  if (!config) {
+    throw new Error(`unsupported curve: ${curve}`);
+  }
+  return config;
+}
 
 function setStatus(text: string): void {
   statusEl.textContent = text;
@@ -98,14 +130,14 @@ function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function packHexBatch(hexValues: readonly string[]): Uint8Array {
-  const out = new Uint8Array(hexValues.length * FP_ELEMENT_BYTES);
+function packHexBatch(hexValues: readonly string[], elementBytes: number): Uint8Array {
+  const out = new Uint8Array(hexValues.length * elementBytes);
   hexValues.forEach((hex, index) => {
     const bytes = hexToBytes(hex);
-    if (bytes.length !== FP_ELEMENT_BYTES) {
-      throw new Error(`expected ${FP_ELEMENT_BYTES} bytes, got ${bytes.length}`);
+    if (bytes.length !== elementBytes) {
+      throw new Error(`expected ${elementBytes} bytes, got ${bytes.length}`);
     }
-    out.set(bytes, index * FP_ELEMENT_BYTES);
+    out.set(bytes, index * elementBytes);
   });
   return out;
 }
@@ -118,8 +150,8 @@ async function fetchText(path: string): Promise<string> {
   return response.text();
 }
 
-async function fetchVectors(): Promise<Phase3Vectors> {
-  const text = await fetchText("/testdata/vectors/fp/bn254_phase3_ops.json");
+async function fetchVectors(config: FpOpsConfig): Promise<Phase3Vectors> {
+  const text = await fetchText(config.vectorPath);
   return JSON.parse(text) as Phase3Vectors;
 }
 
@@ -127,9 +159,7 @@ async function getAdapterInfo(adapter: GPUAdapter): Promise<GPUAdapterInfo | nul
   if ("info" in adapter && adapter.info) {
     return adapter.info;
   }
-  const compatAdapter = adapter as GPUAdapter & {
-    requestAdapterInfo?: () => Promise<GPUAdapterInfo>;
-  };
+  const compatAdapter = adapter as GPUAdapter & { requestAdapterInfo?: () => Promise<GPUAdapterInfo> };
   if (typeof compatAdapter.requestAdapterInfo === "function") {
     try {
       return await compatAdapter.requestAdapterInfo();
@@ -149,26 +179,14 @@ async function appendAdapterDiagnostics(adapter: GPUAdapter, lines: string[]): P
     lines.push("adapter.info = unavailable");
     return;
   }
-  if (info.vendor) {
-    lines.push(`adapter.vendor = ${info.vendor}`);
-  }
-  if (info.architecture) {
-    lines.push(`adapter.architecture = ${info.architecture}`);
-  }
-  if (info.device) {
-    lines.push(`adapter.device = ${info.device}`);
-  }
-  if (info.description) {
-    lines.push(`adapter.description = ${info.description}`);
-  }
+  if (info.vendor) lines.push(`adapter.vendor = ${info.vendor}`);
+  if (info.architecture) lines.push(`adapter.architecture = ${info.architecture}`);
+  if (info.device) lines.push(`adapter.device = ${info.device}`);
+  if (info.description) lines.push(`adapter.description = ${info.description}`);
 }
 
 function createStorageBuffer(device: GPUDevice, label: string, size: number, usage: GPUBufferUsageFlags): GPUBuffer {
-  return device.createBuffer({
-    label,
-    size,
-    usage,
-  });
+  return device.createBuffer({ label, size, usage });
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -187,16 +205,16 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
   }
 }
 
-function createKernel(device: GPUDevice, shaderCode: string): {
+function createKernel(device: GPUDevice, shaderCode: string, config: FpOpsConfig): {
   pipeline: GPUComputePipeline;
   bindGroupLayout: GPUBindGroupLayout;
 } {
   const shaderModule = device.createShaderModule({
-    label: "bn254-fp-shader",
+    label: `${config.labelPrefix}-shader`,
     code: shaderCode,
   });
   const bindGroupLayout = device.createBindGroupLayout({
-    label: "bn254-fp-bgl",
+    label: `${config.labelPrefix}-bgl`,
     entries: [
       { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
       { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
@@ -205,16 +223,13 @@ function createKernel(device: GPUDevice, shaderCode: string): {
     ],
   });
   const pipelineLayout = device.createPipelineLayout({
-    label: "bn254-fp-pl",
+    label: `${config.labelPrefix}-pl`,
     bindGroupLayouts: [bindGroupLayout],
   });
   const pipeline = device.createComputePipeline({
-    label: "bn254-fp-pipeline",
+    label: `${config.labelPrefix}-pipeline`,
     layout: pipelineLayout,
-    compute: {
-      module: shaderModule,
-      entryPoint: "fp_ops_main",
-    },
+    compute: { module: shaderModule, entryPoint: "fp_ops_main" },
   });
   return { pipeline, bindGroupLayout };
 }
@@ -222,36 +237,37 @@ function createKernel(device: GPUDevice, shaderCode: string): {
 async function runOp(
   device: GPUDevice,
   kernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
+  config: FpOpsConfig,
   opcode: number,
   inputAHex: readonly string[],
   inputBHex: readonly string[],
 ): Promise<string[]> {
   const count = Math.max(inputAHex.length, inputBHex.length);
-  const zeros = Array.from({ length: count }, () => FP_ZERO_HEX);
+  const zeros = Array.from({ length: count }, () => config.zeroHex);
   const aHex = inputAHex.length === 0 ? zeros : inputAHex;
   const bHex = inputBHex.length === 0 ? zeros : inputBHex;
   if (aHex.length !== count || bHex.length !== count) {
     throw new Error("mismatched batch lengths");
   }
 
-  const inputBytes = count * FP_ELEMENT_BYTES;
+  const inputBytes = count * config.elementBytes;
   const paramsBytes = new Uint8Array(FP_UNIFORM_BYTES);
   const paramsView = new DataView(paramsBytes.buffer);
   paramsView.setUint32(0, count, true);
   paramsView.setUint32(4, opcode, true);
 
-  const inputABuffer = createStorageBuffer(device, "bn254-fp-input-a", inputBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-  const inputBBuffer = createStorageBuffer(device, "bn254-fp-input-b", inputBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-  const outputBuffer = createStorageBuffer(device, "bn254-fp-output", inputBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
-  const readbackBuffer = createStorageBuffer(device, "bn254-fp-readback", inputBytes, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
-  const uniformBuffer = createStorageBuffer(device, "bn254-fp-params", FP_UNIFORM_BYTES, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
+  const inputABuffer = createStorageBuffer(device, `${config.labelPrefix}-input-a`, inputBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  const inputBBuffer = createStorageBuffer(device, `${config.labelPrefix}-input-b`, inputBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  const outputBuffer = createStorageBuffer(device, `${config.labelPrefix}-output`, inputBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
+  const readbackBuffer = createStorageBuffer(device, `${config.labelPrefix}-readback`, inputBytes, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
+  const uniformBuffer = createStorageBuffer(device, `${config.labelPrefix}-params`, FP_UNIFORM_BYTES, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
 
-  device.queue.writeBuffer(inputABuffer, 0, packHexBatch(aHex));
-  device.queue.writeBuffer(inputBBuffer, 0, packHexBatch(bHex));
+  device.queue.writeBuffer(inputABuffer, 0, packHexBatch(aHex, config.elementBytes));
+  device.queue.writeBuffer(inputBBuffer, 0, packHexBatch(bHex, config.elementBytes));
   device.queue.writeBuffer(uniformBuffer, 0, paramsBytes);
 
   const bindGroup = device.createBindGroup({
-    label: "bn254-fp-bg",
+    label: `${config.labelPrefix}-bg`,
     layout: kernel.bindGroupLayout,
     entries: [
       { binding: 0, resource: { buffer: inputABuffer, size: inputBytes } },
@@ -261,7 +277,7 @@ async function runOp(
     ],
   });
 
-  const encoder = device.createCommandEncoder({ label: "bn254-fp-encoder" });
+  const encoder = device.createCommandEncoder({ label: `${config.labelPrefix}-encoder` });
   const pass = encoder.beginComputePass();
   pass.setPipeline(kernel.pipeline);
   pass.setBindGroup(0, bindGroup);
@@ -278,7 +294,7 @@ async function runOp(
 
   const out: string[] = [];
   for (let i = 0; i < count; i += 1) {
-    const slice = bytes.slice(i * FP_ELEMENT_BYTES, (i + 1) * FP_ELEMENT_BYTES);
+    const slice = bytes.slice(i * config.elementBytes, (i + 1) * config.elementBytes);
     out.push(bytesToHex(slice));
   }
   return out;
@@ -305,15 +321,11 @@ function mustFindConvertCase(cases: readonly ConvertCase[], name: string): Conve
 }
 
 function combineElementCases(vectors: Phase3Vectors): ElementCase[] {
-  return [
-    ...vectors.element_cases,
-    ...vectors.edge_cases,
-    ...vectors.differential_cases,
-  ];
+  return [...vectors.element_cases, ...vectors.edge_cases, ...vectors.differential_cases];
 }
 
-async function runBrowserSmoke(): Promise<string[]> {
-  const lines: string[] = ["=== BN254 fp Phase 3 Browser Smoke ===", ""];
+async function runBrowserSmoke(config: FpOpsConfig): Promise<string[]> {
+  const lines: string[] = [`=== ${config.title} ===`, ""];
   writeLog(lines);
 
   if (!("gpu" in navigator)) {
@@ -338,16 +350,13 @@ async function runBrowserSmoke(): Promise<string[]> {
 
   lines.push("3. Loading shader and vectors...");
   writeLog(lines);
-  const [shaderCode, vectors] = await Promise.all([
-    fetchText("/shaders/curves/bn254/fp_arith.wgsl"),
-    fetchVectors(),
-  ]);
+  const [shaderCode, vectors] = await Promise.all([fetchText(config.shaderPath), fetchVectors(config)]);
   lines[lines.length - 1] += " OK";
   writeLog(lines);
 
   lines.push("4. Creating pipeline...");
   writeLog(lines);
-  const kernel = createKernel(device, shaderCode);
+  const kernel = createKernel(device, shaderCode, config);
   lines[lines.length - 1] += " OK";
   lines.push(`cases.sanity = ${vectors.element_cases.length}`);
   lines.push(`cases.edge = ${vectors.edge_cases.length}`);
@@ -359,88 +368,71 @@ async function runBrowserSmoke(): Promise<string[]> {
   const elementCases = combineElementCases(vectors);
   const aHex = elementCases.map((item) => item.a_bytes_le);
   const bHex = elementCases.map((item) => item.b_bytes_le);
-  const zeros = Array.from({ length: elementCases.length }, () => FP_ZERO_HEX);
+  const zeros = Array.from({ length: elementCases.length }, () => config.zeroHex);
   const oneMontHex = mustFindConvertCase(vectors.convert_cases, "one").mont_bytes_le;
 
-  verifyBatch("copy", await runOp(device, kernel, FP_OP_COPY, aHex, bHex), aHex, lines);
+  verifyBatch("copy", await runOp(device, kernel, config, FP_OP_COPY, aHex, bHex), aHex, lines);
   writeLog(lines);
-  verifyBatch("equal", await runOp(device, kernel, FP_OP_EQUAL, aHex, bHex), elementCases.map((item) => item.equal_bytes_le), lines);
+  verifyBatch("equal", await runOp(device, kernel, config, FP_OP_EQUAL, aHex, bHex), elementCases.map((item) => item.equal_bytes_le), lines);
   writeLog(lines);
-  verifyBatch("zero", await runOp(device, kernel, FP_OP_ZERO, zeros, zeros), zeros, lines);
+  verifyBatch("zero", await runOp(device, kernel, config, FP_OP_ZERO, zeros, zeros), zeros, lines);
   writeLog(lines);
-  verifyBatch("one", await runOp(device, kernel, FP_OP_ONE, zeros, zeros), Array.from({ length: elementCases.length }, () => oneMontHex), lines);
+  verifyBatch("one", await runOp(device, kernel, config, FP_OP_ONE, zeros, zeros), Array.from({ length: elementCases.length }, () => oneMontHex), lines);
   writeLog(lines);
-  verifyBatch("add", await runOp(device, kernel, FP_OP_ADD, aHex, bHex), elementCases.map((item) => item.add_bytes_le), lines);
+  verifyBatch("add", await runOp(device, kernel, config, FP_OP_ADD, aHex, bHex), elementCases.map((item) => item.add_bytes_le), lines);
   writeLog(lines);
-  verifyBatch("sub", await runOp(device, kernel, FP_OP_SUB, aHex, bHex), elementCases.map((item) => item.sub_bytes_le), lines);
+  verifyBatch("sub", await runOp(device, kernel, config, FP_OP_SUB, aHex, bHex), elementCases.map((item) => item.sub_bytes_le), lines);
   writeLog(lines);
-  verifyBatch("neg", await runOp(device, kernel, FP_OP_NEG, aHex, zeros), elementCases.map((item) => item.neg_a_bytes_le), lines);
+  verifyBatch("neg", await runOp(device, kernel, config, FP_OP_NEG, aHex, zeros), elementCases.map((item) => item.neg_a_bytes_le), lines);
   writeLog(lines);
-  verifyBatch("double", await runOp(device, kernel, FP_OP_DOUBLE, aHex, zeros), elementCases.map((item) => item.double_a_bytes_le), lines);
+  verifyBatch("double", await runOp(device, kernel, config, FP_OP_DOUBLE, aHex, zeros), elementCases.map((item) => item.double_a_bytes_le), lines);
   writeLog(lines);
-  verifyBatch("mul", await runOp(device, kernel, FP_OP_MUL, aHex, bHex), elementCases.map((item) => item.mul_bytes_le), lines);
+  verifyBatch("mul", await runOp(device, kernel, config, FP_OP_MUL, aHex, bHex), elementCases.map((item) => item.mul_bytes_le), lines);
   writeLog(lines);
-  verifyBatch("square", await runOp(device, kernel, FP_OP_SQUARE, aHex, zeros), elementCases.map((item) => item.square_a_bytes_le), lines);
+  verifyBatch("square", await runOp(device, kernel, config, FP_OP_SQUARE, aHex, zeros), elementCases.map((item) => item.square_a_bytes_le), lines);
   writeLog(lines);
   verifyBatch(
     "to_mont",
-    await runOp(
-      device,
-      kernel,
-      FP_OP_TO_MONT,
-      vectors.convert_cases.map((item) => item.regular_bytes_le),
-      Array.from({ length: vectors.convert_cases.length }, () => FP_ZERO_HEX),
-    ),
+    await runOp(device, kernel, config, FP_OP_TO_MONT, vectors.convert_cases.map((item) => item.regular_bytes_le), Array.from({ length: vectors.convert_cases.length }, () => config.zeroHex)),
     vectors.convert_cases.map((item) => item.mont_bytes_le),
     lines,
   );
   writeLog(lines);
   verifyBatch(
     "from_mont",
-    await runOp(
-      device,
-      kernel,
-      FP_OP_FROM_MONT,
-      vectors.convert_cases.map((item) => item.mont_bytes_le),
-      Array.from({ length: vectors.convert_cases.length }, () => FP_ZERO_HEX),
-    ),
+    await runOp(device, kernel, config, FP_OP_FROM_MONT, vectors.convert_cases.map((item) => item.mont_bytes_le), Array.from({ length: vectors.convert_cases.length }, () => config.zeroHex)),
     vectors.convert_cases.map((item) => item.regular_bytes_le),
     lines,
   );
   writeLog(lines);
   verifyBatch(
     "normalize",
-    await runOp(
-      device,
-      kernel,
-      FP_OP_NORMALIZE,
-      vectors.normalize_cases.map((item) => item.input_bytes_le),
-      Array.from({ length: vectors.normalize_cases.length }, () => FP_ZERO_HEX),
-    ),
+    await runOp(device, kernel, config, FP_OP_NORMALIZE, vectors.normalize_cases.map((item) => item.input_bytes_le), Array.from({ length: vectors.normalize_cases.length }, () => config.zeroHex)),
     vectors.normalize_cases.map((item) => item.expected_bytes_le),
     lines,
   );
   writeLog(lines);
 
   lines.push("");
-  lines.push("PASS: BN254 fp browser smoke succeeded");
+  lines.push(`PASS: ${config.curve === "bn254" ? "BN254" : "BLS12-381"} fp browser smoke succeeded`);
   writeLog(lines);
   return lines;
 }
 
 async function main(): Promise<void> {
+  const config = getConfig();
   runButton.disabled = true;
   setPageState("running");
   setStatus("Running");
 
   try {
-    const lines = await runBrowserSmoke();
+    const lines = await runBrowserSmoke(config);
     writeLog(lines);
     setPageState("pass");
     setStatus("Pass");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    writeLog(["=== BN254 fp Phase 3 Browser Smoke ===", "", `FAIL: ${message}`]);
+    writeLog([`=== ${config.title} ===`, "", `FAIL: ${message}`]);
     setPageState("fail");
     setStatus("Fail");
     throw error;
@@ -453,13 +445,10 @@ runButton.addEventListener("click", () => {
   void main();
 });
 
+const config = getConfig();
 const params = new URLSearchParams(window.location.search);
 if (params.get("autorun") === "1") {
   void main();
 } else {
-  writeLog([
-    "=== BN254 fp Phase 3 Browser Smoke ===",
-    "",
-    "Press Run to execute the BN254 fp smoke test in browser WebGPU.",
-  ]);
+  writeLog([`=== ${config.title} ===`, "", `Press Run to execute the ${config.curve} fp smoke test in browser WebGPU.`]);
 }

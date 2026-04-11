@@ -27,10 +27,18 @@ type Phase6Vectors = {
   point_cases: G1Case[];
 };
 
-declare const GPUShaderStage: {
-  COMPUTE: number;
+type G1OpsConfig = {
+  curve: string;
+  title: string;
+  vectorPath: string;
+  shaderPath: string;
+  labelPrefix: string;
+  fpBytes: number;
+  pointBytes: number;
+  zeroHex: string;
 };
 
+declare const GPUShaderStage: { COMPUTE: number };
 declare const GPUBufferUsage: {
   STORAGE: number;
   COPY_DST: number;
@@ -38,10 +46,7 @@ declare const GPUBufferUsage: {
   MAP_READ: number;
   UNIFORM: number;
 };
-
-declare const GPUMapMode: {
-  READ: number;
-};
+declare const GPUMapMode: { READ: number };
 
 const G1_OP_COPY = 0;
 const G1_OP_JAC_INFINITY = 1;
@@ -52,14 +57,43 @@ const G1_OP_ADD_MIXED = 5;
 const G1_OP_JAC_TO_AFFINE = 6;
 const G1_OP_AFFINE_ADD = 7;
 
-const FP_BYTES = 32;
-const POINT_BYTES = 96;
 const UNIFORM_BYTES = 32;
-const ZERO_HEX = "0000000000000000000000000000000000000000000000000000000000000000";
+
+const CONFIGS: Record<string, G1OpsConfig> = {
+  bn254: {
+    curve: "bn254",
+    title: "BN254 G1 Phase 6 Browser Smoke",
+    vectorPath: "/testdata/vectors/g1/bn254_phase6_g1_ops.json",
+    shaderPath: "/shaders/curves/bn254/g1_arith.wgsl",
+    labelPrefix: "bn254-g1",
+    fpBytes: 32,
+    pointBytes: 96,
+    zeroHex: "0000000000000000000000000000000000000000000000000000000000000000",
+  },
+  bls12_381: {
+    curve: "bls12_381",
+    title: "BLS12-381 G1 Phase 6 Browser Smoke",
+    vectorPath: "/testdata/vectors/g1/bls12_381_phase6_g1_ops.json?v=1",
+    shaderPath: "/shaders/curves/bls12_381/g1_arith.wgsl?v=1",
+    labelPrefix: "bls12-381-g1",
+    fpBytes: 48,
+    pointBytes: 144,
+    zeroHex: "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+  },
+};
 
 const runButton = document.getElementById("run") as HTMLButtonElement;
 const statusEl = document.getElementById("status") as HTMLSpanElement;
 const logEl = document.getElementById("log") as HTMLPreElement;
+
+function getConfig(): G1OpsConfig {
+  const curve = new URLSearchParams(window.location.search).get("curve") ?? "bn254";
+  const config = CONFIGS[curve];
+  if (!config) {
+    throw new Error(`unsupported curve: ${curve}`);
+  }
+  return config;
+}
 
 function setStatus(text: string): void {
   statusEl.textContent = text;
@@ -81,8 +115,8 @@ async function fetchText(path: string): Promise<string> {
   return response.text();
 }
 
-async function fetchVectors(): Promise<Phase6Vectors> {
-  const text = await fetchText("/testdata/vectors/g1/bn254_phase6_g1_ops.json");
+async function fetchVectors(config: G1OpsConfig): Promise<Phase6Vectors> {
+  const text = await fetchText(config.vectorPath);
   return JSON.parse(text) as Phase6Vectors;
 }
 
@@ -90,9 +124,7 @@ async function getAdapterInfo(adapter: GPUAdapter): Promise<GPUAdapterInfo | nul
   if ("info" in adapter && adapter.info) {
     return adapter.info;
   }
-  const compatAdapter = adapter as GPUAdapter & {
-    requestAdapterInfo?: () => Promise<GPUAdapterInfo>;
-  };
+  const compatAdapter = adapter as GPUAdapter & { requestAdapterInfo?: () => Promise<GPUAdapterInfo> };
   if (typeof compatAdapter.requestAdapterInfo === "function") {
     try {
       return await compatAdapter.requestAdapterInfo();
@@ -112,12 +144,8 @@ async function appendAdapterDiagnostics(adapter: GPUAdapter, lines: string[]): P
     lines.push("adapter.info = unavailable");
     return;
   }
-  if (info.vendor) {
-    lines.push(`adapter.vendor = ${info.vendor}`);
-  }
-  if (info.architecture) {
-    lines.push(`adapter.architecture = ${info.architecture}`);
-  }
+  if (info.vendor) lines.push(`adapter.vendor = ${info.vendor}`);
+  if (info.architecture) lines.push(`adapter.architecture = ${info.architecture}`);
 }
 
 function hexToBytes(hex: string): Uint8Array {
@@ -136,16 +164,16 @@ function createStorageBuffer(device: GPUDevice, label: string, size: number, usa
   return device.createBuffer({ label, size, usage });
 }
 
-function createKernel(device: GPUDevice, shaderCode: string): {
+function createKernel(device: GPUDevice, shaderCode: string, config: G1OpsConfig): {
   pipeline: GPUComputePipeline;
   bindGroupLayout: GPUBindGroupLayout;
 } {
   const shaderModule = device.createShaderModule({
-    label: "bn254-g1-shader",
+    label: `${config.labelPrefix}-shader`,
     code: shaderCode,
   });
   const bindGroupLayout = device.createBindGroupLayout({
-    label: "bn254-g1-bgl",
+    label: `${config.labelPrefix}-bgl`,
     entries: [
       { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
       { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
@@ -154,54 +182,54 @@ function createKernel(device: GPUDevice, shaderCode: string): {
     ],
   });
   const pipelineLayout = device.createPipelineLayout({
-    label: "bn254-g1-pl",
+    label: `${config.labelPrefix}-pl`,
     bindGroupLayouts: [bindGroupLayout],
   });
   const pipeline = device.createComputePipeline({
-    label: "bn254-g1-pipeline",
+    label: `${config.labelPrefix}-pipeline`,
     layout: pipelineLayout,
     compute: { module: shaderModule, entryPoint: "g1_ops_main" },
   });
   return { pipeline, bindGroupLayout };
 }
 
-function findOneMontZ(vectors: Phase6Vectors): string {
+function findOneMontZ(vectors: Phase6Vectors, zeroHex: string): string {
   for (const pointCase of vectors.point_cases) {
-    if (pointCase.p_jacobian.z_bytes_le !== ZERO_HEX) {
+    if (pointCase.p_jacobian.z_bytes_le !== zeroHex) {
       return pointCase.p_jacobian.z_bytes_le;
     }
   }
   throw new Error("missing non-zero affine flag in vectors");
 }
 
-function affineToKernelPoint(point: AffinePoint, oneMontZ: string): JacobianPoint {
-  const isInfinity = point.x_bytes_le === ZERO_HEX && point.y_bytes_le === ZERO_HEX;
+function affineToKernelPoint(point: AffinePoint, oneMontZ: string, zeroHex: string): JacobianPoint {
+  const isInfinity = point.x_bytes_le === zeroHex && point.y_bytes_le === zeroHex;
   return {
     x_bytes_le: point.x_bytes_le,
     y_bytes_le: point.y_bytes_le,
-    z_bytes_le: isInfinity ? ZERO_HEX : oneMontZ,
+    z_bytes_le: isInfinity ? zeroHex : oneMontZ,
   };
 }
 
-function packPointBatch(points: readonly JacobianPoint[]): Uint8Array {
-  const out = new Uint8Array(points.length * POINT_BYTES);
+function packPointBatch(points: readonly JacobianPoint[], config: G1OpsConfig): Uint8Array {
+  const out = new Uint8Array(points.length * config.pointBytes);
   points.forEach((point, index) => {
-    const base = index * POINT_BYTES;
+    const base = index * config.pointBytes;
     out.set(hexToBytes(point.x_bytes_le), base);
-    out.set(hexToBytes(point.y_bytes_le), base + FP_BYTES);
-    out.set(hexToBytes(point.z_bytes_le), base + 2 * FP_BYTES);
+    out.set(hexToBytes(point.y_bytes_le), base + config.fpBytes);
+    out.set(hexToBytes(point.z_bytes_le), base + 2 * config.fpBytes);
   });
   return out;
 }
 
-function unpackPointBatch(bytes: Uint8Array, count: number): JacobianPoint[] {
+function unpackPointBatch(bytes: Uint8Array, count: number, config: G1OpsConfig): JacobianPoint[] {
   const out: JacobianPoint[] = [];
   for (let i = 0; i < count; i += 1) {
-    const base = i * POINT_BYTES;
+    const base = i * config.pointBytes;
     out.push({
-      x_bytes_le: bytesToHex(bytes.slice(base, base + FP_BYTES)),
-      y_bytes_le: bytesToHex(bytes.slice(base + FP_BYTES, base + 2 * FP_BYTES)),
-      z_bytes_le: bytesToHex(bytes.slice(base + 2 * FP_BYTES, base + 3 * FP_BYTES)),
+      x_bytes_le: bytesToHex(bytes.slice(base, base + config.fpBytes)),
+      y_bytes_le: bytesToHex(bytes.slice(base + config.fpBytes, base + 2 * config.fpBytes)),
+      z_bytes_le: bytesToHex(bytes.slice(base + 2 * config.fpBytes, base + 3 * config.fpBytes)),
     });
   }
   return out;
@@ -212,11 +240,7 @@ function expectPointBatch(name: string, got: readonly JacobianPoint[], want: rea
     throw new Error(`${name}: length mismatch got=${got.length} want=${want.length}`);
   }
   for (let i = 0; i < got.length; i += 1) {
-    if (
-      got[i].x_bytes_le !== want[i].x_bytes_le ||
-      got[i].y_bytes_le !== want[i].y_bytes_le ||
-      got[i].z_bytes_le !== want[i].z_bytes_le
-    ) {
+    if (got[i].x_bytes_le !== want[i].x_bytes_le || got[i].y_bytes_le !== want[i].y_bytes_le || got[i].z_bytes_le !== want[i].z_bytes_le) {
       throw new Error(`${name}: mismatch at index ${i}`);
     }
   }
@@ -225,21 +249,22 @@ function expectPointBatch(name: string, got: readonly JacobianPoint[], want: rea
 async function runOp(
   device: GPUDevice,
   kernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
+  config: G1OpsConfig,
   opcode: number,
   inputA: readonly JacobianPoint[],
   inputB: readonly JacobianPoint[],
 ): Promise<JacobianPoint[]> {
   const count = inputA.length;
-  const aBytes = packPointBatch(inputA);
-  const bBytes = packPointBatch(inputB);
-  const byteSize = count * POINT_BYTES;
+  const aBytes = packPointBatch(inputA, config);
+  const bBytes = packPointBatch(inputB, config);
+  const byteSize = count * config.pointBytes;
 
-  const inputABuffer = createStorageBuffer(device, "g1-input-a", byteSize, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-  const inputBBuffer = createStorageBuffer(device, "g1-input-b", byteSize, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-  const outputBuffer = createStorageBuffer(device, "g1-output", byteSize, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
-  const stagingBuffer = createStorageBuffer(device, "g1-staging", byteSize, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
+  const inputABuffer = createStorageBuffer(device, `${config.labelPrefix}-input-a`, byteSize, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  const inputBBuffer = createStorageBuffer(device, `${config.labelPrefix}-input-b`, byteSize, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  const outputBuffer = createStorageBuffer(device, `${config.labelPrefix}-output`, byteSize, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
+  const stagingBuffer = createStorageBuffer(device, `${config.labelPrefix}-staging`, byteSize, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
   const uniformBuffer = device.createBuffer({
-    label: "g1-params",
+    label: `${config.labelPrefix}-params`,
     size: UNIFORM_BYTES,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
@@ -252,7 +277,7 @@ async function runOp(
   device.queue.writeBuffer(uniformBuffer, 0, params.buffer);
 
   const bindGroup = device.createBindGroup({
-    label: "g1-bind-group",
+    label: `${config.labelPrefix}-bind-group`,
     layout: kernel.bindGroupLayout,
     entries: [
       { binding: 0, resource: { buffer: inputABuffer } },
@@ -262,8 +287,8 @@ async function runOp(
     ],
   });
 
-  const encoder = device.createCommandEncoder({ label: "g1-encoder" });
-  const pass = encoder.beginComputePass({ label: "g1-pass" });
+  const encoder = device.createCommandEncoder({ label: `${config.labelPrefix}-encoder` });
+  const pass = encoder.beginComputePass({ label: `${config.labelPrefix}-pass` });
   pass.setPipeline(kernel.pipeline);
   pass.setBindGroup(0, bindGroup);
   pass.dispatchWorkgroups(Math.ceil(count / 64));
@@ -281,11 +306,11 @@ async function runOp(
   stagingBuffer.destroy();
   uniformBuffer.destroy();
 
-  return unpackPointBatch(result, count);
+  return unpackPointBatch(result, count, config);
 }
 
-async function runSmoke(): Promise<void> {
-  const lines = ["=== BN254 G1 Phase 6 Browser Smoke ===", ""];
+async function runSmoke(config: G1OpsConfig): Promise<void> {
+  const lines = [`=== ${config.title} ===`, ""];
   writeLog(lines);
   setStatus("Running");
   setPageState("running");
@@ -305,54 +330,51 @@ async function runSmoke(): Promise<void> {
     const device = await adapter.requestDevice();
     lines.push("2. Requesting device... OK");
 
-    const [shaderText, vectors] = await Promise.all([
-      fetchText("/shaders/curves/bn254/g1_arith.wgsl"),
-      fetchVectors(),
-    ]);
+    const [shaderText, vectors] = await Promise.all([fetchText(config.shaderPath), fetchVectors(config)]);
     lines.push("3. Loading shader and vectors... OK");
     lines.push(`cases.g1 = ${vectors.point_cases.length}`);
 
-    const kernel = createKernel(device, shaderText);
+    const kernel = createKernel(device, shaderText, config);
     lines.push("4. Creating pipeline... OK");
 
-    const oneMontZ = findOneMontZ(vectors);
-    const pAffineInputs = vectors.point_cases.map((pointCase) => affineToKernelPoint(pointCase.p_affine, oneMontZ));
-    const qAffineInputs = vectors.point_cases.map((pointCase) => affineToKernelPoint(pointCase.q_affine, oneMontZ));
+    const oneMontZ = findOneMontZ(vectors, config.zeroHex);
+    const pAffineInputs = vectors.point_cases.map((pointCase) => affineToKernelPoint(pointCase.p_affine, oneMontZ, config.zeroHex));
+    const qAffineInputs = vectors.point_cases.map((pointCase) => affineToKernelPoint(pointCase.q_affine, oneMontZ, config.zeroHex));
     const pJac = vectors.point_cases.map((pointCase) => pointCase.p_jacobian);
     const negWant = vectors.point_cases.map((pointCase) => pointCase.neg_p_jacobian);
     const doubleWant = vectors.point_cases.map((pointCase) => pointCase.double_p_jacobian);
     const addWant = vectors.point_cases.map((pointCase) => pointCase.add_mixed_p_plus_q_jacobian);
     const affineWant = vectors.point_cases.map((pointCase) => pointCase.p_affine_output);
     const affineAddWant = vectors.point_cases.map((pointCase) => pointCase.affine_add_p_plus_q);
-    const infinityWant = vectors.point_cases.map(() => ({ x_bytes_le: oneMontZ, y_bytes_le: oneMontZ, z_bytes_le: ZERO_HEX }));
-    const zeros = vectors.point_cases.map(() => ({ x_bytes_le: ZERO_HEX, y_bytes_le: ZERO_HEX, z_bytes_le: ZERO_HEX }));
+    const infinityWant = vectors.point_cases.map(() => ({ x_bytes_le: oneMontZ, y_bytes_le: oneMontZ, z_bytes_le: config.zeroHex }));
+    const zeros = vectors.point_cases.map(() => ({ x_bytes_le: config.zeroHex, y_bytes_le: config.zeroHex, z_bytes_le: config.zeroHex }));
 
-    expectPointBatch("copy", await runOp(device, kernel, G1_OP_COPY, pJac, zeros), pJac);
+    expectPointBatch("copy", await runOp(device, kernel, config, G1_OP_COPY, pJac, zeros), pJac);
     lines.push("copy: OK");
 
-    expectPointBatch("jac_infinity", await runOp(device, kernel, G1_OP_JAC_INFINITY, zeros, zeros), infinityWant);
+    expectPointBatch("jac_infinity", await runOp(device, kernel, config, G1_OP_JAC_INFINITY, zeros, zeros), infinityWant);
     lines.push("jac_infinity: OK");
 
-    expectPointBatch("affine_to_jac", await runOp(device, kernel, G1_OP_AFFINE_TO_JAC, pAffineInputs, zeros), pJac);
+    expectPointBatch("affine_to_jac", await runOp(device, kernel, config, G1_OP_AFFINE_TO_JAC, pAffineInputs, zeros), pJac);
     lines.push("affine_to_jac: OK");
 
-    expectPointBatch("neg_jac", await runOp(device, kernel, G1_OP_NEG_JAC, pJac, zeros), negWant);
+    expectPointBatch("neg_jac", await runOp(device, kernel, config, G1_OP_NEG_JAC, pJac, zeros), negWant);
     lines.push("neg_jac: OK");
 
-    expectPointBatch("jac_to_affine", await runOp(device, kernel, G1_OP_JAC_TO_AFFINE, pJac, zeros), affineWant);
+    expectPointBatch("jac_to_affine", await runOp(device, kernel, config, G1_OP_JAC_TO_AFFINE, pJac, zeros), affineWant);
     lines.push("jac_to_affine: OK");
 
-    expectPointBatch("double_jac", await runOp(device, kernel, G1_OP_DOUBLE_JAC, pJac, zeros), doubleWant);
+    expectPointBatch("double_jac", await runOp(device, kernel, config, G1_OP_DOUBLE_JAC, pJac, zeros), doubleWant);
     lines.push("double_jac: OK");
 
-    expectPointBatch("add_mixed", await runOp(device, kernel, G1_OP_ADD_MIXED, pJac, qAffineInputs), addWant);
+    expectPointBatch("add_mixed", await runOp(device, kernel, config, G1_OP_ADD_MIXED, pJac, qAffineInputs), addWant);
     lines.push("add_mixed: OK");
 
-    expectPointBatch("affine_add", await runOp(device, kernel, G1_OP_AFFINE_ADD, pAffineInputs, qAffineInputs), affineAddWant);
+    expectPointBatch("affine_add", await runOp(device, kernel, config, G1_OP_AFFINE_ADD, pAffineInputs, qAffineInputs), affineAddWant);
     lines.push("affine_add: OK");
 
     lines.push("");
-    lines.push("PASS: BN254 G1 Phase 6 browser smoke succeeded");
+    lines.push(`PASS: ${config.curve === "bn254" ? "BN254" : "BLS12-381"} G1 Phase 6 browser smoke succeeded`);
     writeLog(lines);
     setStatus("Pass");
     setPageState("pass");
@@ -367,5 +389,6 @@ async function runSmoke(): Promise<void> {
 }
 
 runButton.addEventListener("click", () => {
-  void runSmoke();
+  void runSmoke(getConfig());
 });
+

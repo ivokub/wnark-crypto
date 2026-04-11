@@ -33,10 +33,15 @@ type Phase2Vectors = {
   convert_cases: ConvertCase[];
 };
 
-declare const GPUShaderStage: {
-  COMPUTE: number;
+type FrOpsConfig = {
+  curve: string;
+  title: string;
+  vectorPath: string;
+  shaderPath: string;
+  labelPrefix: string;
 };
 
+declare const GPUShaderStage: { COMPUTE: number };
 declare const GPUBufferUsage: {
   STORAGE: number;
   COPY_DST: number;
@@ -44,10 +49,7 @@ declare const GPUBufferUsage: {
   MAP_READ: number;
   UNIFORM: number;
 };
-
-declare const GPUMapMode: {
-  READ: number;
-};
+declare const GPUMapMode: { READ: number };
 
 const FR_OP_COPY = 0;
 const FR_OP_ZERO = 1;
@@ -67,9 +69,35 @@ const FR_ELEMENT_BYTES = 32;
 const FR_UNIFORM_BYTES = 32;
 const FR_ZERO_HEX = "0000000000000000000000000000000000000000000000000000000000000000";
 
+const CONFIGS: Record<string, FrOpsConfig> = {
+  bn254: {
+    curve: "bn254",
+    title: "BN254 fr Phase 2 Browser Smoke",
+    vectorPath: "/testdata/vectors/fr/bn254_phase2_ops.json",
+    shaderPath: "/shaders/curves/bn254/fr_arith.wgsl",
+    labelPrefix: "bn254-fr",
+  },
+  bls12_381: {
+    curve: "bls12_381",
+    title: "BLS12-381 fr Phase 2 Browser Smoke",
+    vectorPath: "/testdata/vectors/fr/bls12_381_phase2_ops.json?v=2",
+    shaderPath: "/shaders/curves/bls12_381/fr_arith.wgsl?v=2",
+    labelPrefix: "bls12-381-fr",
+  },
+};
+
 const runButton = document.getElementById("run") as HTMLButtonElement;
 const statusEl = document.getElementById("status") as HTMLSpanElement;
 const logEl = document.getElementById("log") as HTMLPreElement;
+
+function getConfig(): FrOpsConfig {
+  const curve = new URLSearchParams(window.location.search).get("curve") ?? "bn254";
+  const config = CONFIGS[curve];
+  if (!config) {
+    throw new Error(`unsupported curve: ${curve}`);
+  }
+  return config;
+}
 
 function setStatus(text: string): void {
   statusEl.textContent = text;
@@ -98,27 +126,6 @@ function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function bytesToLimbs(bytes: Uint8Array): Uint32Array {
-  if (bytes.length % 4 !== 0) {
-    throw new Error(`invalid byte length ${bytes.length}`);
-  }
-  const out = new Uint32Array(bytes.length / 4);
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  for (let i = 0; i < out.length; i += 1) {
-    out[i] = view.getUint32(i * 4, true);
-  }
-  return out;
-}
-
-function limbsToBytes(limbs: Uint32Array): Uint8Array {
-  const out = new Uint8Array(limbs.length * 4);
-  const view = new DataView(out.buffer);
-  for (let i = 0; i < limbs.length; i += 1) {
-    view.setUint32(i * 4, limbs[i], true);
-  }
-  return out;
-}
-
 function packHexBatch(hexValues: readonly string[]): Uint8Array {
   const out = new Uint8Array(hexValues.length * FR_ELEMENT_BYTES);
   hexValues.forEach((hex, index) => {
@@ -139,8 +146,8 @@ async function fetchText(path: string): Promise<string> {
   return response.text();
 }
 
-async function fetchVectors(): Promise<Phase2Vectors> {
-  const text = await fetchText("/testdata/vectors/fr/bn254_phase2_ops.json");
+async function fetchVectors(config: FrOpsConfig): Promise<Phase2Vectors> {
+  const text = await fetchText(config.vectorPath);
   return JSON.parse(text) as Phase2Vectors;
 }
 
@@ -148,9 +155,7 @@ async function getAdapterInfo(adapter: GPUAdapter): Promise<GPUAdapterInfo | nul
   if ("info" in adapter && adapter.info) {
     return adapter.info;
   }
-  const compatAdapter = adapter as GPUAdapter & {
-    requestAdapterInfo?: () => Promise<GPUAdapterInfo>;
-  };
+  const compatAdapter = adapter as GPUAdapter & { requestAdapterInfo?: () => Promise<GPUAdapterInfo> };
   if (typeof compatAdapter.requestAdapterInfo === "function") {
     try {
       return await compatAdapter.requestAdapterInfo();
@@ -170,26 +175,14 @@ async function appendAdapterDiagnostics(adapter: GPUAdapter, lines: string[]): P
     lines.push("adapter.info = unavailable");
     return;
   }
-  if (info.vendor) {
-    lines.push(`adapter.vendor = ${info.vendor}`);
-  }
-  if (info.architecture) {
-    lines.push(`adapter.architecture = ${info.architecture}`);
-  }
-  if (info.device) {
-    lines.push(`adapter.device = ${info.device}`);
-  }
-  if (info.description) {
-    lines.push(`adapter.description = ${info.description}`);
-  }
+  if (info.vendor) lines.push(`adapter.vendor = ${info.vendor}`);
+  if (info.architecture) lines.push(`adapter.architecture = ${info.architecture}`);
+  if (info.device) lines.push(`adapter.device = ${info.device}`);
+  if (info.description) lines.push(`adapter.description = ${info.description}`);
 }
 
 function createStorageBuffer(device: GPUDevice, label: string, size: number, usage: GPUBufferUsageFlags): GPUBuffer {
-  return device.createBuffer({
-    label,
-    size,
-    usage,
-  });
+  return device.createBuffer({ label, size, usage });
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -208,16 +201,16 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
   }
 }
 
-function createKernel(device: GPUDevice, shaderCode: string): {
+function createKernel(device: GPUDevice, shaderCode: string, config: FrOpsConfig): {
   pipeline: GPUComputePipeline;
   bindGroupLayout: GPUBindGroupLayout;
 } {
   const shaderModule = device.createShaderModule({
-    label: "bn254-fr-shader",
+    label: `${config.labelPrefix}-shader`,
     code: shaderCode,
   });
   const bindGroupLayout = device.createBindGroupLayout({
-    label: "bn254-fr-bgl",
+    label: `${config.labelPrefix}-bgl`,
     entries: [
       { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
       { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
@@ -226,11 +219,11 @@ function createKernel(device: GPUDevice, shaderCode: string): {
     ],
   });
   const pipelineLayout = device.createPipelineLayout({
-    label: "bn254-fr-pl",
+    label: `${config.labelPrefix}-pl`,
     bindGroupLayouts: [bindGroupLayout],
   });
   const pipeline = device.createComputePipeline({
-    label: "bn254-fr-pipeline",
+    label: `${config.labelPrefix}-pipeline`,
     layout: pipelineLayout,
     compute: {
       module: shaderModule,
@@ -243,6 +236,7 @@ function createKernel(device: GPUDevice, shaderCode: string): {
 async function runOp(
   device: GPUDevice,
   kernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
+  config: FrOpsConfig,
   opcode: number,
   inputAHex: readonly string[],
   inputBHex: readonly string[],
@@ -261,18 +255,18 @@ async function runOp(
   paramsView.setUint32(0, count, true);
   paramsView.setUint32(4, opcode, true);
 
-  const inputABuffer = createStorageBuffer(device, "bn254-fr-input-a", inputBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-  const inputBBuffer = createStorageBuffer(device, "bn254-fr-input-b", inputBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-  const outputBuffer = createStorageBuffer(device, "bn254-fr-output", inputBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
-  const readbackBuffer = createStorageBuffer(device, "bn254-fr-readback", inputBytes, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
-  const uniformBuffer = createStorageBuffer(device, "bn254-fr-params", FR_UNIFORM_BYTES, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
+  const inputABuffer = createStorageBuffer(device, `${config.labelPrefix}-input-a`, inputBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  const inputBBuffer = createStorageBuffer(device, `${config.labelPrefix}-input-b`, inputBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  const outputBuffer = createStorageBuffer(device, `${config.labelPrefix}-output`, inputBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
+  const readbackBuffer = createStorageBuffer(device, `${config.labelPrefix}-readback`, inputBytes, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
+  const uniformBuffer = createStorageBuffer(device, `${config.labelPrefix}-params`, FR_UNIFORM_BYTES, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
 
   device.queue.writeBuffer(inputABuffer, 0, packHexBatch(aHex));
   device.queue.writeBuffer(inputBBuffer, 0, packHexBatch(bHex));
   device.queue.writeBuffer(uniformBuffer, 0, paramsBytes);
 
   const bindGroup = device.createBindGroup({
-    label: "bn254-fr-bg",
+    label: `${config.labelPrefix}-bg`,
     layout: kernel.bindGroupLayout,
     entries: [
       { binding: 0, resource: { buffer: inputABuffer, size: inputBytes } },
@@ -282,7 +276,7 @@ async function runOp(
     ],
   });
 
-  const encoder = device.createCommandEncoder({ label: "bn254-fr-encoder" });
+  const encoder = device.createCommandEncoder({ label: `${config.labelPrefix}-encoder` });
   const pass = encoder.beginComputePass();
   pass.setPipeline(kernel.pipeline);
   pass.setBindGroup(0, bindGroup);
@@ -326,15 +320,11 @@ function mustFindConvertCase(cases: readonly ConvertCase[], name: string): Conve
 }
 
 function combineElementCases(vectors: Phase2Vectors): ElementCase[] {
-  return [
-    ...vectors.element_cases,
-    ...vectors.edge_cases,
-    ...vectors.differential_cases,
-  ];
+  return [...vectors.element_cases, ...vectors.edge_cases, ...vectors.differential_cases];
 }
 
-async function runBrowserSmoke(): Promise<string[]> {
-  const lines: string[] = ["=== BN254 fr Phase 2 Browser Smoke ===", ""];
+async function runBrowserSmoke(config: FrOpsConfig): Promise<string[]> {
+  const lines: string[] = [`=== ${config.title} ===`, ""];
   writeLog(lines);
 
   if (!("gpu" in navigator)) {
@@ -343,10 +333,7 @@ async function runBrowserSmoke(): Promise<string[]> {
 
   lines.push("1. Loading shader and vectors...");
   writeLog(lines);
-  const [shaderCode, vectors] = await Promise.all([
-    fetchText("/shaders/curves/bn254/fr_arith.wgsl"),
-    fetchVectors(),
-  ]);
+  const [shaderCode, vectors] = await Promise.all([fetchText(config.shaderPath), fetchVectors(config)]);
   lines[lines.length - 1] += " OK";
   writeLog(lines);
 
@@ -368,7 +355,7 @@ async function runBrowserSmoke(): Promise<string[]> {
 
   lines.push("4. Creating pipeline...");
   writeLog(lines);
-  const kernel = createKernel(device, shaderCode);
+  const kernel = createKernel(device, shaderCode, config);
   lines[lines.length - 1] += " OK";
   lines.push(`cases.sanity = ${vectors.element_cases.length}`);
   lines.push(`cases.edge = ${vectors.edge_cases.length}`);
@@ -383,85 +370,68 @@ async function runBrowserSmoke(): Promise<string[]> {
   const zeros = Array.from({ length: elementCases.length }, () => FR_ZERO_HEX);
   const oneMontHex = mustFindConvertCase(vectors.convert_cases, "one").mont_bytes_le;
 
-  verifyBatch("copy", await runOp(device, kernel, FR_OP_COPY, aHex, bHex), aHex, lines);
+  verifyBatch("copy", await runOp(device, kernel, config, FR_OP_COPY, aHex, bHex), aHex, lines);
   writeLog(lines);
-  verifyBatch("equal", await runOp(device, kernel, FR_OP_EQUAL, aHex, bHex), elementCases.map((item) => item.equal_bytes_le), lines);
+  verifyBatch("equal", await runOp(device, kernel, config, FR_OP_EQUAL, aHex, bHex), elementCases.map((item) => item.equal_bytes_le), lines);
   writeLog(lines);
-  verifyBatch("zero", await runOp(device, kernel, FR_OP_ZERO, zeros, zeros), zeros, lines);
+  verifyBatch("zero", await runOp(device, kernel, config, FR_OP_ZERO, zeros, zeros), zeros, lines);
   writeLog(lines);
-  verifyBatch("one", await runOp(device, kernel, FR_OP_ONE, zeros, zeros), Array.from({ length: elementCases.length }, () => oneMontHex), lines);
+  verifyBatch("one", await runOp(device, kernel, config, FR_OP_ONE, zeros, zeros), Array.from({ length: elementCases.length }, () => oneMontHex), lines);
   writeLog(lines);
-  verifyBatch("add", await runOp(device, kernel, FR_OP_ADD, aHex, bHex), elementCases.map((item) => item.add_bytes_le), lines);
+  verifyBatch("add", await runOp(device, kernel, config, FR_OP_ADD, aHex, bHex), elementCases.map((item) => item.add_bytes_le), lines);
   writeLog(lines);
-  verifyBatch("sub", await runOp(device, kernel, FR_OP_SUB, aHex, bHex), elementCases.map((item) => item.sub_bytes_le), lines);
+  verifyBatch("sub", await runOp(device, kernel, config, FR_OP_SUB, aHex, bHex), elementCases.map((item) => item.sub_bytes_le), lines);
   writeLog(lines);
-  verifyBatch("neg", await runOp(device, kernel, FR_OP_NEG, aHex, zeros), elementCases.map((item) => item.neg_a_bytes_le), lines);
+  verifyBatch("neg", await runOp(device, kernel, config, FR_OP_NEG, aHex, zeros), elementCases.map((item) => item.neg_a_bytes_le), lines);
   writeLog(lines);
-  verifyBatch("double", await runOp(device, kernel, FR_OP_DOUBLE, aHex, zeros), elementCases.map((item) => item.double_a_bytes_le), lines);
+  verifyBatch("double", await runOp(device, kernel, config, FR_OP_DOUBLE, aHex, zeros), elementCases.map((item) => item.double_a_bytes_le), lines);
   writeLog(lines);
-  verifyBatch("mul", await runOp(device, kernel, FR_OP_MUL, aHex, bHex), elementCases.map((item) => item.mul_bytes_le), lines);
+  verifyBatch("mul", await runOp(device, kernel, config, FR_OP_MUL, aHex, bHex), elementCases.map((item) => item.mul_bytes_le), lines);
   writeLog(lines);
-  verifyBatch("square", await runOp(device, kernel, FR_OP_SQUARE, aHex, zeros), elementCases.map((item) => item.square_a_bytes_le), lines);
+  verifyBatch("square", await runOp(device, kernel, config, FR_OP_SQUARE, aHex, zeros), elementCases.map((item) => item.square_a_bytes_le), lines);
   writeLog(lines);
   verifyBatch(
     "to_mont",
-    await runOp(
-      device,
-      kernel,
-      FR_OP_TO_MONT,
-      vectors.convert_cases.map((item) => item.regular_bytes_le),
-      Array.from({ length: vectors.convert_cases.length }, () => FR_ZERO_HEX),
-    ),
+    await runOp(device, kernel, config, FR_OP_TO_MONT, vectors.convert_cases.map((item) => item.regular_bytes_le), Array.from({ length: vectors.convert_cases.length }, () => FR_ZERO_HEX)),
     vectors.convert_cases.map((item) => item.mont_bytes_le),
     lines,
   );
   writeLog(lines);
   verifyBatch(
     "from_mont",
-    await runOp(
-      device,
-      kernel,
-      FR_OP_FROM_MONT,
-      vectors.convert_cases.map((item) => item.mont_bytes_le),
-      Array.from({ length: vectors.convert_cases.length }, () => FR_ZERO_HEX),
-    ),
+    await runOp(device, kernel, config, FR_OP_FROM_MONT, vectors.convert_cases.map((item) => item.mont_bytes_le), Array.from({ length: vectors.convert_cases.length }, () => FR_ZERO_HEX)),
     vectors.convert_cases.map((item) => item.regular_bytes_le),
     lines,
   );
   writeLog(lines);
   verifyBatch(
     "normalize",
-    await runOp(
-      device,
-      kernel,
-      FR_OP_NORMALIZE,
-      vectors.normalize_cases.map((item) => item.input_bytes_le),
-      Array.from({ length: vectors.normalize_cases.length }, () => FR_ZERO_HEX),
-    ),
+    await runOp(device, kernel, config, FR_OP_NORMALIZE, vectors.normalize_cases.map((item) => item.input_bytes_le), Array.from({ length: vectors.normalize_cases.length }, () => FR_ZERO_HEX)),
     vectors.normalize_cases.map((item) => item.expected_bytes_le),
     lines,
   );
   writeLog(lines);
 
   lines.push("");
-  lines.push("PASS: BN254 fr browser smoke succeeded");
+  lines.push(`PASS: ${config.curve === "bn254" ? "BN254" : "BLS12-381"} fr browser smoke succeeded`);
   writeLog(lines);
   return lines;
 }
 
 async function main(): Promise<void> {
+  const config = getConfig();
   runButton.disabled = true;
   setPageState("running");
   setStatus("Running");
 
   try {
-    const lines = await runBrowserSmoke();
+    const lines = await runBrowserSmoke(config);
     writeLog(lines);
     setPageState("pass");
     setStatus("Pass");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    writeLog(["=== BN254 fr Phase 2 Browser Smoke ===", "", `FAIL: ${message}`]);
+    writeLog([`=== ${config.title} ===`, "", `FAIL: ${message}`]);
     setPageState("fail");
     setStatus("Fail");
     throw error;
@@ -474,13 +444,10 @@ runButton.addEventListener("click", () => {
   void main();
 });
 
+const config = getConfig();
 const params = new URLSearchParams(window.location.search);
 if (params.get("autorun") === "1") {
   void main();
 } else {
-  writeLog([
-    "=== BN254 fr Phase 2 Browser Smoke ===",
-    "",
-    "Press Run to execute the BN254 fr smoke test in browser WebGPU.",
-  ]);
+  writeLog([`=== ${config.title} ===`, "", `Press Run to execute the ${config.curve} fr smoke test in browser WebGPU.`]);
 }

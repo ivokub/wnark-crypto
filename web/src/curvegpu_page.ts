@@ -23,7 +23,7 @@ const SUITES: SuiteConfig[] = [
     kind: "smoke",
     title: "BN254 fr WebGPU Smoke",
     description: "Runs the BN254 scalar-field smoke suite against shared vectors.",
-    script: "/web/dist/bn254_fr_ops.js",
+    script: "/web/dist/fr_ops_page.js",
   },
   {
     curve: "bn254",
@@ -32,7 +32,7 @@ const SUITES: SuiteConfig[] = [
     kind: "smoke",
     title: "BN254 fp WebGPU Smoke",
     description: "Runs the BN254 base-field smoke suite against shared vectors.",
-    script: "/web/dist/bn254_fp_ops.js",
+    script: "/web/dist/fp_ops_page.js",
   },
   {
     curve: "bn254",
@@ -59,7 +59,7 @@ const SUITES: SuiteConfig[] = [
     kind: "smoke",
     title: "BN254 G1 Phase 6 Browser Smoke",
     description: "Runs the BN254 G1 point-operation smoke suite.",
-    script: "/web/dist/bn254_g1_ops.js",
+    script: "/web/dist/g1_ops_page.js",
   },
   {
     curve: "bn254",
@@ -122,7 +122,7 @@ const SUITES: SuiteConfig[] = [
     kind: "smoke",
     title: "BLS12-381 fr Phase 2 Browser Smoke",
     description: "Runs the BLS12-381 scalar-field smoke suite against shared vectors.",
-    script: "/web/dist/bls12_381_fr_ops.js",
+    script: "/web/dist/fr_ops_page.js",
   },
   {
     curve: "bls12_381",
@@ -131,7 +131,7 @@ const SUITES: SuiteConfig[] = [
     kind: "smoke",
     title: "BLS12-381 fp Phase 3 Browser Smoke",
     description: "Runs the BLS12-381 base-field smoke suite against shared vectors.",
-    script: "/web/dist/bls12_381_fp_ops.js",
+    script: "/web/dist/fp_ops_page.js",
   },
   {
     curve: "bls12_381",
@@ -140,7 +140,7 @@ const SUITES: SuiteConfig[] = [
     kind: "smoke",
     title: "BLS12-381 G1 Phase 6 Browser Smoke",
     description: "Runs the BLS12-381 G1 point-operation smoke suite.",
-    script: "/web/dist/bls12_381_g1_ops.js",
+    script: "/web/dist/g1_ops_page.js",
   },
   {
     curve: "bls12_381",
