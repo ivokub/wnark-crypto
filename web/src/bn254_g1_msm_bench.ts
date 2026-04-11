@@ -11,6 +11,7 @@ import {
   MSMProfile,
 } from "./curvegpu/msm_bench_shared.js";
 import { runMSMBenchmarkPage } from "./curvegpu/msm_page_runner.js";
+import { runSparseSignedPippengerMSMProfiled } from "./curvegpu/msm_pippenger_bench.js";
 import {
   createBindGroupForBuffers as sharedCreateBindGroupForBuffers,
   createEmptyPointStorageBuffer as sharedCreateEmptyPointStorageBuffer,
@@ -826,131 +827,19 @@ async function runPippengerMSMProfiled(
   scalars: ScalarBatch,
   window: number,
 ): Promise<MSMProfile> {
-  const totalStart = performance.now();
-  const count = 1;
-  const termsPerInstance = bases.length;
-  const profile: MSMProfile = {
-    partitionMs: 0,
-    uploadMs: 0,
-    kernelMs: 0,
-    readbackMs: 0,
-    scalarMulTotalMs: 0,
-    bucketReductionTotalMs: 0,
-    windowReductionTotalMs: 0,
-    finalReductionTotalMs: 0,
-    reductionTotalMs: 0,
-    totalMs: 0,
-  };
-
-  const partitionStart = performance.now();
-  const metadata = buildSparseSignedBucketMetadata(scalars.words, count, termsPerInstance, window);
-  profile.partitionMs = performance.now() - partitionStart;
-
-  const zeroBatch = [zeroPoint()];
-  const basesInput = createPointStorageBuffer(device, "g1-pip-bases", bases);
-  const zeroInput = createPointStorageBuffer(device, "g1-pip-zero", zeroBatch, 1);
-  const baseIndicesInput = createU32StorageBuffer(device, "g1-pip-base-indices", metadata.baseIndices);
-  const bucketPointersInput = createU32StorageBuffer(device, "g1-pip-bucket-pointers", metadata.bucketPointers);
-  const bucketSizesInput = createU32StorageBuffer(device, "g1-pip-bucket-sizes", metadata.bucketSizes);
-  profile.uploadMs += basesInput.uploadMs + zeroInput.uploadMs + baseIndicesInput.uploadMs + bucketPointersInput.uploadMs + bucketSizesInput.uploadMs;
-
-  const bucketCountOut = metadata.bucketPointers.length;
-  const bucketOutput = createEmptyPointStorageBuffer(device, "g1-pip-bucket-out", bucketCountOut);
-  const bucketParams = createParamsBuffer(device, "g1-pip-bucket-params", {
-    count: bucketCountOut,
-    termsPerInstance,
+  return runSparseSignedPippengerMSMProfiled({
+    device,
+    kernels: { mode: "simple", ...kernels },
+    basesBytes: packPointBatch(bases),
+    pointBytes: POINT_BYTES,
+    uniformBytes: UNIFORM_BYTES,
+    zeroPointBytes: packPointBatch([zeroPoint()]),
+    scalarWords: scalars.words,
+    count: 1,
+    termsPerInstance: bases.length,
     window,
-    numWindows: metadata.numWindows,
-    bucketCount: metadata.bucketCount,
+    labelPrefix: "g1-pip",
   });
-  profile.uploadMs += bucketParams.uploadMs;
-  const bucketBindGroup = createBindGroupForBuffers(
-    device,
-    kernels.bucket,
-    "g1-pip-bucket-bg",
-    basesInput.buffer,
-    zeroInput.buffer,
-    bucketOutput,
-    bucketParams.buffer,
-    baseIndicesInput.buffer,
-    bucketPointersInput.buffer,
-    bucketSizesInput.buffer,
-  );
-  const bucketStart = performance.now();
-  const bucketKernelMs = await submitKernelProfiled(device, kernels.bucket, bucketBindGroup, bucketCountOut, "g1-pip-bucket");
-  profile.kernelMs += bucketKernelMs;
-  profile.bucketReductionTotalMs += performance.now() - bucketStart;
-
-  const windowOutput = createEmptyPointStorageBuffer(device, "g1-pip-window-sparse-out", count * metadata.numWindows);
-  const bucketValuesInput = createU32StorageBuffer(device, "g1-pip-window-values", metadata.bucketValues);
-  const windowStartsInput = createU32StorageBuffer(device, "g1-pip-window-starts", metadata.windowStarts);
-  const windowCountsInput = createU32StorageBuffer(device, "g1-pip-window-counts", metadata.windowCounts);
-  const windowParams = createParamsBuffer(device, "g1-pip-window-sparse-params", {
-    count: count * metadata.numWindows,
-    bucketCount: metadata.bucketCount,
-  });
-  profile.uploadMs += bucketValuesInput.uploadMs + windowStartsInput.uploadMs + windowCountsInput.uploadMs + windowParams.uploadMs;
-  const windowBindGroup = createBindGroupForBuffers(
-    device,
-    kernels.windowSparse,
-    "g1-pip-window-sparse-bg",
-    bucketOutput,
-    zeroInput.buffer,
-    windowOutput,
-    windowParams.buffer,
-    bucketValuesInput.buffer,
-    windowStartsInput.buffer,
-    windowCountsInput.buffer,
-  );
-  const windowStart = performance.now();
-  const windowKernelMs = await submitKernelProfiled(device, kernels.windowSparse, windowBindGroup, count * metadata.numWindows * 64, "g1-pip-window-sparse");
-  profile.kernelMs += windowKernelMs;
-  profile.windowReductionTotalMs += performance.now() - windowStart;
-
-  const finalOutput = createEmptyPointStorageBuffer(device, "g1-pip-final-out", count);
-  const finalParams = createParamsBuffer(device, "g1-pip-final-params", {
-    count,
-    termsPerInstance,
-    window,
-    numWindows: metadata.numWindows,
-    bucketCount: metadata.bucketCount,
-  });
-  profile.uploadMs += finalParams.uploadMs;
-  const finalBindGroup = createBindGroupForBuffers(
-    device,
-    kernels.combine,
-    "g1-pip-final-bg",
-    windowOutput,
-    zeroInput.buffer,
-    finalOutput,
-    finalParams.buffer,
-  );
-  const finalStart = performance.now();
-  const finalKernelMs = await submitKernelProfiled(device, kernels.combine, finalBindGroup, count, "g1-pip-final");
-  profile.kernelMs += finalKernelMs;
-  profile.finalReductionTotalMs += performance.now() - finalStart;
-
-  const readback = await readbackPointBufferProfiled(device, finalOutput, count);
-  profile.readbackMs += readback.readbackMs;
-
-  basesInput.buffer.destroy();
-  zeroInput.buffer.destroy();
-  baseIndicesInput.buffer.destroy();
-  bucketPointersInput.buffer.destroy();
-  bucketSizesInput.buffer.destroy();
-  bucketValuesInput.buffer.destroy();
-  windowStartsInput.buffer.destroy();
-  windowCountsInput.buffer.destroy();
-  bucketOutput.destroy();
-  bucketParams.buffer.destroy();
-  windowOutput.destroy();
-  windowParams.buffer.destroy();
-  finalOutput.destroy();
-  finalParams.buffer.destroy();
-
-  profile.reductionTotalMs = profile.bucketReductionTotalMs + profile.windowReductionTotalMs + profile.finalReductionTotalMs;
-  profile.totalMs = performance.now() - totalStart;
-  return profile;
 }
 
 async function runBenchmark(): Promise<void> {
