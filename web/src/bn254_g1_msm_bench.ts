@@ -12,6 +12,7 @@ import {
 } from "./curvegpu/msm_bench_shared.js";
 import { runMSMBenchmarkPage } from "./curvegpu/msm_page_runner.js";
 import { runSparseSignedPippengerMSMProfiled } from "./curvegpu/msm_pippenger_bench.js";
+import { createGeneratedBaseSource } from "./curvegpu/msm_bench_sources.js";
 import {
   createBindGroupForBuffers as sharedCreateBindGroupForBuffers,
   createEmptyPointStorageBuffer as sharedCreateEmptyPointStorageBuffer,
@@ -868,8 +869,18 @@ async function runBenchmark(): Promise<void> {
         windowSparse: "g1_msm_window_sparse_main",
         combine: "g1_msm_combine_main",
       });
+      const baseSourceProvider = createGeneratedBaseSource({
+        loadBases: async (size: number) =>
+          buildBases(
+            device,
+            kernel,
+            phase7.generator_affine,
+            phase7.one_mont_z,
+            size,
+          ),
+      });
       return {
-        context: { device, kernel, phase7, pippengerKernels },
+        context: { device, kernel, phase7, pippengerKernels, baseSourceProvider },
         preMetricLines: ["4. Creating pipeline... OK"],
       };
     },
@@ -882,13 +893,10 @@ async function runBenchmark(): Promise<void> {
         iters,
         writeLog,
         makeSizeBenchmarks: async ({ size }) => {
-          const bases = await buildBases(
-            context.device,
-            context.kernel,
-            context.phase7.generator_affine,
-            context.phase7.one_mont_z,
+          const { bases } = await context.baseSourceProvider.loadBases({
+            context: null,
             size,
-          );
+          });
           const scalars = makeMSMScalars(size);
           return {
             entries: [
