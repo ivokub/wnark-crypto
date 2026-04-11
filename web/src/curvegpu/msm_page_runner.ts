@@ -60,8 +60,24 @@ export async function runMSMBenchmarkPage<T>(options: {
       throw new Error("requestAdapter returned null");
     }
     await options.appendAdapterDiagnostics(adapter, lines);
+    const adapterWithLimits = adapter as GPUAdapter & {
+      limits?: {
+        maxStorageBufferBindingSize?: number;
+        maxBufferSize?: number;
+      };
+    };
+    const requiredLimits: Record<string, number> = {};
+    if (adapterWithLimits.limits?.maxStorageBufferBindingSize !== undefined) {
+      requiredLimits.maxStorageBufferBindingSize = adapterWithLimits.limits.maxStorageBufferBindingSize;
+    }
+    if (adapterWithLimits.limits?.maxBufferSize !== undefined) {
+      requiredLimits.maxBufferSize = adapterWithLimits.limits.maxBufferSize;
+    }
+
     lines.push("2. Requesting device... OK");
-    const device = await adapter.requestDevice();
+    const device = await adapter.requestDevice({
+      requiredLimits: Object.keys(requiredLimits).length > 0 ? requiredLimits : undefined,
+    });
 
     const init = await options.init({ adapter, device, lines });
     const initMs = performance.now() - initStart;
