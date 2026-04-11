@@ -6,6 +6,11 @@ import {
   makeRandomScalarBatch,
 } from "./curvegpu/msm_shared";
 import {
+  benchmarkMSM,
+  formatMSMBenchmarkRow,
+  MSMProfile,
+} from "./curvegpu/msm_bench_shared";
+import {
   createBindGroupForBuffers as sharedCreateBindGroupForBuffers,
   createEmptyPointStorageBuffer as sharedCreateEmptyPointStorageBuffer,
   createMSMKernel as sharedCreateMSMKernel,
@@ -48,19 +53,6 @@ type GpuPointBatch = {
 type ScalarBatch = {
   hexes: string[];
   words: Uint32Array;
-};
-
-type MSMProfile = {
-  partitionMs: number;
-  uploadMs: number;
-  kernelMs: number;
-  readbackMs: number;
-  scalarMulTotalMs: number;
-  bucketReductionTotalMs: number;
-  windowReductionTotalMs: number;
-  finalReductionTotalMs: number;
-  reductionTotalMs: number;
-  totalMs: number;
 };
 
 declare const GPUShaderStage: { COMPUTE: number };
@@ -959,56 +951,6 @@ async function runPippengerMSMProfiled(
   return profile;
 }
 
-async function benchmarkMSM(
-  device: GPUDevice,
-  kernel: Kernel,
-  bases: readonly JacobianPoint[],
-  scalars: ScalarBatch,
-  iters: number,
-  run: () => Promise<MSMProfile>,
-): Promise<{ cold: MSMProfile; warm: MSMProfile }> {
-  const cold = await run();
-  if (iters === 1) {
-    return { cold, warm: cold };
-  }
-  const warm: MSMProfile = {
-    partitionMs: 0,
-    uploadMs: 0,
-    kernelMs: 0,
-    readbackMs: 0,
-    scalarMulTotalMs: 0,
-    bucketReductionTotalMs: 0,
-    windowReductionTotalMs: 0,
-    finalReductionTotalMs: 0,
-    reductionTotalMs: 0,
-    totalMs: 0,
-  };
-  for (let i = 0; i < iters; i += 1) {
-    const profile = await run();
-    warm.partitionMs += profile.partitionMs;
-    warm.uploadMs += profile.uploadMs;
-    warm.kernelMs += profile.kernelMs;
-    warm.readbackMs += profile.readbackMs;
-    warm.scalarMulTotalMs += profile.scalarMulTotalMs;
-    warm.bucketReductionTotalMs += profile.bucketReductionTotalMs;
-    warm.windowReductionTotalMs += profile.windowReductionTotalMs;
-    warm.finalReductionTotalMs += profile.finalReductionTotalMs;
-    warm.reductionTotalMs += profile.reductionTotalMs;
-    warm.totalMs += profile.totalMs;
-  }
-  warm.partitionMs /= iters;
-  warm.uploadMs /= iters;
-  warm.kernelMs /= iters;
-  warm.readbackMs /= iters;
-  warm.scalarMulTotalMs /= iters;
-  warm.bucketReductionTotalMs /= iters;
-  warm.windowReductionTotalMs /= iters;
-  warm.finalReductionTotalMs /= iters;
-  warm.reductionTotalMs /= iters;
-  warm.totalMs /= iters;
-  return { cold, warm };
-}
-
 async function runBenchmark(): Promise<void> {
   const lines = ["=== BN254 G1 MSM Browser Benchmark ===", ""];
   writeLog(lines);
@@ -1072,10 +1014,15 @@ async function runBenchmark(): Promise<void> {
         },
       ];
       for (const bench of benchmarks) {
-        const benchmark = await benchmarkMSM(device, kernel, bases, scalars, iters, bench.run);
-        lines.push(
-          `${size},${bench.label},${bench.window},${initMs.toFixed(3)},${benchmark.cold.partitionMs.toFixed(3)},${benchmark.cold.uploadMs.toFixed(3)},${benchmark.cold.kernelMs.toFixed(3)},${benchmark.cold.readbackMs.toFixed(3)},${benchmark.cold.scalarMulTotalMs.toFixed(3)},${benchmark.cold.bucketReductionTotalMs.toFixed(3)},${benchmark.cold.windowReductionTotalMs.toFixed(3)},${benchmark.cold.finalReductionTotalMs.toFixed(3)},${benchmark.cold.reductionTotalMs.toFixed(3)},${benchmark.cold.totalMs.toFixed(3)},${(initMs + benchmark.cold.totalMs).toFixed(3)},${benchmark.warm.partitionMs.toFixed(3)},${benchmark.warm.uploadMs.toFixed(3)},${benchmark.warm.kernelMs.toFixed(3)},${benchmark.warm.readbackMs.toFixed(3)},${benchmark.warm.scalarMulTotalMs.toFixed(3)},${benchmark.warm.bucketReductionTotalMs.toFixed(3)},${benchmark.warm.windowReductionTotalMs.toFixed(3)},${benchmark.warm.finalReductionTotalMs.toFixed(3)},${benchmark.warm.reductionTotalMs.toFixed(3)},${benchmark.warm.totalMs.toFixed(3)}`,
-        );
+        const benchmark = await benchmarkMSM(iters, bench.run);
+        lines.push(formatMSMBenchmarkRow({
+          size,
+          label: bench.label,
+          window: bench.window,
+          initMs,
+          cold: benchmark.cold,
+          warm: benchmark.warm,
+        }));
         writeLog(lines);
       }
     }
