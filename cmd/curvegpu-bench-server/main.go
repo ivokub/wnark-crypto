@@ -14,11 +14,16 @@ import (
 	gnarkbls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	gnarkfp "github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
 	gnarkfr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
+	gnarkbn254 "github.com/consensys/gnark-crypto/ecc/bn254"
+	gnarkbn254fp "github.com/consensys/gnark-crypto/ecc/bn254/fp"
+	gnarkbn254fr "github.com/consensys/gnark-crypto/ecc/bn254/fr"
 )
 
 const (
-	fpBytes    = 48
-	pointBytes = 144
+	bn254FpBytes    = 32
+	bn254PointBytes = 96
+	fpBytes         = 48
+	pointBytes      = 144
 )
 
 type basesResponse struct {
@@ -75,6 +80,37 @@ func main() {
 		w.Header().Set("X-Base-Seed", strconv.FormatInt(seed, 10))
 		_, _ = w.Write(bytes)
 	})
+	mux.HandleFunc("/api/bn254/g1/bases.json", func(w http.ResponseWriter, r *http.Request) {
+		count, seed, err := parseBaseRequest(r, *maxCount)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(basesResponse{
+			Count:      count,
+			PointBytes: bn254PointBytes,
+			Format:     "jacobian_x_y_z_le",
+			Seed:       seed,
+		})
+	})
+	mux.HandleFunc("/api/bn254/g1/bases.bin", func(w http.ResponseWriter, r *http.Request) {
+		count, seed, err := parseBaseRequest(r, *maxCount)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		bytes, err := cache.getOrBuildBN254(count, seed)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("X-Point-Bytes", strconv.Itoa(bn254PointBytes))
+		w.Header().Set("X-Base-Count", strconv.Itoa(count))
+		w.Header().Set("X-Base-Seed", strconv.FormatInt(seed, 10))
+		_, _ = w.Write(bytes)
+	})
 
 	fileServer := http.FileServer(http.Dir(filepath.Clean(*root)))
 	mux.Handle("/", fileServer)
@@ -108,7 +144,7 @@ func parseBaseRequest(r *http.Request, maxCount int) (count int, seed int64, err
 }
 
 func (c *baseCache) getOrBuild(count int, seed int64) ([]byte, error) {
-	key := fmt.Sprintf("%d:%d", count, seed)
+	key := fmt.Sprintf("bls12-381:%d:%d", count, seed)
 	c.mu.RLock()
 	if cached, ok := c.entries[key]; ok {
 		c.mu.RUnlock()
@@ -117,6 +153,26 @@ func (c *baseCache) getOrBuild(count int, seed int64) ([]byte, error) {
 	c.mu.RUnlock()
 
 	bytes, err := buildRandomBases(count, seed)
+	if err != nil {
+		return nil, err
+	}
+
+	c.mu.Lock()
+	c.entries[key] = bytes
+	c.mu.Unlock()
+	return bytes, nil
+}
+
+func (c *baseCache) getOrBuildBN254(count int, seed int64) ([]byte, error) {
+	key := fmt.Sprintf("bn254:%d:%d", count, seed)
+	c.mu.RLock()
+	if cached, ok := c.entries[key]; ok {
+		c.mu.RUnlock()
+		return cached, nil
+	}
+	c.mu.RUnlock()
+
+	bytes, err := buildRandomBasesBN254(count, seed)
 	if err != nil {
 		return nil, err
 	}
@@ -154,14 +210,61 @@ func buildRandomBases(count int, seed int64) ([]byte, error) {
 	return out, nil
 }
 
+func buildRandomBasesBN254(count int, seed int64) ([]byte, error) {
+	_, _, genAff, _ := gnarkbn254.Generators()
+	oneMontZ := montOneBN254()
+	rng := rand.New(rand.NewSource(seed))
+	scalars := make([]gnarkbn254fr.Element, count)
+	for i := range scalars {
+		var raw [32]byte
+		for j := range raw {
+			raw[j] = byte(rng.Uint32())
+		}
+		scalars[i].SetBytes(raw[:])
+		if scalars[i].IsZero() {
+			scalars[i].SetUint64(1)
+		}
+	}
+	points := gnarkbn254.BatchScalarMultiplicationG1(&genAff, scalars)
+
+	out := make([]byte, count*bn254PointBytes)
+	for i := range points {
+		base := i * bn254PointBytes
+		writeElementLE4(out[base:base+bn254FpBytes], points[i].X)
+		writeElementLE4(out[base+bn254FpBytes:base+2*bn254FpBytes], points[i].Y)
+		writeElementLE4(out[base+2*bn254FpBytes:base+3*bn254FpBytes], oneMontZ)
+	}
+	return out, nil
+}
+
 func montOne() gnarkfp.Element {
 	var one gnarkfp.Element
 	one.SetOne()
 	return one
 }
 
+func montOneBN254() gnarkbn254fp.Element {
+	var one gnarkbn254fp.Element
+	one.SetOne()
+	return one
+}
+
 func writeElementLE(dst []byte, v gnarkfp.Element) {
 	for i, word := range [6]uint64(v) {
+		base := i * 8
+		dst[base+0] = byte(word)
+		dst[base+1] = byte(word >> 8)
+		dst[base+2] = byte(word >> 16)
+		dst[base+3] = byte(word >> 24)
+		dst[base+4] = byte(word >> 32)
+		dst[base+5] = byte(word >> 40)
+		dst[base+6] = byte(word >> 48)
+		dst[base+7] = byte(word >> 56)
+	}
+}
+
+func writeElementLE4(dst []byte, v gnarkbn254fp.Element) {
+	for i, word := range [4]uint64(v) {
 		base := i * 8
 		dst[base+0] = byte(word)
 		dst[base+1] = byte(word >> 8)

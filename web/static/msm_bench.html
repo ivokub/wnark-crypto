@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MSM Browser Benchmark</title>
+    <style>
+      body {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        margin: 24px;
+        line-height: 1.4;
+      }
+      .controls {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+      }
+      label {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      pre {
+        white-space: pre-wrap;
+      }
+      body[data-status="pass"] #status {
+        color: #1a7f37;
+      }
+      body[data-status="fail"] #status {
+        color: #cf222e;
+      }
+    </style>
+  </head>
+  <body data-status="idle">
+    <h1 id="heading">MSM Browser Benchmark</h1>
+    <p id="description">Unified MSM benchmark page.</p>
+    <div class="controls">
+      <label>min log2 <input id="min-log" type="number" value="10" min="1" max="24" /></label>
+      <label>max log2 <input id="max-log" type="number" value="19" min="1" max="24" /></label>
+      <label>iters <input id="iters" type="number" value="1" min="1" max="10" /></label>
+      <button id="run" type="button">Run</button>
+      <span id="status">Idle</span>
+    </div>
+    <pre id="log">Press Run.</pre>
+    <script type="module" src="/web/dist/msm_bench_page.js?v=1"></script>
+  </body>
+</html>

@@ -42,6 +42,8 @@ type Phase7Vectors = {
   one_mont_z: string;
 };
 
+type BN254BaseSource = "generated" | "server";
+
 type OpProfile = {
   uploadMs: number;
   kernelMs: number;
@@ -110,6 +112,30 @@ async function fetchText(path: string): Promise<string> {
 
 async function fetchJSON<T>(path: string): Promise<T> {
   return JSON.parse(await fetchText(path)) as T;
+}
+
+async function fetchBytes(path: string): Promise<Uint8Array> {
+  const response = await fetch(path);
+  if (!response.ok) {
+    throw new Error(`failed to load ${path}: ${response.status} ${response.statusText}`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+function getBaseSource(): BN254BaseSource {
+  const params = new URLSearchParams(window.location.search);
+  const source = params.get("base-source") ?? params.get("baseSource") ?? "generated";
+  return source === "server" ? "server" : "generated";
+}
+
+function getBaseSeed(): number {
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get("seed");
+  if (!raw) {
+    return 1;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isInteger(parsed) ? parsed : 1;
 }
 
 async function getAdapterInfo(adapter: GPUAdapter): Promise<GPUAdapterInfo | null> {
@@ -844,6 +870,8 @@ async function runPippengerMSMProfiled(
 }
 
 async function runBenchmark(): Promise<void> {
+  const baseSource = getBaseSource();
+  const baseSeed = getBaseSeed();
   await runMSMBenchmarkPage({
     title: "BN254 G1 MSM Browser Benchmark",
     successMessage: "BN254 G1 MSM browser benchmark completed",
@@ -870,18 +898,30 @@ async function runBenchmark(): Promise<void> {
         combine: "g1_msm_combine_main",
       });
       const baseSourceProvider = createGeneratedBaseSource({
-        loadBases: async (size: number) =>
-          buildBases(
+        loadBases: async (size: number) => {
+          if (baseSource === "server") {
+            const bytes = await fetchBytes(`/api/bn254/g1/bases.bin?count=${size}&seed=${baseSeed}`);
+            if (bytes.byteLength !== size * POINT_BYTES) {
+              throw new Error(`server base length mismatch: got ${bytes.byteLength}, want ${size * POINT_BYTES}`);
+            }
+            return unpackPointBatch(bytes, size);
+          }
+          return buildBases(
             device,
             kernel,
             phase7.generator_affine,
             phase7.one_mont_z,
             size,
-          ),
+          );
+        },
       });
       return {
         context: { device, kernel, phase7, pippengerKernels, baseSourceProvider },
         preMetricLines: ["4. Creating pipeline... OK"],
+        postMetricLines:
+          baseSource === "server"
+            ? [`base_source = server`, `base_seed = ${baseSeed}`]
+            : [`base_source = generated`],
       };
     },
     runSizes: async ({ context, lines, initMs, minLog, maxLog, iters, writeLog }) => {
