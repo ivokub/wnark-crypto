@@ -1,5 +1,11 @@
 export {};
 
+import {
+  bestPippengerWindow as sharedBestPippengerWindow,
+  buildSparseSignedBucketMetadataWords,
+  makeRandomScalarBatch,
+} from "./curvegpu/msm_shared";
+
 type AffinePoint = {
   x_bytes_le: string;
   y_bytes_le: string;
@@ -204,17 +210,7 @@ function extractWindowDigit(scalar: bigint, bitOffset: number, window: number): 
 }
 
 function bestPippengerWindow(count: number): number {
-  const windows = [4, 5, 6, 7, 8, 9, 10, 11, 12];
-  let best = windows[0];
-  let bestCost = Number.POSITIVE_INFINITY;
-  for (const window of windows) {
-    const cost = Math.ceil(255 / window) * (count + (1 << window));
-    if (cost < bestCost) {
-      bestCost = cost;
-      best = window;
-    }
-  }
-  return best;
+  return sharedBestPippengerWindow(count);
 }
 
 function extractWindowDigitWords(words: Uint32Array, scalarBase: number, bitOffset: number, window: number): number {
@@ -311,109 +307,7 @@ function buildSparseSignedBucketMetadata(
   numWindows: number;
   bucketCount: number;
 } {
-  const numWindows = Math.ceil(256 / window) + 1;
-  const bucketCount = 1 << (window - 1);
-  const totalWindows = count * numWindows;
-  const logicalBucketSizes = new Uint32Array(totalWindows * bucketCount);
-  const half = 1 << (window - 1);
-  const full = 1 << window;
-  for (let instance = 0; instance < count; instance += 1) {
-    const baseOffset = instance * termsPerInstance;
-    for (let term = 0; term < termsPerInstance; term += 1) {
-      const idx = baseOffset + term;
-      const scalarBase = idx * 8;
-      let carry = 0;
-      for (let win = 0; win < numWindows; win += 1) {
-        const unsigned = win < numWindows - 1 ? extractWindowDigitWords(scalarWords, scalarBase, win * window, window) : 0;
-        let value = unsigned + carry;
-        carry = 0;
-        if (value >= half) {
-          value = full - value;
-          if (value !== 0) {
-            const slot = (instance * numWindows + win) * bucketCount + (value - 1);
-            logicalBucketSizes[slot] += 1;
-          }
-          carry = 1;
-        } else if (value !== 0) {
-          const slot = (instance * numWindows + win) * bucketCount + (value - 1);
-          logicalBucketSizes[slot] += 1;
-        }
-      }
-    }
-  }
-
-  const logicalBucketPointers = new Uint32Array(totalWindows * bucketCount);
-  let totalEntries = 0;
-  for (let i = 0; i < logicalBucketSizes.length; i += 1) {
-    logicalBucketPointers[i] = totalEntries;
-    totalEntries += logicalBucketSizes[i];
-  }
-  const baseIndices = new Uint32Array(totalEntries);
-  const writeOffsets = logicalBucketPointers.slice();
-
-  for (let instance = 0; instance < count; instance += 1) {
-    const baseOffset = instance * termsPerInstance;
-    for (let term = 0; term < termsPerInstance; term += 1) {
-      const idx = baseOffset + term;
-      const scalarBase = idx * 8;
-      let carry = 0;
-      for (let win = 0; win < numWindows; win += 1) {
-        const unsigned = win < numWindows - 1 ? extractWindowDigitWords(scalarWords, scalarBase, win * window, window) : 0;
-        let value = unsigned + carry;
-        carry = 0;
-        let neg = false;
-        if (value >= half) {
-          value = full - value;
-          neg = value !== 0;
-          carry = 1;
-        }
-        if (value === 0) {
-          continue;
-        }
-        const slot = (instance * numWindows + win) * bucketCount + (value - 1);
-        const raw = neg ? ((idx | INDEX_SIGN_BIT) >>> 0) : idx;
-        baseIndices[writeOffsets[slot]] = raw;
-        writeOffsets[slot] += 1;
-      }
-    }
-  }
-
-  const bucketPointers: number[] = [];
-  const bucketSizes: number[] = [];
-  const bucketValues: number[] = [];
-  const windowStarts = new Uint32Array(totalWindows);
-  const windowCounts = new Uint32Array(totalWindows);
-  for (let windowSlot = 0; windowSlot < totalWindows; windowSlot += 1) {
-    windowStarts[windowSlot] = bucketPointers.length;
-    let dispatchedInWindow = 0;
-    const bucketBase = windowSlot * bucketCount;
-    for (let value = 1; value <= bucketCount; value += 1) {
-      const slot = bucketBase + (value - 1);
-      const size = logicalBucketSizes[slot];
-      if (size === 0) {
-        continue;
-      }
-      const ptr = logicalBucketPointers[slot];
-      for (let offset = 0; offset < size; offset += maxChunkSize) {
-        bucketPointers.push(ptr + offset);
-        bucketSizes.push(Math.min(size - offset, maxChunkSize));
-        bucketValues.push(value);
-        dispatchedInWindow += 1;
-      }
-    }
-    windowCounts[windowSlot] = dispatchedInWindow;
-  }
-
-  return {
-    baseIndices,
-    bucketPointers: Uint32Array.from(bucketPointers),
-    bucketSizes: Uint32Array.from(bucketSizes),
-    bucketValues: Uint32Array.from(bucketValues),
-    windowStarts,
-    windowCounts,
-    numWindows,
-    bucketCount,
-  };
+  return buildSparseSignedBucketMetadataWords(scalarWords, count, termsPerInstance, window, maxChunkSize);
 }
 
 function affineToKernelPoint(point: AffinePoint, oneMontZ: string): JacobianPoint {
@@ -753,14 +647,7 @@ async function buildBases(
 }
 
 function makeMSMScalars(count: number): ScalarBatch {
-  const hexes = new Array<string>(count);
-  const words = new Uint32Array(count * 8);
-  for (let index = 0; index < count; index += 1) {
-    const scalar = makeRandomScalarData((0x9e3779b9 ^ count ^ index) >>> 0);
-    hexes[index] = scalar.hex;
-    words.set(scalar.words, index * 8);
-  }
-  return { hexes, words };
+  return makeRandomScalarBatch(count);
 }
 
 async function runMSMProfiled(

@@ -1,5 +1,11 @@
 export {};
 
+import {
+  bestPippengerWindow as sharedBestPippengerWindow,
+  buildSparseSignedBucketMetadataWords,
+  makeRandomScalarBatch,
+} from "./curvegpu/msm_shared";
+
 type AffinePoint = {
   x_bytes_le: string;
   y_bytes_le: string;
@@ -221,17 +227,7 @@ function extractWindowDigit(scalar: bigint, bitOffset: number, window: number): 
 }
 
 function bestPippengerWindow(count: number): number {
-  const windows = [4, 5, 6, 7, 8, 9, 10, 11, 12];
-  let best = windows[0];
-  let bestCost = Number.POSITIVE_INFINITY;
-  for (const window of windows) {
-    const cost = Math.ceil(255 / window) * (count + (1 << window));
-    if (cost < bestCost) {
-      bestCost = cost;
-      best = window;
-    }
-  }
-  return best;
+  return sharedBestPippengerWindow(count);
 }
 
 function extractWindowDigitWords(words: Uint32Array, scalarBase: number, bitOffset: number, window: number): number {
@@ -328,109 +324,7 @@ function buildSparseSignedBucketMetadata(
   numWindows: number;
   bucketCount: number;
 } {
-  const numWindows = Math.ceil(256 / window) + 1;
-  const bucketCount = 1 << (window - 1);
-  const totalWindows = count * numWindows;
-  const logicalBucketSizes = new Uint32Array(totalWindows * bucketCount);
-  const half = 1 << (window - 1);
-  const full = 1 << window;
-  for (let instance = 0; instance < count; instance += 1) {
-    const baseOffset = instance * termsPerInstance;
-    for (let term = 0; term < termsPerInstance; term += 1) {
-      const idx = baseOffset + term;
-      const scalarBase = idx * 8;
-      let carry = 0;
-      for (let win = 0; win < numWindows; win += 1) {
-        const unsigned = win < numWindows - 1 ? extractWindowDigitWords(scalarWords, scalarBase, win * window, window) : 0;
-        let value = unsigned + carry;
-        carry = 0;
-        if (value >= half) {
-          value = full - value;
-          if (value !== 0) {
-            const slot = (instance * numWindows + win) * bucketCount + (value - 1);
-            logicalBucketSizes[slot] += 1;
-          }
-          carry = 1;
-        } else if (value !== 0) {
-          const slot = (instance * numWindows + win) * bucketCount + (value - 1);
-          logicalBucketSizes[slot] += 1;
-        }
-      }
-    }
-  }
-
-  const logicalBucketPointers = new Uint32Array(totalWindows * bucketCount);
-  let totalEntries = 0;
-  for (let i = 0; i < logicalBucketSizes.length; i += 1) {
-    logicalBucketPointers[i] = totalEntries;
-    totalEntries += logicalBucketSizes[i];
-  }
-  const baseIndices = new Uint32Array(totalEntries);
-  const writeOffsets = logicalBucketPointers.slice();
-
-  for (let instance = 0; instance < count; instance += 1) {
-    const baseOffset = instance * termsPerInstance;
-    for (let term = 0; term < termsPerInstance; term += 1) {
-      const idx = baseOffset + term;
-      const scalarBase = idx * 8;
-      let carry = 0;
-      for (let win = 0; win < numWindows; win += 1) {
-        const unsigned = win < numWindows - 1 ? extractWindowDigitWords(scalarWords, scalarBase, win * window, window) : 0;
-        let value = unsigned + carry;
-        carry = 0;
-        let neg = false;
-        if (value >= half) {
-          value = full - value;
-          neg = value !== 0;
-          carry = 1;
-        }
-        if (value === 0) {
-          continue;
-        }
-        const slot = (instance * numWindows + win) * bucketCount + (value - 1);
-        const raw = neg ? ((idx | INDEX_SIGN_BIT) >>> 0) : idx;
-        baseIndices[writeOffsets[slot]] = raw;
-        writeOffsets[slot] += 1;
-      }
-    }
-  }
-
-  const bucketPointers: number[] = [];
-  const bucketSizes: number[] = [];
-  const bucketValues: number[] = [];
-  const windowStarts = new Uint32Array(totalWindows);
-  const windowCounts = new Uint32Array(totalWindows);
-  for (let windowSlot = 0; windowSlot < totalWindows; windowSlot += 1) {
-    windowStarts[windowSlot] = bucketPointers.length;
-    let dispatchedInWindow = 0;
-    const bucketBase = windowSlot * bucketCount;
-    for (let value = 1; value <= bucketCount; value += 1) {
-      const slot = bucketBase + (value - 1);
-      const size = logicalBucketSizes[slot];
-      if (size === 0) {
-        continue;
-      }
-      const ptr = logicalBucketPointers[slot];
-      for (let offset = 0; offset < size; offset += maxChunkSize) {
-        bucketPointers.push(ptr + offset);
-        bucketSizes.push(Math.min(size - offset, maxChunkSize));
-        bucketValues.push(value);
-        dispatchedInWindow += 1;
-      }
-    }
-    windowCounts[windowSlot] = dispatchedInWindow;
-  }
-
-  return {
-    baseIndices,
-    bucketPointers: Uint32Array.from(bucketPointers),
-    bucketSizes: Uint32Array.from(bucketSizes),
-    bucketValues: Uint32Array.from(bucketValues),
-    windowStarts,
-    windowCounts,
-    numWindows,
-    bucketCount,
-  };
+  return buildSparseSignedBucketMetadataWords(scalarWords, count, termsPerInstance, window, maxChunkSize);
 }
 
 function affineToKernelPoint(point: AffinePoint, oneMontZ: string): JacobianPoint {
@@ -841,14 +735,7 @@ function sliceBaseFixture(fixture: Uint8Array, count: number): Uint8Array {
 }
 
 function makeMSMScalars(count: number): ScalarBatch {
-  const hexes = new Array<string>(count);
-  const words = new Uint32Array(count * 8);
-  for (let index = 0; index < count; index += 1) {
-    const scalar = makeRandomScalarData((0x9e3779b9 ^ count ^ index) >>> 0);
-    hexes[index] = scalar.hex;
-    words.set(scalar.words, index * 8);
-  }
-  return { hexes, words };
+  return makeRandomScalarBatch(count);
 }
 
 async function runMSMProfiled(
@@ -1115,7 +1002,8 @@ async function runPippengerMSMProfiled(
   device: GPUDevice,
   kernels: {
     bucket: Kernel;
-    windowSparse: Kernel;
+    weightBuckets: Kernel;
+    subsumPhase1: Kernel;
     combine: Kernel;
   },
   basesBytes: Uint8Array,
@@ -1177,20 +1065,40 @@ async function runPippengerMSMProfiled(
   profile.kernelMs += bucketKernelMs;
   profile.bucketReductionTotalMs += performance.now() - bucketStart;
 
-  const windowOutput = createEmptyPointStorageBuffer(device, "g1-pip-window-sparse-out", count * metadata.numWindows);
   const bucketValuesInput = createU32StorageBuffer(device, "g1-pip-window-values", metadata.bucketValues);
+  profile.uploadMs += bucketValuesInput.uploadMs;
+  const weightedBucketOutput = createEmptyPointStorageBuffer(device, "g1-pip-weighted-bucket-out", bucketCountOut);
+  const weightParams = createParamsBuffer(device, "g1-pip-weight-params", {
+    count: bucketCountOut,
+  });
+  profile.uploadMs += weightParams.uploadMs;
+  const weightBindGroup = createBindGroupForBuffers(
+    device,
+    kernels.weightBuckets,
+    "g1-pip-weight-bg",
+    bucketOutput,
+    zeroInput.buffer,
+    weightedBucketOutput,
+    weightParams.buffer,
+    bucketValuesInput.buffer,
+  );
+  const weightStart = performance.now();
+  const weightKernelMs = await submitKernelProfiled(device, kernels.weightBuckets, weightBindGroup, bucketCountOut, "g1-pip-weight");
+  profile.kernelMs += weightKernelMs;
+  profile.windowReductionTotalMs += performance.now() - weightStart;
+
+  const windowOutput = createEmptyPointStorageBuffer(device, "g1-pip-window-sparse-out", count * metadata.numWindows);
   const windowStartsInput = createU32StorageBuffer(device, "g1-pip-window-starts", metadata.windowStarts);
   const windowCountsInput = createU32StorageBuffer(device, "g1-pip-window-counts", metadata.windowCounts);
   const windowParams = createParamsBuffer(device, "g1-pip-window-sparse-params", {
     count: count * metadata.numWindows,
-    bucketCount: metadata.bucketCount,
   });
-  profile.uploadMs += bucketValuesInput.uploadMs + windowStartsInput.uploadMs + windowCountsInput.uploadMs + windowParams.uploadMs;
+  profile.uploadMs += windowStartsInput.uploadMs + windowCountsInput.uploadMs + windowParams.uploadMs;
   const windowBindGroup = createBindGroupForBuffers(
     device,
-    kernels.windowSparse,
+    kernels.subsumPhase1,
     "g1-pip-window-sparse-bg",
-    bucketOutput,
+    weightedBucketOutput,
     zeroInput.buffer,
     windowOutput,
     windowParams.buffer,
@@ -1199,7 +1107,7 @@ async function runPippengerMSMProfiled(
     windowCountsInput.buffer,
   );
   const windowStart = performance.now();
-  const windowKernelMs = await submitKernelProfiled(device, kernels.windowSparse, windowBindGroup, count * metadata.numWindows * 64, "g1-pip-window-sparse");
+  const windowKernelMs = await submitKernelProfiled(device, kernels.subsumPhase1, windowBindGroup, count * metadata.numWindows * 64, "g1-pip-window-sparse");
   profile.kernelMs += windowKernelMs;
   profile.windowReductionTotalMs += performance.now() - windowStart;
 
@@ -1238,7 +1146,9 @@ async function runPippengerMSMProfiled(
   windowStartsInput.buffer.destroy();
   windowCountsInput.buffer.destroy();
   bucketOutput.destroy();
+  weightedBucketOutput.destroy();
   bucketParams.buffer.destroy();
+  weightParams.buffer.destroy();
   windowOutput.destroy();
   windowParams.buffer.destroy();
   finalOutput.destroy();
@@ -1341,7 +1251,8 @@ async function runBenchmark(): Promise<void> {
     const kernel = createKernel(device, shaderText);
     const pippengerKernels = {
       bucket: createKernel(device, shaderText, "g1_msm_bucket_sparse_main"),
-      windowSparse: createKernel(device, shaderText, "g1_msm_window_sparse_main"),
+      weightBuckets: createKernel(device, shaderText, "g1_msm_weight_buckets_main"),
+      subsumPhase1: createKernel(device, shaderText, "g1_msm_subsum_phase1_main"),
       combine: createKernel(device, shaderText, "g1_msm_combine_main"),
     };
     const initMs = performance.now() - initStart;
