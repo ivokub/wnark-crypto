@@ -5,6 +5,17 @@ import {
   buildSparseSignedBucketMetadataWords,
   makeRandomScalarBatch,
 } from "./curvegpu/msm_shared";
+import {
+  createBindGroupForBuffers as sharedCreateBindGroupForBuffers,
+  createEmptyPointStorageBuffer as sharedCreateEmptyPointStorageBuffer,
+  createMSMKernel as sharedCreateMSMKernel,
+  createParamsBuffer as sharedCreateParamsBuffer,
+  createStorageBufferFromBytes,
+  createU32StorageBuffer as sharedCreateU32StorageBuffer,
+  Kernel,
+  readbackBufferProfiled,
+  submitKernelProfiled as sharedSubmitKernelProfiled,
+} from "./curvegpu/msm_gpu_runtime";
 
 type AffinePoint = {
   x_bytes_le: string;
@@ -21,11 +32,6 @@ type FixtureMetadata = {
   count: number;
   point_bytes: number;
   format: string;
-};
-
-type Kernel = {
-  pipeline: GPUComputePipeline;
-  bindGroupLayout: GPUBindGroupLayout;
 };
 
 type OpProfile = {
@@ -58,8 +64,13 @@ type MSMProfile = {
   totalMs: number;
 };
 
-declare const GPUShaderStage: { COMPUTE: number };
-declare const GPUBufferUsage: { STORAGE: number; COPY_DST: number; COPY_SRC: number; MAP_READ: number; UNIFORM: number };
+declare const GPUBufferUsage: {
+  STORAGE: number;
+  COPY_DST: number;
+  COPY_SRC: number;
+  MAP_READ: number;
+  UNIFORM: number;
+};
 declare const GPUMapMode: { READ: number };
 
 const FP_BYTES = 48;
@@ -157,29 +168,7 @@ async function appendAdapterDiagnostics(adapter: GPUAdapter, lines: string[]): P
 }
 
 function createKernel(device: GPUDevice, shaderCode: string, entryPoint = "g1_ops_main"): Kernel {
-  const shaderModule = device.createShaderModule({ label: "bls12-381-g1-shader", code: shaderCode });
-  const bindGroupLayout = device.createBindGroupLayout({
-    label: "bls12-381-g1-bgl",
-    entries: [
-      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
-      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
-      { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
-      { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-      { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
-      { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
-      { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
-    ],
-  });
-  const pipelineLayout = device.createPipelineLayout({
-    label: "bls12-381-g1-pl",
-    bindGroupLayouts: [bindGroupLayout],
-  });
-  const pipeline = device.createComputePipeline({
-    label: "bls12-381-g1-pipeline",
-    layout: pipelineLayout,
-    compute: { module: shaderModule, entryPoint },
-  });
-  return { pipeline, bindGroupLayout };
+  return sharedCreateMSMKernel(device, shaderCode, "bls12-381-g1", entryPoint);
 }
 
 function hexToBytes(hex: string): Uint8Array {
@@ -569,15 +558,7 @@ function createPointStorageBuffer(
 ): { buffer: GPUBuffer; uploadMs: number } {
   const bytes = packPointBatch(points.length === 0 ? [zeroPoint()] : points);
   const count = Math.max(minCount, points.length === 0 ? 1 : points.length);
-  const size = count * POINT_BYTES;
-  const buffer = device.createBuffer({
-    label,
-    size,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  });
-  const start = performance.now();
-  device.queue.writeBuffer(buffer, 0, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
-  return { buffer, uploadMs: performance.now() - start };
+  return createStorageBufferFromBytes(device, label, bytes, count * POINT_BYTES);
 }
 
 function createPointStorageBufferFromBytes(
@@ -586,16 +567,7 @@ function createPointStorageBufferFromBytes(
   bytes: Uint8Array,
   count: number,
 ): { buffer: GPUBuffer; uploadMs: number } {
-  const buffer = device.createBuffer({
-    label,
-    size: Math.max(1, count) * POINT_BYTES,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  });
-  const start = performance.now();
-  if (bytes.byteLength > 0) {
-    device.queue.writeBuffer(buffer, 0, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
-  }
-  return { buffer, uploadMs: performance.now() - start };
+  return createStorageBufferFromBytes(device, label, bytes, Math.max(1, count) * POINT_BYTES);
 }
 
 function createU32StorageBuffer(
@@ -603,25 +575,11 @@ function createU32StorageBuffer(
   label: string,
   values: Uint32Array,
 ): { buffer: GPUBuffer; uploadMs: number } {
-  const byteLength = Math.max(4, values.byteLength);
-  const buffer = device.createBuffer({
-    label,
-    size: byteLength,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  });
-  const uploadStart = performance.now();
-  if (values.byteLength > 0) {
-    device.queue.writeBuffer(buffer, 0, values.buffer.slice(values.byteOffset, values.byteOffset + values.byteLength));
-  }
-  return { buffer, uploadMs: performance.now() - uploadStart };
+  return sharedCreateU32StorageBuffer(device, label, values);
 }
 
 function createEmptyPointStorageBuffer(device: GPUDevice, label: string, count: number): GPUBuffer {
-  return device.createBuffer({
-    label,
-    size: Math.max(1, count) * POINT_BYTES,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-  });
+  return sharedCreateEmptyPointStorageBuffer(device, label, count, POINT_BYTES);
 }
 
 function createParamsBuffer(
@@ -637,22 +595,7 @@ function createParamsBuffer(
     rowWidth?: number;
   },
 ): { buffer: GPUBuffer; uploadMs: number } {
-  const buffer = device.createBuffer({
-    label,
-    size: UNIFORM_BYTES,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
-  const params = new Uint32Array(UNIFORM_BYTES / 4);
-  params[0] = values.count;
-  params[1] = values.opcode ?? 0;
-  params[2] = values.termsPerInstance ?? 0;
-  params[3] = values.window ?? 0;
-  params[4] = values.numWindows ?? 0;
-  params[5] = values.bucketCount ?? 0;
-  params[6] = values.rowWidth ?? 0;
-  const start = performance.now();
-  device.queue.writeBuffer(buffer, 0, params.buffer);
-  return { buffer, uploadMs: performance.now() - start };
+  return sharedCreateParamsBuffer(device, label, UNIFORM_BYTES, values);
 }
 
 function createBindGroupForBuffers(
@@ -667,22 +610,7 @@ function createBindGroupForBuffers(
   meta1?: GPUBuffer,
   meta2?: GPUBuffer,
 ): GPUBindGroup {
-  const metaA = meta0 ?? inputB;
-  const metaB = meta1 ?? inputB;
-  const metaC = meta2 ?? inputB;
-  return device.createBindGroup({
-    label,
-    layout: kernel.bindGroupLayout,
-    entries: [
-      { binding: 0, resource: { buffer: inputA } },
-      { binding: 1, resource: { buffer: inputB } },
-      { binding: 2, resource: { buffer: output } },
-      { binding: 3, resource: { buffer: params } },
-      { binding: 4, resource: { buffer: metaA } },
-      { binding: 5, resource: { buffer: metaB } },
-      { binding: 6, resource: { buffer: metaC } },
-    ],
-  });
+  return sharedCreateBindGroupForBuffers(device, kernel, label, inputA, inputB, output, params, meta0, meta1, meta2);
 }
 
 async function submitKernelProfiled(
@@ -692,16 +620,7 @@ async function submitKernelProfiled(
   count: number,
   label: string,
 ): Promise<number> {
-  const start = performance.now();
-  const encoder = device.createCommandEncoder({ label: `${label}-encoder` });
-  const pass = encoder.beginComputePass({ label: `${label}-pass` });
-  pass.setPipeline(kernel.pipeline);
-  pass.setBindGroup(0, bindGroup);
-  pass.dispatchWorkgroups(Math.ceil(count / 64));
-  pass.end();
-  device.queue.submit([encoder.finish()]);
-  await device.queue.onSubmittedWorkDone();
-  return performance.now() - start;
+  return sharedSubmitKernelProfiled(device, kernel, bindGroup, count, label);
 }
 
 async function readbackPointBufferProfiled(
@@ -709,21 +628,8 @@ async function readbackPointBufferProfiled(
   buffer: GPUBuffer,
   count: number,
 ): Promise<{ points: JacobianPoint[]; readbackMs: number }> {
-  const size = Math.max(1, count) * POINT_BYTES;
-  const staging = device.createBuffer({
-    label: "g1-readback-staging",
-    size,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-  });
-  const start = performance.now();
-  const encoder = device.createCommandEncoder({ label: "g1-readback-encoder" });
-  encoder.copyBufferToBuffer(buffer, 0, staging, 0, size);
-  device.queue.submit([encoder.finish()]);
-  await staging.mapAsync(GPUMapMode.READ);
-  const bytes = new Uint8Array(staging.getMappedRange()).slice();
-  staging.unmap();
-  staging.destroy();
-  return { points: unpackPointBatch(bytes, count), readbackMs: performance.now() - start };
+  const result = await readbackBufferProfiled(device, buffer, Math.max(1, count) * POINT_BYTES);
+  return { points: unpackPointBatch(result.bytes, count), readbackMs: result.readbackMs };
 }
 
 function sliceBaseFixture(fixture: Uint8Array, count: number): Uint8Array {
