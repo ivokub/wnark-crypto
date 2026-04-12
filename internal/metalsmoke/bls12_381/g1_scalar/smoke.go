@@ -1,10 +1,9 @@
-package main
+package smoke
 
 import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -47,11 +46,7 @@ type phase7Vectors struct {
 	BaseCases       []scalarMulBaseCase `json:"base_cases"`
 }
 
-func main() {
-	if err := run(); err != nil {
-		log.Fatalf("FATAL: %v", err)
-	}
-}
+func Run() error { return run() }
 
 func run() error {
 	fmt.Println("=== BLS12-381 G1 Phase 7 Metal Smoke ===")
@@ -138,7 +133,7 @@ func loadVectors() (phase7Vectors, error) {
 	if !ok {
 		return phase7Vectors{}, os.ErrNotExist
 	}
-	path := filepath.Join(filepath.Dir(filename), "..", "..", "testdata", "vectors", "g1", "bls12_381_phase7_scalar_mul.json")
+	path := filepath.Join(filepath.Dir(filename), "..", "..", "..", "..", "testdata", "vectors", "g1", "bls12_381_phase7_scalar_mul.json")
 	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return phase7Vectors{}, err

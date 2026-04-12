@@ -1,9 +1,8 @@
-package main
+package smoke
 
 import (
 	"encoding/binary"
 	"fmt"
-	"log"
 	"math/big"
 	"math/bits"
 	"math/rand"
@@ -14,11 +13,7 @@ import (
 	bn254gpu "github.com/ivokub/wnark-crypto/go/curvegpu/bn254"
 )
 
-func main() {
-	if err := run(); err != nil {
-		log.Fatalf("FATAL: %v", err)
-	}
-}
+func Run() error { return run() }
 
 func run() error {
 	fmt.Println("=== BN254 fr Phase 4 Vector Metal Smoke ===")

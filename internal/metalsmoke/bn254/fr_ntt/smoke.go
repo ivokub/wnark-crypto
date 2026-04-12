@@ -1,10 +1,9 @@
-package main
+package smoke
 
 import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -28,11 +27,7 @@ type nttCase struct {
 	InverseScaleLE         string     `json:"inverse_scale_le"`
 }
 
-func main() {
-	if err := run(); err != nil {
-		log.Fatalf("FATAL: %v", err)
-	}
-}
+func Run() error { return run() }
 
 func run() error {
 	fmt.Println("=== BN254 fr Phase 5 NTT Metal Smoke ===")
@@ -92,7 +87,7 @@ func loadVectors() (phase5Vectors, error) {
 	if !ok {
 		return phase5Vectors{}, os.ErrNotExist
 	}
-	path := filepath.Join(filepath.Dir(filename), "..", "..", "testdata", "vectors", "fr", "bn254_phase5_ntt.json")
+	path := filepath.Join(filepath.Dir(filename), "..", "..", "..", "..", "testdata", "vectors", "fr", "bn254_phase5_ntt.json")
 	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return phase5Vectors{}, err

@@ -1,19 +1,18 @@
-package main
+package smoke
 
 import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"runtime"
 
-	gnarkbls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
-	gnarkfp "github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
+	gnarkbn254 "github.com/consensys/gnark-crypto/ecc/bn254"
+	gnarkfp "github.com/consensys/gnark-crypto/ecc/bn254/fp"
 
 	"github.com/ivokub/wnark-crypto/go/curvegpu"
-	bls12381gpu "github.com/ivokub/wnark-crypto/go/curvegpu/bls12_381"
+	bn254gpu "github.com/ivokub/wnark-crypto/go/curvegpu/bn254"
 )
 
 type affinePoint struct {
@@ -43,14 +42,10 @@ type phase6Vectors struct {
 	PointCases []g1Case `json:"point_cases"`
 }
 
-func main() {
-	if err := run(); err != nil {
-		log.Fatalf("FATAL: %v", err)
-	}
-}
+func Run() error { return run() }
 
 func run() error {
-	fmt.Println("=== BLS12-381 G1 Phase 6 Metal Smoke ===")
+	fmt.Println("=== BN254 G1 Phase 6 Metal Smoke ===")
 	fmt.Println()
 
 	vectors, err := loadVectors()
@@ -58,13 +53,13 @@ func run() error {
 		return err
 	}
 
-	deviceSet, err := bls12381gpu.NewHeadlessDevice()
+	deviceSet, err := bn254gpu.NewHeadlessDevice()
 	if err != nil {
 		return err
 	}
 	defer deviceSet.Close()
 
-	kernel, err := bls12381gpu.NewG1Kernel(deviceSet.Device)
+	kernel, err := bn254gpu.NewG1Kernel(deviceSet.Device)
 	if err != nil {
 		return err
 	}
@@ -73,15 +68,15 @@ func run() error {
 	fmt.Printf("1. Adapter: %s\n", deviceSet.Adapter.Info().Name)
 	fmt.Printf("2. G1 cases: %d\n", len(vectors.PointCases))
 
-	pAff := make([]bls12381gpu.G1Affine, len(vectors.PointCases))
-	qAff := make([]bls12381gpu.G1Affine, len(vectors.PointCases))
-	pJac := make([]bls12381gpu.G1Jac, len(vectors.PointCases))
-	wantNeg := make([]bls12381gpu.G1Jac, len(vectors.PointCases))
-	wantDouble := make([]bls12381gpu.G1Jac, len(vectors.PointCases))
-	wantAdd := make([]bls12381gpu.G1Jac, len(vectors.PointCases))
-	wantAffine := make([]bls12381gpu.G1Jac, len(vectors.PointCases))
-	wantAffineAdd := make([]bls12381gpu.G1Jac, len(vectors.PointCases))
-	wantInfinity := make([]bls12381gpu.G1Jac, len(vectors.PointCases))
+	pAff := make([]bn254gpu.G1Affine, len(vectors.PointCases))
+	qAff := make([]bn254gpu.G1Affine, len(vectors.PointCases))
+	pJac := make([]bn254gpu.G1Jac, len(vectors.PointCases))
+	wantNeg := make([]bn254gpu.G1Jac, len(vectors.PointCases))
+	wantDouble := make([]bn254gpu.G1Jac, len(vectors.PointCases))
+	wantAdd := make([]bn254gpu.G1Jac, len(vectors.PointCases))
+	wantAffine := make([]bn254gpu.G1Jac, len(vectors.PointCases))
+	wantAffineAdd := make([]bn254gpu.G1Jac, len(vectors.PointCases))
+	wantInfinity := make([]bn254gpu.G1Jac, len(vectors.PointCases))
 	for i, tc := range vectors.PointCases {
 		pAff[i] = mustAffine(tc.PAffine)
 		qAff[i] = mustAffine(tc.QAffine)
@@ -91,7 +86,7 @@ func run() error {
 		wantDouble[i] = mustJac(tc.DoublePJacobian)
 		wantAdd[i] = mustJac(tc.AddMixedPPlusQJacob)
 		wantAffineAdd[i] = mustJac(tc.AffineAddPPlusQ)
-		wantInfinity[i] = bls12381gpu.G1JacInfinity()
+		wantInfinity[i] = bn254gpu.G1JacInfinity()
 	}
 
 	gotCopy, err := kernel.Copy(pJac)
@@ -128,11 +123,11 @@ func run() error {
 	}
 
 	fmt.Println()
-	fmt.Println("PASS: BLS12-381 G1 Phase 6 Metal smoke succeeded")
+	fmt.Println("PASS: BN254 G1 Phase 6 Metal smoke succeeded")
 	return nil
 }
 
-func verify(name string, got []bls12381gpu.G1Jac, err error, want []bls12381gpu.G1Jac) error {
+func verify(name string, got []bn254gpu.G1Jac, err error, want []bn254gpu.G1Jac) error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", name, err)
 	}
@@ -160,7 +155,7 @@ func loadVectors() (phase6Vectors, error) {
 	if !ok {
 		return phase6Vectors{}, os.ErrNotExist
 	}
-	path := filepath.Join(filepath.Dir(filename), "..", "..", "testdata", "vectors", "g1", "bls12_381_phase6_g1_ops.json")
+	path := filepath.Join(filepath.Dir(filename), "..", "..", "..", "..", "testdata", "vectors", "g1", "bn254_phase6_g1_ops.json")
 	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return phase6Vectors{}, err
@@ -172,31 +167,31 @@ func loadVectors() (phase6Vectors, error) {
 	return out, nil
 }
 
-func mustAffine(raw affinePoint) bls12381gpu.G1Affine {
-	return bls12381gpu.G1Affine{
-		X: mustU32x12(raw.XBytesLE),
-		Y: mustU32x12(raw.YBytesLE),
+func mustAffine(raw affinePoint) bn254gpu.G1Affine {
+	return bn254gpu.G1Affine{
+		X: mustU32x8(raw.XBytesLE),
+		Y: mustU32x8(raw.YBytesLE),
 	}
 }
 
-func mustJac(raw jacPoint) bls12381gpu.G1Jac {
-	return bls12381gpu.G1Jac{
-		X: mustU32x12(raw.XBytesLE),
-		Y: mustU32x12(raw.YBytesLE),
-		Z: mustU32x12(raw.ZBytesLE),
+func mustJac(raw jacPoint) bn254gpu.G1Jac {
+	return bn254gpu.G1Jac{
+		X: mustU32x8(raw.XBytesLE),
+		Y: mustU32x8(raw.YBytesLE),
+		Z: mustU32x8(raw.ZBytesLE),
 	}
 }
 
-func mustU32x12(raw string) curvegpu.U32x12 {
+func mustU32x8(raw string) curvegpu.U32x8 {
 	bytes, err := hex.DecodeString(raw)
 	if err != nil {
 		panic(err)
 	}
-	if len(bytes) != 48 {
+	if len(bytes) != 32 {
 		panic("invalid element length")
 	}
-	var out curvegpu.U32x12
-	for i := 0; i < 12; i++ {
+	var out curvegpu.U32x8
+	for i := 0; i < 8; i++ {
 		base := i * 4
 		out[i] = uint32(bytes[base]) |
 			(uint32(bytes[base+1]) << 8) |
@@ -206,10 +201,10 @@ func mustU32x12(raw string) curvegpu.U32x12 {
 	return out
 }
 
-func gpuJacToGnark(in bls12381gpu.G1Jac) gnarkbls12381.G1Jac {
-	return gnarkbls12381.G1Jac{
-		X: gnarkfp.Element(curvegpu.JoinWords12(in.X)),
-		Y: gnarkfp.Element(curvegpu.JoinWords12(in.Y)),
-		Z: gnarkfp.Element(curvegpu.JoinWords12(in.Z)),
+func gpuJacToGnark(in bn254gpu.G1Jac) gnarkbn254.G1Jac {
+	return gnarkbn254.G1Jac{
+		X: gnarkfp.Element(curvegpu.JoinWords8(in.X)),
+		Y: gnarkfp.Element(curvegpu.JoinWords8(in.Y)),
+		Z: gnarkfp.Element(curvegpu.JoinWords8(in.Z)),
 	}
 }

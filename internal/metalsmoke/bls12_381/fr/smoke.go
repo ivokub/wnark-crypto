@@ -1,20 +1,19 @@
-package main
+package smoke
 
 import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"math/big"
 	"os"
 	"path/filepath"
 	"runtime"
 
-	gnarkfr "github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	gnarkfr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 
 	"github.com/ivokub/wnark-crypto/go/curvegpu"
-	bn254gpu "github.com/ivokub/wnark-crypto/go/curvegpu/bn254"
+	bls12_381gpu "github.com/ivokub/wnark-crypto/go/curvegpu/bls12_381"
 )
 
 type phase2Vectors struct {
@@ -50,14 +49,10 @@ type convertCase struct {
 	MontBytes    string `json:"mont_bytes_le"`
 }
 
-func main() {
-	if err := run(); err != nil {
-		log.Fatalf("FATAL: %v", err)
-	}
-}
+func Run() error { return run() }
 
 func run() error {
-	fmt.Println("=== BN254 fr Phase 2 Metal Smoke ===")
+	fmt.Println("=== BLS12-381 fr Phase 2 Metal Smoke ===")
 	fmt.Println()
 
 	vectors, err := loadVectors()
@@ -65,13 +60,13 @@ func run() error {
 		return err
 	}
 
-	deviceSet, err := bn254gpu.NewHeadlessDevice()
+	deviceSet, err := bls12_381gpu.NewHeadlessDevice()
 	if err != nil {
 		return err
 	}
 	defer deviceSet.Close()
 
-	kernel, err := bn254gpu.NewFrKernel(deviceSet.Device)
+	kernel, err := bls12_381gpu.NewFrKernel(deviceSet.Device)
 	if err != nil {
 		return err
 	}
@@ -89,22 +84,22 @@ func run() error {
 	if err := verifyStaticOps(kernel, allElementCases, vectors.ConvertCases); err != nil {
 		return err
 	}
-	if err := verifyBinaryOp(kernel, "add", bn254gpu.FrOpAdd, allElementCases, func(tc elementCase) string { return tc.AddBytesLE }, applyAdd); err != nil {
+	if err := verifyBinaryOp(kernel, "add", bls12_381gpu.FrOpAdd, allElementCases, func(tc elementCase) string { return tc.AddBytesLE }, applyAdd); err != nil {
 		return err
 	}
-	if err := verifyBinaryOp(kernel, "sub", bn254gpu.FrOpSub, allElementCases, func(tc elementCase) string { return tc.SubBytesLE }, applySub); err != nil {
+	if err := verifyBinaryOp(kernel, "sub", bls12_381gpu.FrOpSub, allElementCases, func(tc elementCase) string { return tc.SubBytesLE }, applySub); err != nil {
 		return err
 	}
-	if err := verifyUnaryOp(kernel, "neg", bn254gpu.FrOpNeg, allElementCases, func(tc elementCase) string { return tc.NegABytesLE }, applyNeg); err != nil {
+	if err := verifyUnaryOp(kernel, "neg", bls12_381gpu.FrOpNeg, allElementCases, func(tc elementCase) string { return tc.NegABytesLE }, applyNeg); err != nil {
 		return err
 	}
-	if err := verifyUnaryOp(kernel, "double", bn254gpu.FrOpDouble, allElementCases, func(tc elementCase) string { return tc.DoubleABytesLE }, applyDouble); err != nil {
+	if err := verifyUnaryOp(kernel, "double", bls12_381gpu.FrOpDouble, allElementCases, func(tc elementCase) string { return tc.DoubleABytesLE }, applyDouble); err != nil {
 		return err
 	}
-	if err := verifyBinaryOp(kernel, "mul", bn254gpu.FrOpMul, allElementCases, func(tc elementCase) string { return tc.MulBytesLE }, applyMul); err != nil {
+	if err := verifyBinaryOp(kernel, "mul", bls12_381gpu.FrOpMul, allElementCases, func(tc elementCase) string { return tc.MulBytesLE }, applyMul); err != nil {
 		return err
 	}
-	if err := verifyUnaryOp(kernel, "square", bn254gpu.FrOpSquare, allElementCases, func(tc elementCase) string { return tc.SquareABytesLE }, applySquare); err != nil {
+	if err := verifyUnaryOp(kernel, "square", bls12_381gpu.FrOpSquare, allElementCases, func(tc elementCase) string { return tc.SquareABytesLE }, applySquare); err != nil {
 		return err
 	}
 	if err := verifyToMont(kernel, vectors.ConvertCases); err != nil {
@@ -118,11 +113,11 @@ func run() error {
 	}
 
 	fmt.Println()
-	fmt.Println("PASS: BN254 fr Phase 2 Metal smoke succeeded")
+	fmt.Println("PASS: BLS12-381 fr Phase 2 Metal smoke succeeded")
 	return nil
 }
 
-func verifyStaticOps(kernel *bn254gpu.FrKernel, cases []elementCase, convertCases []convertCase) error {
+func verifyStaticOps(kernel *bls12_381gpu.FrKernel, cases []elementCase, convertCases []convertCase) error {
 	aBatch := make([]curvegpu.U32x8, len(cases))
 	bBatch := make([]curvegpu.U32x8, len(cases))
 	copyExpected := make([]string, len(cases))
@@ -133,14 +128,14 @@ func verifyStaticOps(kernel *bn254gpu.FrKernel, cases []elementCase, convertCase
 		copyExpected[i] = tc.ABytesLE
 		equalExpected[i] = tc.EqualBytesLE
 	}
-	if err := verifyBatch(kernel, "copy", bn254gpu.FrOpCopy, aBatch, bBatch, copyExpected); err != nil {
+	if err := verifyBatch(kernel, "copy", bls12_381gpu.FrOpCopy, aBatch, bBatch, copyExpected); err != nil {
 		return err
 	}
-	if err := verifyBatch(kernel, "equal", bn254gpu.FrOpEqual, aBatch, bBatch, equalExpected); err != nil {
+	if err := verifyBatch(kernel, "equal", bls12_381gpu.FrOpEqual, aBatch, bBatch, equalExpected); err != nil {
 		return err
 	}
 
-	zeros := bn254gpu.ZeroBatch(len(cases))
+	zeros := bls12_381gpu.ZeroBatch(len(cases))
 	zeroExpected := make([]string, len(cases))
 	oneExpected := make([]string, len(cases))
 	oneMont := mustFindConvertCase(convertCases, "one").MontBytes
@@ -148,16 +143,16 @@ func verifyStaticOps(kernel *bn254gpu.FrKernel, cases []elementCase, convertCase
 		zeroExpected[i] = "0000000000000000000000000000000000000000000000000000000000000000"
 		oneExpected[i] = oneMont
 	}
-	if err := verifyBatch(kernel, "zero", bn254gpu.FrOpZero, zeros, zeros, zeroExpected); err != nil {
+	if err := verifyBatch(kernel, "zero", bls12_381gpu.FrOpZero, zeros, zeros, zeroExpected); err != nil {
 		return err
 	}
-	if err := verifyBatch(kernel, "one", bn254gpu.FrOpOne, zeros, zeros, oneExpected); err != nil {
+	if err := verifyBatch(kernel, "one", bls12_381gpu.FrOpOne, zeros, zeros, oneExpected); err != nil {
 		return err
 	}
 	return nil
 }
 
-func verifyBinaryOp(kernel *bn254gpu.FrKernel, name string, op bn254gpu.FrOp, cases []elementCase, expected func(elementCase) string, cpu func(a, b gnarkfr.Element) gnarkfr.Element) error {
+func verifyBinaryOp(kernel *bls12_381gpu.FrKernel, name string, op bls12_381gpu.FrOp, cases []elementCase, expected func(elementCase) string, cpu func(a, b gnarkfr.Element) gnarkfr.Element) error {
 	aBatch := make([]curvegpu.U32x8, len(cases))
 	bBatch := make([]curvegpu.U32x8, len(cases))
 	expectedBatch := make([]string, len(cases))
@@ -176,9 +171,9 @@ func verifyBinaryOp(kernel *bn254gpu.FrKernel, name string, op bn254gpu.FrOp, ca
 	return verifyBatch(kernel, name, op, aBatch, bBatch, expectedBatch)
 }
 
-func verifyUnaryOp(kernel *bn254gpu.FrKernel, name string, op bn254gpu.FrOp, cases []elementCase, expected func(elementCase) string, cpu func(a gnarkfr.Element) gnarkfr.Element) error {
+func verifyUnaryOp(kernel *bls12_381gpu.FrKernel, name string, op bls12_381gpu.FrOp, cases []elementCase, expected func(elementCase) string, cpu func(a gnarkfr.Element) gnarkfr.Element) error {
 	aBatch := make([]curvegpu.U32x8, len(cases))
-	bBatch := bn254gpu.ZeroBatch(len(cases))
+	bBatch := bls12_381gpu.ZeroBatch(len(cases))
 	expectedBatch := make([]string, len(cases))
 	for i, tc := range cases {
 		aBatch[i] = mustU32x8(tc.ABytesLE)
@@ -193,20 +188,20 @@ func verifyUnaryOp(kernel *bn254gpu.FrKernel, name string, op bn254gpu.FrOp, cas
 	return verifyBatch(kernel, name, op, aBatch, bBatch, expectedBatch)
 }
 
-func verifyNormalize(kernel *bn254gpu.FrKernel, cases []normalizeCase) error {
+func verifyNormalize(kernel *bls12_381gpu.FrKernel, cases []normalizeCase) error {
 	aBatch := make([]curvegpu.U32x8, len(cases))
-	bBatch := bn254gpu.ZeroBatch(len(cases))
+	bBatch := bls12_381gpu.ZeroBatch(len(cases))
 	expectedBatch := make([]string, len(cases))
 	for i, tc := range cases {
 		aBatch[i] = mustU32x8(tc.InputBytesLE)
 		expectedBatch[i] = tc.ExpectedBytesLE
 	}
-	return verifyBatch(kernel, "normalize", bn254gpu.FrOpNormalize, aBatch, bBatch, expectedBatch)
+	return verifyBatch(kernel, "normalize", bls12_381gpu.FrOpNormalize, aBatch, bBatch, expectedBatch)
 }
 
-func verifyToMont(kernel *bn254gpu.FrKernel, cases []convertCase) error {
+func verifyToMont(kernel *bls12_381gpu.FrKernel, cases []convertCase) error {
 	aBatch := make([]curvegpu.U32x8, len(cases))
-	bBatch := bn254gpu.ZeroBatch(len(cases))
+	bBatch := bls12_381gpu.ZeroBatch(len(cases))
 	expectedBatch := make([]string, len(cases))
 	for i, tc := range cases {
 		aBatch[i] = mustU32x8(tc.RegularBytes)
@@ -217,12 +212,12 @@ func verifyToMont(kernel *bn254gpu.FrKernel, cases []convertCase) error {
 			return fmt.Errorf("to_mont cpu mismatch for %s: got=%s want=%s", tc.Name, gotCPU, expectedBatch[i])
 		}
 	}
-	return verifyBatch(kernel, "to_mont", bn254gpu.FrOpToMont, aBatch, bBatch, expectedBatch)
+	return verifyBatch(kernel, "to_mont", bls12_381gpu.FrOpToMont, aBatch, bBatch, expectedBatch)
 }
 
-func verifyFromMont(kernel *bn254gpu.FrKernel, cases []convertCase) error {
+func verifyFromMont(kernel *bls12_381gpu.FrKernel, cases []convertCase) error {
 	aBatch := make([]curvegpu.U32x8, len(cases))
-	bBatch := bn254gpu.ZeroBatch(len(cases))
+	bBatch := bls12_381gpu.ZeroBatch(len(cases))
 	expectedBatch := make([]string, len(cases))
 	for i, tc := range cases {
 		aBatch[i] = mustU32x8(tc.MontBytes)
@@ -233,10 +228,10 @@ func verifyFromMont(kernel *bn254gpu.FrKernel, cases []convertCase) error {
 			return fmt.Errorf("from_mont cpu mismatch for %s: got=%s want=%s", tc.Name, gotCPU, expectedBatch[i])
 		}
 	}
-	return verifyBatch(kernel, "from_mont", bn254gpu.FrOpFromMont, aBatch, bBatch, expectedBatch)
+	return verifyBatch(kernel, "from_mont", bls12_381gpu.FrOpFromMont, aBatch, bBatch, expectedBatch)
 }
 
-func verifyBatch(kernel *bn254gpu.FrKernel, name string, op bn254gpu.FrOp, aBatch, bBatch []curvegpu.U32x8, expected []string) error {
+func verifyBatch(kernel *bls12_381gpu.FrKernel, name string, op bls12_381gpu.FrOp, aBatch, bBatch []curvegpu.U32x8, expected []string) error {
 	fmt.Printf("4. %s... ", name)
 	got, err := kernel.Run(op, aBatch, bBatch)
 	if err != nil {
@@ -293,7 +288,7 @@ func loadVectors() (phase2Vectors, error) {
 	if !ok {
 		return phase2Vectors{}, fmt.Errorf("runtime caller lookup failed")
 	}
-	path := filepath.Join(filepath.Dir(file), "..", "..", "testdata", "vectors", "fr", "bn254_phase2_ops.json")
+	path := filepath.Join(filepath.Dir(file), "..", "..", "..", "..", "testdata", "vectors", "fr", "bls12_381_phase2_ops.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return phase2Vectors{}, fmt.Errorf("read vectors: %w", err)

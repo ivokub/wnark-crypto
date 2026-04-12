@@ -1,23 +1,22 @@
-package main
+package smoke
 
 import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"math/big"
 	"os"
 	"path/filepath"
 	"runtime"
 
-	gnarkfr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
+	gnarkfp "github.com/consensys/gnark-crypto/ecc/bn254/fp"
 
 	"github.com/ivokub/wnark-crypto/go/curvegpu"
-	bls12_381gpu "github.com/ivokub/wnark-crypto/go/curvegpu/bls12_381"
+	bn254gpu "github.com/ivokub/wnark-crypto/go/curvegpu/bn254"
 )
 
-type phase2Vectors struct {
+type phase3Vectors struct {
 	ElementCases      []elementCase   `json:"element_cases"`
 	EdgeCases         []elementCase   `json:"edge_cases"`
 	DifferentialCases []elementCase   `json:"differential_cases"`
@@ -50,14 +49,10 @@ type convertCase struct {
 	MontBytes    string `json:"mont_bytes_le"`
 }
 
-func main() {
-	if err := run(); err != nil {
-		log.Fatalf("FATAL: %v", err)
-	}
-}
+func Run() error { return run() }
 
 func run() error {
-	fmt.Println("=== BLS12-381 fr Phase 2 Metal Smoke ===")
+	fmt.Println("=== BN254 fp Phase 3 Metal Smoke ===")
 	fmt.Println()
 
 	vectors, err := loadVectors()
@@ -65,13 +60,13 @@ func run() error {
 		return err
 	}
 
-	deviceSet, err := bls12_381gpu.NewHeadlessDevice()
+	deviceSet, err := bn254gpu.NewHeadlessDevice()
 	if err != nil {
 		return err
 	}
 	defer deviceSet.Close()
 
-	kernel, err := bls12_381gpu.NewFrKernel(deviceSet.Device)
+	kernel, err := bn254gpu.NewFpKernel(deviceSet.Device)
 	if err != nil {
 		return err
 	}
@@ -89,22 +84,22 @@ func run() error {
 	if err := verifyStaticOps(kernel, allElementCases, vectors.ConvertCases); err != nil {
 		return err
 	}
-	if err := verifyBinaryOp(kernel, "add", bls12_381gpu.FrOpAdd, allElementCases, func(tc elementCase) string { return tc.AddBytesLE }, applyAdd); err != nil {
+	if err := verifyBinaryOp(kernel, "add", bn254gpu.FpOpAdd, allElementCases, func(tc elementCase) string { return tc.AddBytesLE }, applyAdd); err != nil {
 		return err
 	}
-	if err := verifyBinaryOp(kernel, "sub", bls12_381gpu.FrOpSub, allElementCases, func(tc elementCase) string { return tc.SubBytesLE }, applySub); err != nil {
+	if err := verifyBinaryOp(kernel, "sub", bn254gpu.FpOpSub, allElementCases, func(tc elementCase) string { return tc.SubBytesLE }, applySub); err != nil {
 		return err
 	}
-	if err := verifyUnaryOp(kernel, "neg", bls12_381gpu.FrOpNeg, allElementCases, func(tc elementCase) string { return tc.NegABytesLE }, applyNeg); err != nil {
+	if err := verifyUnaryOp(kernel, "neg", bn254gpu.FpOpNeg, allElementCases, func(tc elementCase) string { return tc.NegABytesLE }, applyNeg); err != nil {
 		return err
 	}
-	if err := verifyUnaryOp(kernel, "double", bls12_381gpu.FrOpDouble, allElementCases, func(tc elementCase) string { return tc.DoubleABytesLE }, applyDouble); err != nil {
+	if err := verifyUnaryOp(kernel, "double", bn254gpu.FpOpDouble, allElementCases, func(tc elementCase) string { return tc.DoubleABytesLE }, applyDouble); err != nil {
 		return err
 	}
-	if err := verifyBinaryOp(kernel, "mul", bls12_381gpu.FrOpMul, allElementCases, func(tc elementCase) string { return tc.MulBytesLE }, applyMul); err != nil {
+	if err := verifyBinaryOp(kernel, "mul", bn254gpu.FpOpMul, allElementCases, func(tc elementCase) string { return tc.MulBytesLE }, applyMul); err != nil {
 		return err
 	}
-	if err := verifyUnaryOp(kernel, "square", bls12_381gpu.FrOpSquare, allElementCases, func(tc elementCase) string { return tc.SquareABytesLE }, applySquare); err != nil {
+	if err := verifyUnaryOp(kernel, "square", bn254gpu.FpOpSquare, allElementCases, func(tc elementCase) string { return tc.SquareABytesLE }, applySquare); err != nil {
 		return err
 	}
 	if err := verifyToMont(kernel, vectors.ConvertCases); err != nil {
@@ -118,11 +113,11 @@ func run() error {
 	}
 
 	fmt.Println()
-	fmt.Println("PASS: BLS12-381 fr Phase 2 Metal smoke succeeded")
+	fmt.Println("PASS: BN254 fp Phase 3 Metal smoke succeeded")
 	return nil
 }
 
-func verifyStaticOps(kernel *bls12_381gpu.FrKernel, cases []elementCase, convertCases []convertCase) error {
+func verifyStaticOps(kernel *bn254gpu.FpKernel, cases []elementCase, convertCases []convertCase) error {
 	aBatch := make([]curvegpu.U32x8, len(cases))
 	bBatch := make([]curvegpu.U32x8, len(cases))
 	copyExpected := make([]string, len(cases))
@@ -133,14 +128,14 @@ func verifyStaticOps(kernel *bls12_381gpu.FrKernel, cases []elementCase, convert
 		copyExpected[i] = tc.ABytesLE
 		equalExpected[i] = tc.EqualBytesLE
 	}
-	if err := verifyBatch(kernel, "copy", bls12_381gpu.FrOpCopy, aBatch, bBatch, copyExpected); err != nil {
+	if err := verifyBatch(kernel, "copy", bn254gpu.FpOpCopy, aBatch, bBatch, copyExpected); err != nil {
 		return err
 	}
-	if err := verifyBatch(kernel, "equal", bls12_381gpu.FrOpEqual, aBatch, bBatch, equalExpected); err != nil {
+	if err := verifyBatch(kernel, "equal", bn254gpu.FpOpEqual, aBatch, bBatch, equalExpected); err != nil {
 		return err
 	}
 
-	zeros := bls12_381gpu.ZeroBatch(len(cases))
+	zeros := bn254gpu.ZeroBatch(len(cases))
 	zeroExpected := make([]string, len(cases))
 	oneExpected := make([]string, len(cases))
 	oneMont := mustFindConvertCase(convertCases, "one").MontBytes
@@ -148,16 +143,16 @@ func verifyStaticOps(kernel *bls12_381gpu.FrKernel, cases []elementCase, convert
 		zeroExpected[i] = "0000000000000000000000000000000000000000000000000000000000000000"
 		oneExpected[i] = oneMont
 	}
-	if err := verifyBatch(kernel, "zero", bls12_381gpu.FrOpZero, zeros, zeros, zeroExpected); err != nil {
+	if err := verifyBatch(kernel, "zero", bn254gpu.FpOpZero, zeros, zeros, zeroExpected); err != nil {
 		return err
 	}
-	if err := verifyBatch(kernel, "one", bls12_381gpu.FrOpOne, zeros, zeros, oneExpected); err != nil {
+	if err := verifyBatch(kernel, "one", bn254gpu.FpOpOne, zeros, zeros, oneExpected); err != nil {
 		return err
 	}
 	return nil
 }
 
-func verifyBinaryOp(kernel *bls12_381gpu.FrKernel, name string, op bls12_381gpu.FrOp, cases []elementCase, expected func(elementCase) string, cpu func(a, b gnarkfr.Element) gnarkfr.Element) error {
+func verifyBinaryOp(kernel *bn254gpu.FpKernel, name string, op bn254gpu.FpOp, cases []elementCase, expected func(elementCase) string, cpu func(a, b gnarkfp.Element) gnarkfp.Element) error {
 	aBatch := make([]curvegpu.U32x8, len(cases))
 	bBatch := make([]curvegpu.U32x8, len(cases))
 	expectedBatch := make([]string, len(cases))
@@ -176,9 +171,9 @@ func verifyBinaryOp(kernel *bls12_381gpu.FrKernel, name string, op bls12_381gpu.
 	return verifyBatch(kernel, name, op, aBatch, bBatch, expectedBatch)
 }
 
-func verifyUnaryOp(kernel *bls12_381gpu.FrKernel, name string, op bls12_381gpu.FrOp, cases []elementCase, expected func(elementCase) string, cpu func(a gnarkfr.Element) gnarkfr.Element) error {
+func verifyUnaryOp(kernel *bn254gpu.FpKernel, name string, op bn254gpu.FpOp, cases []elementCase, expected func(elementCase) string, cpu func(a gnarkfp.Element) gnarkfp.Element) error {
 	aBatch := make([]curvegpu.U32x8, len(cases))
-	bBatch := bls12_381gpu.ZeroBatch(len(cases))
+	bBatch := bn254gpu.ZeroBatch(len(cases))
 	expectedBatch := make([]string, len(cases))
 	for i, tc := range cases {
 		aBatch[i] = mustU32x8(tc.ABytesLE)
@@ -193,50 +188,48 @@ func verifyUnaryOp(kernel *bls12_381gpu.FrKernel, name string, op bls12_381gpu.F
 	return verifyBatch(kernel, name, op, aBatch, bBatch, expectedBatch)
 }
 
-func verifyNormalize(kernel *bls12_381gpu.FrKernel, cases []normalizeCase) error {
+func verifyNormalize(kernel *bn254gpu.FpKernel, cases []normalizeCase) error {
 	aBatch := make([]curvegpu.U32x8, len(cases))
-	bBatch := bls12_381gpu.ZeroBatch(len(cases))
+	bBatch := bn254gpu.ZeroBatch(len(cases))
 	expectedBatch := make([]string, len(cases))
 	for i, tc := range cases {
 		aBatch[i] = mustU32x8(tc.InputBytesLE)
 		expectedBatch[i] = tc.ExpectedBytesLE
 	}
-	return verifyBatch(kernel, "normalize", bls12_381gpu.FrOpNormalize, aBatch, bBatch, expectedBatch)
+	return verifyBatch(kernel, "normalize", bn254gpu.FpOpNormalize, aBatch, bBatch, expectedBatch)
 }
 
-func verifyToMont(kernel *bls12_381gpu.FrKernel, cases []convertCase) error {
+func verifyToMont(kernel *bn254gpu.FpKernel, cases []convertCase) error {
 	aBatch := make([]curvegpu.U32x8, len(cases))
-	bBatch := bls12_381gpu.ZeroBatch(len(cases))
+	bBatch := bn254gpu.ZeroBatch(len(cases))
 	expectedBatch := make([]string, len(cases))
 	for i, tc := range cases {
 		aBatch[i] = mustU32x8(tc.RegularBytes)
 		expectedBatch[i] = tc.MontBytes
-
 		gotCPU := elementToHex(regularBytesToMontElement(tc.RegularBytes))
 		if gotCPU != expectedBatch[i] {
 			return fmt.Errorf("to_mont cpu mismatch for %s: got=%s want=%s", tc.Name, gotCPU, expectedBatch[i])
 		}
 	}
-	return verifyBatch(kernel, "to_mont", bls12_381gpu.FrOpToMont, aBatch, bBatch, expectedBatch)
+	return verifyBatch(kernel, "to_mont", bn254gpu.FpOpToMont, aBatch, bBatch, expectedBatch)
 }
 
-func verifyFromMont(kernel *bls12_381gpu.FrKernel, cases []convertCase) error {
+func verifyFromMont(kernel *bn254gpu.FpKernel, cases []convertCase) error {
 	aBatch := make([]curvegpu.U32x8, len(cases))
-	bBatch := bls12_381gpu.ZeroBatch(len(cases))
+	bBatch := bn254gpu.ZeroBatch(len(cases))
 	expectedBatch := make([]string, len(cases))
 	for i, tc := range cases {
 		aBatch[i] = mustU32x8(tc.MontBytes)
 		expectedBatch[i] = tc.RegularBytes
-
 		gotCPU := elementToRegularHex(bytesToElement(tc.MontBytes))
 		if gotCPU != expectedBatch[i] {
 			return fmt.Errorf("from_mont cpu mismatch for %s: got=%s want=%s", tc.Name, gotCPU, expectedBatch[i])
 		}
 	}
-	return verifyBatch(kernel, "from_mont", bls12_381gpu.FrOpFromMont, aBatch, bBatch, expectedBatch)
+	return verifyBatch(kernel, "from_mont", bn254gpu.FpOpFromMont, aBatch, bBatch, expectedBatch)
 }
 
-func verifyBatch(kernel *bls12_381gpu.FrKernel, name string, op bls12_381gpu.FrOp, aBatch, bBatch []curvegpu.U32x8, expected []string) error {
+func verifyBatch(kernel *bn254gpu.FpKernel, name string, op bn254gpu.FpOp, aBatch, bBatch []curvegpu.U32x8, expected []string) error {
 	fmt.Printf("4. %s... ", name)
 	got, err := kernel.Run(op, aBatch, bBatch)
 	if err != nil {
@@ -252,55 +245,55 @@ func verifyBatch(kernel *bls12_381gpu.FrKernel, name string, op bls12_381gpu.FrO
 	return nil
 }
 
-func applyAdd(a, b gnarkfr.Element) gnarkfr.Element {
-	var z gnarkfr.Element
+func applyAdd(a, b gnarkfp.Element) gnarkfp.Element {
+	var z gnarkfp.Element
 	z.Add(&a, &b)
 	return z
 }
 
-func applySub(a, b gnarkfr.Element) gnarkfr.Element {
-	var z gnarkfr.Element
+func applySub(a, b gnarkfp.Element) gnarkfp.Element {
+	var z gnarkfp.Element
 	z.Sub(&a, &b)
 	return z
 }
 
-func applyNeg(a gnarkfr.Element) gnarkfr.Element {
-	var z gnarkfr.Element
+func applyNeg(a gnarkfp.Element) gnarkfp.Element {
+	var z gnarkfp.Element
 	z.Neg(&a)
 	return z
 }
 
-func applyDouble(a gnarkfr.Element) gnarkfr.Element {
-	var z gnarkfr.Element
+func applyDouble(a gnarkfp.Element) gnarkfp.Element {
+	var z gnarkfp.Element
 	z.Double(&a)
 	return z
 }
 
-func applyMul(a, b gnarkfr.Element) gnarkfr.Element {
-	var z gnarkfr.Element
+func applyMul(a, b gnarkfp.Element) gnarkfp.Element {
+	var z gnarkfp.Element
 	z.Mul(&a, &b)
 	return z
 }
 
-func applySquare(a gnarkfr.Element) gnarkfr.Element {
-	var z gnarkfr.Element
+func applySquare(a gnarkfp.Element) gnarkfp.Element {
+	var z gnarkfp.Element
 	z.Square(&a)
 	return z
 }
 
-func loadVectors() (phase2Vectors, error) {
+func loadVectors() (phase3Vectors, error) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
-		return phase2Vectors{}, fmt.Errorf("runtime caller lookup failed")
+		return phase3Vectors{}, fmt.Errorf("runtime caller lookup failed")
 	}
-	path := filepath.Join(filepath.Dir(file), "..", "..", "testdata", "vectors", "fr", "bls12_381_phase2_ops.json")
+	path := filepath.Join(filepath.Dir(file), "..", "..", "..", "..", "testdata", "vectors", "fp", "bn254_phase3_ops.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return phase2Vectors{}, fmt.Errorf("read vectors: %w", err)
+		return phase3Vectors{}, fmt.Errorf("read vectors: %w", err)
 	}
-	var vectors phase2Vectors
+	var vectors phase3Vectors
 	if err := json.Unmarshal(data, &vectors); err != nil {
-		return phase2Vectors{}, fmt.Errorf("unmarshal vectors: %w", err)
+		return phase3Vectors{}, fmt.Errorf("unmarshal vectors: %w", err)
 	}
 	return vectors, nil
 }
@@ -337,7 +330,7 @@ func limbsToHex(in curvegpu.U32x8) string {
 	return hex.EncodeToString(data)
 }
 
-func bytesToElement(raw string) gnarkfr.Element {
+func bytesToElement(raw string) gnarkfp.Element {
 	data, err := hex.DecodeString(raw)
 	if err != nil {
 		panic(err)
@@ -346,10 +339,10 @@ func bytesToElement(raw string) gnarkfr.Element {
 	for i := range words {
 		words[i] = binary.LittleEndian.Uint64(data[i*8:])
 	}
-	return gnarkfr.Element(words)
+	return gnarkfp.Element(words)
 }
 
-func elementToHex(in gnarkfr.Element) string {
+func elementToHex(in gnarkfp.Element) string {
 	data := make([]byte, 32)
 	for i := range in {
 		binary.LittleEndian.PutUint64(data[i*8:], in[i])
@@ -357,7 +350,7 @@ func elementToHex(in gnarkfr.Element) string {
 	return hex.EncodeToString(data)
 }
 
-func elementToRegularHex(in gnarkfr.Element) string {
+func elementToRegularHex(in gnarkfp.Element) string {
 	regular := in.BigInt(new(big.Int))
 	bytes := regular.FillBytes(make([]byte, 32))
 	for i, j := 0, len(bytes)-1; i < j; i, j = i+1, j-1 {
@@ -366,7 +359,7 @@ func elementToRegularHex(in gnarkfr.Element) string {
 	return hex.EncodeToString(bytes)
 }
 
-func regularBytesToMontElement(raw string) gnarkfr.Element {
+func regularBytesToMontElement(raw string) gnarkfp.Element {
 	data, err := hex.DecodeString(raw)
 	if err != nil {
 		panic(err)
@@ -374,7 +367,7 @@ func regularBytesToMontElement(raw string) gnarkfr.Element {
 	for i, j := 0, len(data)-1; i < j; i, j = i+1, j-1 {
 		data[i], data[j] = data[j], data[i]
 	}
-	var z gnarkfr.Element
+	var z gnarkfp.Element
 	z.SetBigInt(new(big.Int).SetBytes(data))
 	return z
 }

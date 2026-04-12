@@ -1,10 +1,9 @@
-package main
+package smoke
 
 import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -40,11 +39,7 @@ type phase8Vectors struct {
 	OneMontZ         string    `json:"one_mont_z"`
 }
 
-func main() {
-	if err := run(); err != nil {
-		log.Fatalf("FATAL: %v", err)
-	}
-}
+func Run() error { return run() }
 
 func run() error {
 	fmt.Println("=== BN254 G1 Phase 8 Metal Smoke ===")
@@ -123,7 +118,7 @@ func loadVectors() (phase8Vectors, error) {
 	if !ok {
 		return phase8Vectors{}, os.ErrNotExist
 	}
-	path := filepath.Join(filepath.Dir(filename), "..", "..", "testdata", "vectors", "g1", "bn254_phase8_msm.json")
+	path := filepath.Join(filepath.Dir(filename), "..", "..", "..", "..", "testdata", "vectors", "g1", "bn254_phase8_msm.json")
 	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return phase8Vectors{}, err
