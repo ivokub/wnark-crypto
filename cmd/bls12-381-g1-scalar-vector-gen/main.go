@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	out := flag.String("out", "testdata/vectors/g1/bn254_phase7_scalar_mul.json", "output vector path")
+	out := flag.String("out", "testdata/vectors/g1/bls12_381_phase7_scalar_mul.json", "output vector path")
 	flag.Parse()
 
 	if err := run(*out); err != nil {
@@ -20,7 +20,7 @@ func main() {
 }
 
 func run(outPath string) error {
-	out := testgen.BuildBN254G1ScalarVectors()
+	out := testgen.BuildBLS12381G1ScalarVectors()
 	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
 		return err
 	}

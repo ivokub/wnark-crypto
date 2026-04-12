@@ -32,9 +32,19 @@ This remains a primitive-layer project. It is not yet a Groth16 prover or pairin
   - sparse signed Pippenger benchmark driver
 - Shared browser benchmark base-source helpers now exist for both BN254 and BLS12-381.
 - A unified browser suite launcher now exists at `web/static/curvegpu.html`.
-- Unified MSM smoke and benchmark launchers now exist at:
-  - `web/static/msm.html`
-  - `web/static/msm_bench.html`
+- Shared browser suite entrypoints now exist for:
+  - `fr` ops
+  - `fp` ops
+  - G1 ops
+  - G1 scalar multiplication
+  - G1 MSM smoke
+  - G1 MSM benchmark
+- Browser MSM benchmark base selection now follows one shared priority order:
+  - fixture if available
+  - otherwise benchmark server if available
+  - otherwise generated bases
+- A shared `pkg/testgen` package now exists for reusable benchmark/test data generation.
+- `go generate ./testdata` now regenerates the tracked curve testdata from repo root.
 
 ### BN254
 
@@ -130,11 +140,24 @@ Next benchmark infrastructure task:
 
 This should better model the practical workflow of loading proving-key-like base sets without forcing us to check in larger and larger blobs.
 
-### 3. Push the optimized BLS12-381 MSM path into shared/runtime code
+### 3. Move more generator logic into `pkg/testgen`
+
+The first generator extraction is in place, but most curve testdata still lives inside separate `cmd/*-vector-gen` implementations.
+
+Next generator work:
+
+- move more vector/fixture construction into `pkg/testgen`
+- keep the command binaries as thin wrappers around shared generators
+- reuse the same generators from the benchmark server where practical
+- keep `go generate ./testdata` as the single regeneration entrypoint
+
+This is the direction needed to match the `gnark-crypto/internal/generator` style more closely.
+
+### 4. Push the optimized BLS12-381 MSM path into shared/runtime code
 
 The BLS12-381 optimized browser path is correct and fast enough to treat as a real backend now. The next engineering step is to make it a first-class shared pipeline rather than a benchmark-only special case.
 
-### 4. Extend multi-curve generation beyond shape/layout scaffolding
+### 5. Extend multi-curve generation beyond shape/layout scaffolding
 
 Adopt more of the `gnark-crypto/internal/generator` style:
 
@@ -143,7 +166,7 @@ Adopt more of the `gnark-crypto/internal/generator` style:
 - generated curve-specific wrapper/config layers
 - minimize hand-maintained per-curve boilerplate
 
-### 5. Clean up placeholder and debugging files
+### 6. Clean up placeholder and debugging files
 
 There are still temporary or debugging artifacts in the repo that should be removed or consolidated once the current refactor settles:
 
@@ -174,4 +197,4 @@ Current practical validation policy remains:
 
 ## Immediate Next Step
 
-Continue extracting the optimized browser MSM pipeline into a curve-config-driven shared driver, then start consolidating the remaining per-suite browser pages behind the unified launcher while cleaning out obsolete one-off harness files.
+Continue extracting the optimized browser MSM pipeline into a curve-config-driven shared driver, while moving more curve testdata generation into `pkg/testgen` and removing obsolete one-off browser harness files as they become superseded.
