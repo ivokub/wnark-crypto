@@ -91,12 +91,16 @@ const CURVE_CONFIGS: Record<CurveId, CurveConfig> = {
     zeroHex: "0000000000000000000000000000000000000000000000000000000000000000",
     vectorsPath: "/testdata/vectors/g1/bn254_phase8_msm.json",
     opsShaderParts: [
-      "/shaders/curves/bn254/fp_arith.wgsl#section=fp-core",
-      "/shaders/curves/bn254/g1_arith.wgsl",
+      "/shaders/curves/bn254/fp_arith.wgsl?v=2#section=fp-types",
+      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-consts",
+      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-core",
+      "/shaders/curves/bn254/g1_arith.wgsl?v=1",
     ],
     msmShaderParts: [
-      "/shaders/curves/bn254/fp_arith.wgsl#section=fp-core",
-      "/shaders/curves/bn254/g1_arith.wgsl",
+      "/shaders/curves/bn254/fp_arith.wgsl?v=2#section=fp-types",
+      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-consts",
+      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-core",
+      "/shaders/curves/bn254/g1_arith.wgsl?v=1",
     ],
   },
   bls12_381: {
@@ -111,12 +115,16 @@ const CURVE_CONFIGS: Record<CurveId, CurveConfig> = {
       "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
     vectorsPath: "/testdata/vectors/g1/bls12_381_phase8_msm.json?v=1",
     opsShaderParts: [
-      "/shaders/curves/bls12_381/fp_arith.wgsl?v=1#section=fp-core",
-      "/shaders/curves/bls12_381/g1_arith.wgsl?v=1",
+      "/shaders/curves/bls12_381/fp_arith.wgsl?v=3#section=fp-types",
+      "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-consts",
+      "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-core",
+      "/shaders/curves/bls12_381/g1_arith.wgsl?v=2",
     ],
     msmShaderParts: [
-      "/shaders/curves/bls12_381/fp_arith.wgsl?v=1#section=fp-core",
-      "/shaders/curves/bls12_381/g1_msm.wgsl?v=2",
+      "/shaders/curves/bls12_381/fp_arith.wgsl?v=3#section=fp-types",
+      "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-consts",
+      "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-core",
+      "/shaders/curves/bls12_381/g1_msm.wgsl?v=3",
     ],
   },
 };

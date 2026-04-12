@@ -1,3 +1,4 @@
+// curvegpu:section fp-types begin
 struct Fp {
   limbs: array<u32, 12>,
 }
@@ -5,6 +6,7 @@ struct Fp {
 struct Fp24 {
   limbs: array<u32, 24>,
 }
+// curvegpu:section fp-types end
 
 struct Params {
   count: u32,
@@ -26,6 +28,8 @@ const FP_OP_MUL: u32 = 9u;
 const FP_OP_SQUARE: u32 = 10u;
 const FP_OP_TO_MONT: u32 = 11u;
 const FP_OP_FROM_MONT: u32 = 12u;
+
+// curvegpu:section fp-consts begin
 const FP_LIMB16_MASK: u32 = 0xffffu;
 const FP_QINV_NEG_16: u32 = 0xfffdu;
 
@@ -43,6 +47,22 @@ const FP_MODULUS16: array<u32, 24> = array<u32, 24>(
   0xe69au, 0x397fu,
   0x11eau, 0x1a01u,
 );
+
+const FP_MODULUS_MINUS_TWO: array<u32, 12> = array<u32, 12>(
+  0xffffaaa9u,
+  0xb9feffffu,
+  0xb153ffffu,
+  0x1eabfffeu,
+  0xf6b0f624u,
+  0x6730d2a0u,
+  0xf38512bfu,
+  0x64774b84u,
+  0x434bacd7u,
+  0x4b1ba7b6u,
+  0x397fe69au,
+  0x1a0111eau,
+);
+// curvegpu:section fp-consts end
 
 @group(0) @binding(0) var<storage, read> input_a: array<u32>;
 @group(0) @binding(1) var<storage, read> input_b: array<u32>;
@@ -321,6 +341,27 @@ fn fp_mul(x: Fp, y: Fp) -> Fp {
   }
   return fp_pack16(z24);
 }
+
+fn fp_square(x: Fp) -> Fp {
+  return fp_mul(x, x);
+}
+
+fn fp_inverse(x: Fp) -> Fp {
+  if (fp_is_zero(x)) {
+    return fp_zero();
+  }
+  var acc = fp_one();
+  for (var word_index: i32 = 11; word_index >= 0; word_index = word_index - 1) {
+    let word = FP_MODULUS_MINUS_TWO[u32(word_index)];
+    for (var bit_index: i32 = 31; bit_index >= 0; bit_index = bit_index - 1) {
+      acc = fp_square(acc);
+      if (((word >> u32(bit_index)) & 1u) != 0u) {
+        acc = fp_mul(acc, x);
+      }
+    }
+  }
+  return acc;
+}
 // curvegpu:section fp-core end
 
 fn fp_dispatch(opcode: u32, a: Fp, b: Fp) -> Fp {
@@ -355,7 +396,7 @@ fn fp_dispatch(opcode: u32, a: Fp, b: Fp) -> Fp {
     return fp_mul(a, b);
   }
   if (opcode == FP_OP_SQUARE) {
-    return fp_mul(a, a);
+    return fp_square(a);
   }
   if (opcode == FP_OP_TO_MONT) {
     return fp_mul(a, fp_rsquare_regular());
