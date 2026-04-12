@@ -283,78 +283,56 @@ func runBN254G1MSMBench(minLog, maxLog, iters int) {
 		basesGPU := bn254PointsToGPU(basesCPU)
 		scalarsGPU := bn254ScalarsToGPU(scalarsCPU)
 
-		benchmarks := []struct {
-			label string
-			run   func(*bn254.G1MSMKernel) (bn254MSMBenchResult, error)
-		}{
-			{
-				label: "msm_naive_affine",
-				run: func(kernel *bn254.G1MSMKernel) (bn254MSMBenchResult, error) {
-					return runBN254MSMBenchmark(basesCPU, scalarsCPU, iters, func() ([]bn254.G1Jac, bn254.G1MSMProfile, error) {
-						return kernel.RunAffineNaiveProfiled(basesGPU, scalarsGPU, len(basesGPU))
-					}, 0)
-				},
-			},
-			{
-				label: "msm_pippenger_affine",
-				run: func(kernel *bn254.G1MSMKernel) (bn254MSMBenchResult, error) {
-					window := bn254.BestPippengerWindow(len(basesGPU))
-					return runBN254MSMBenchmark(basesCPU, scalarsCPU, iters, func() ([]bn254.G1Jac, bn254.G1MSMProfile, error) {
-						return kernel.RunAffinePippengerProfiled(basesGPU, scalarsGPU, len(basesGPU), window)
-					}, window)
-				},
-			},
+		initStart := time.Now()
+		deviceSet, err := bn254.NewHeadlessDevice()
+		if err != nil {
+			panic(err)
 		}
-
-		for _, bench := range benchmarks {
-			initStart := time.Now()
-			deviceSet, err := bn254.NewHeadlessDevice()
-			if err != nil {
-				panic(err)
-			}
-			kernel, err := bn254.NewG1MSMKernel(deviceSet.Device)
-			if err != nil {
-				deviceSet.Close()
-				panic(err)
-			}
-			initElapsed := time.Since(initStart)
-
-			result, err := bench.run(kernel)
-			kernel.Close()
+		kernel, err := bn254.NewG1MSMKernel(deviceSet.Device)
+		if err != nil {
 			deviceSet.Close()
-			if err != nil {
-				if benchutil.IsResourceError(err) {
-					fmt.Printf("# stop at size=2^%d op=%s: %v\n", logSize, bench.label, err)
-					return
-				}
-				panic(err)
-			}
-
-			fmt.Printf(
-				"%d,%s,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%t\n",
-				size,
-				bench.label,
-				result.window,
-				benchutil.DurationMS(initElapsed),
-				benchutil.DurationMS(result.cpu),
-				benchutil.DurationMS(result.cold.Partition),
-				benchutil.DurationMS(result.cold.ScalarMul),
-				benchutil.DurationMS(result.cold.BucketReduction),
-				benchutil.DurationMS(result.cold.WindowReduction),
-				benchutil.DurationMS(result.cold.FinalReduction),
-				benchutil.DurationMS(result.cold.Reduction),
-				benchutil.DurationMS(result.cold.Total),
-				benchutil.DurationMS(initElapsed+result.cold.Total),
-				benchutil.DurationMS(result.warm.Partition),
-				benchutil.DurationMS(result.warm.ScalarMul),
-				benchutil.DurationMS(result.warm.BucketReduction),
-				benchutil.DurationMS(result.warm.WindowReduction),
-				benchutil.DurationMS(result.warm.FinalReduction),
-				benchutil.DurationMS(result.warm.Reduction),
-				benchutil.DurationMS(result.warm.Total),
-				result.verify,
-			)
+			panic(err)
 		}
+		initElapsed := time.Since(initStart)
+
+		window := bn254.BestPippengerWindow(len(basesGPU))
+		result, err := runBN254MSMBenchmark(basesCPU, scalarsCPU, iters, func() ([]bn254.G1Jac, bn254.G1MSMProfile, error) {
+			return kernel.RunAffinePippengerProfiled(basesGPU, scalarsGPU, len(basesGPU), window)
+		}, window)
+		kernel.Close()
+		deviceSet.Close()
+		if err != nil {
+			if benchutil.IsResourceError(err) {
+				fmt.Printf("# stop at size=2^%d op=msm_pippenger_affine: %v\n", logSize, err)
+				return
+			}
+			panic(err)
+		}
+
+		fmt.Printf(
+			"%d,%s,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%t\n",
+			size,
+			"msm_pippenger_affine",
+			result.window,
+			benchutil.DurationMS(initElapsed),
+			benchutil.DurationMS(result.cpu),
+			benchutil.DurationMS(result.cold.Partition),
+			benchutil.DurationMS(result.cold.ScalarMul),
+			benchutil.DurationMS(result.cold.BucketReduction),
+			benchutil.DurationMS(result.cold.WindowReduction),
+			benchutil.DurationMS(result.cold.FinalReduction),
+			benchutil.DurationMS(result.cold.Reduction),
+			benchutil.DurationMS(result.cold.Total),
+			benchutil.DurationMS(initElapsed+result.cold.Total),
+			benchutil.DurationMS(result.warm.Partition),
+			benchutil.DurationMS(result.warm.ScalarMul),
+			benchutil.DurationMS(result.warm.BucketReduction),
+			benchutil.DurationMS(result.warm.WindowReduction),
+			benchutil.DurationMS(result.warm.FinalReduction),
+			benchutil.DurationMS(result.warm.Reduction),
+			benchutil.DurationMS(result.warm.Total),
+			result.verify,
+		)
 	}
 }
 
