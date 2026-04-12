@@ -1,5 +1,13 @@
 export {};
 
+import {
+  appendAdapterDiagnostics,
+  createPageUI,
+  fetchJSON,
+  fetchText,
+  mustElement,
+} from "./curvegpu/browser_utils.js";
+
 type DomainMetadata = {
   log_n: number;
   size: number;
@@ -90,6 +98,7 @@ const itersEl = document.getElementById("iters") as HTMLInputElement | null;
 const runButton = document.getElementById("run") as HTMLButtonElement | null;
 const statusEl = document.getElementById("status") as HTMLElement | null;
 const logEl = document.getElementById("log") as HTMLElement | null;
+const { setStatus, setPageState, writeLog } = createPageUI(statusEl, logEl);
 
 function getConfig(): NTTConfig {
   const curve = new URLSearchParams(window.location.search).get("curve") ?? "bn254";
@@ -98,66 +107,6 @@ function getConfig(): NTTConfig {
     throw new Error(`unsupported curve: ${curve}`);
   }
   return config;
-}
-
-function mustElement<T>(value: T | null, name: string): T {
-  if (value === null) {
-    throw new Error(`missing element: ${name}`);
-  }
-  return value;
-}
-
-function setStatus(text: string): void {
-  mustElement(statusEl, "status").textContent = text;
-}
-
-function setPageState(state: string): void {
-  document.body.dataset.status = state;
-}
-
-function writeLog(lines: string[]): void {
-  mustElement(logEl, "log").textContent = lines.join("\n");
-}
-
-async function fetchText(path: string): Promise<string> {
-  const response = await fetch(path);
-  if (!response.ok) {
-    throw new Error(`failed to load ${path}: ${response.status} ${response.statusText}`);
-  }
-  return response.text();
-}
-
-async function fetchJSON<T>(path: string): Promise<T> {
-  return JSON.parse(await fetchText(path)) as T;
-}
-
-async function getAdapterInfo(adapter: GPUAdapter): Promise<GPUAdapterInfo | null> {
-  const adapterWithInfo = adapter as GPUAdapter & { info?: GPUAdapterInfo; requestAdapterInfo?: () => Promise<GPUAdapterInfo> };
-  if (adapterWithInfo.info) {
-    return adapterWithInfo.info;
-  }
-  if (typeof adapterWithInfo.requestAdapterInfo === "function") {
-    try {
-      return await adapterWithInfo.requestAdapterInfo();
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
-async function appendAdapterDiagnostics(adapter: GPUAdapter, lines: string[]): Promise<void> {
-  const adapterWithFallback = adapter as GPUAdapter & { isFallbackAdapter?: boolean };
-  if ("isFallbackAdapter" in adapterWithFallback) {
-    lines.push(`adapter.isFallbackAdapter = ${String(adapterWithFallback.isFallbackAdapter)}`);
-  }
-  const info = await getAdapterInfo(adapter);
-  if (!info) {
-    lines.push("adapter.info = unavailable");
-    return;
-  }
-  if (info.vendor) lines.push(`adapter.vendor = ${info.vendor}`);
-  if (info.architecture) lines.push(`adapter.architecture = ${info.architecture}`);
 }
 
 function createKernel(device: GPUDevice, label: string, shaderCode: string, entryPoint: string): Kernel {

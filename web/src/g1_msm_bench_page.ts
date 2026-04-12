@@ -1,5 +1,15 @@
 export {};
 
+import {
+  appendAdapterDiagnostics,
+  bytesToHex,
+  createPageUI,
+  fetchBytes,
+  fetchJSON,
+  fetchText,
+  hexToBytes,
+  mustElement,
+} from "./curvegpu/browser_utils.js";
 import { fetchShaderParts } from "./curvegpu/shaders.js";
 
 import {
@@ -172,96 +182,10 @@ const itersEl = document.getElementById("iters") as HTMLInputElement | null;
 const runButton = document.getElementById("run") as HTMLButtonElement | null;
 const statusEl = document.getElementById("status") as HTMLElement | null;
 const logEl = document.getElementById("log") as HTMLElement | null;
-
-function mustElement<T>(value: T | null, name: string): T {
-  if (value === null) {
-    throw new Error(`missing element: ${name}`);
-  }
-  return value;
-}
-
-function setStatus(text: string): void {
-  mustElement(statusEl, "status").textContent = text;
-}
-
-function setPageState(state: string): void {
-  document.body.dataset.status = state;
-}
-
-function writeLog(lines: string[]): void {
-  mustElement(logEl, "log").textContent = lines.join("\n");
-}
-
-async function fetchText(path: string): Promise<string> {
-  const response = await fetch(path);
-  if (!response.ok) {
-    throw new Error(`failed to load ${path}: ${response.status} ${response.statusText}`);
-  }
-  return response.text();
-}
-
-async function fetchJSON<T>(path: string): Promise<T> {
-  return JSON.parse(await fetchText(path)) as T;
-}
-
-async function fetchBytes(path: string): Promise<Uint8Array> {
-  const response = await fetch(path);
-  if (!response.ok) {
-    throw new Error(`failed to load ${path}: ${response.status} ${response.statusText}`);
-  }
-  return new Uint8Array(await response.arrayBuffer());
-}
-
-async function getAdapterInfo(adapter: GPUAdapter): Promise<GPUAdapterInfo | null> {
-  const adapterWithInfo = adapter as GPUAdapter & {
-    info?: GPUAdapterInfo;
-    requestAdapterInfo?: () => Promise<GPUAdapterInfo>;
-  };
-  if (adapterWithInfo.info) {
-    return adapterWithInfo.info;
-  }
-  if (typeof adapterWithInfo.requestAdapterInfo === "function") {
-    try {
-      return await adapterWithInfo.requestAdapterInfo();
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
-async function appendAdapterDiagnostics(adapter: GPUAdapter, lines: string[]): Promise<void> {
-  const adapterWithFallback = adapter as GPUAdapter & { isFallbackAdapter?: boolean };
-  if ("isFallbackAdapter" in adapterWithFallback) {
-    lines.push(`adapter.isFallbackAdapter = ${String(adapterWithFallback.isFallbackAdapter)}`);
-  }
-  const info = await getAdapterInfo(adapter);
-  if (!info) {
-    lines.push("adapter.info = unavailable");
-    return;
-  }
-  if (info.vendor) {
-    lines.push(`adapter.vendor = ${info.vendor}`);
-  }
-  if (info.architecture) {
-    lines.push(`adapter.architecture = ${info.architecture}`);
-  }
-}
+const { setStatus, setPageState, writeLog } = createPageUI(statusEl, logEl);
 
 function createKernel(device: GPUDevice, shaderCode: string, entryPoint = "g1_ops_main"): Kernel {
   return sharedCreateMSMKernel(device, shaderCode, curveConfig.opsKernelLabel, entryPoint);
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  const out = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < out.length; i += 1) {
-    out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  }
-  return out;
-}
-
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function zeroPoint(): JacobianPoint {

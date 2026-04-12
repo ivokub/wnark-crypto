@@ -1,3 +1,5 @@
+import { fetchBytes, fetchJSON } from "./browser_utils.js";
+
 export type BaseLoadResult<TBases> = {
   bases: TBases;
   prepMs: number;
@@ -36,26 +38,6 @@ export type PreferredByteBaseSourceContext = {
   baseFixture: Uint8Array | null;
   fixtureMeta: FixtureMetadata | null;
 };
-
-async function fetchText(path: string): Promise<string> {
-  const response = await fetch(path);
-  if (!response.ok) {
-    throw new Error(`failed to load ${path}: ${response.status} ${response.statusText}`);
-  }
-  return response.text();
-}
-
-async function fetchJSON<T>(path: string): Promise<T> {
-  return JSON.parse(await fetchText(path)) as T;
-}
-
-async function fetchBytes(path: string): Promise<Uint8Array> {
-  const response = await fetch(path);
-  if (!response.ok) {
-    throw new Error(`failed to load ${path}: ${response.status} ${response.statusText}`);
-  }
-  return new Uint8Array(await response.arrayBuffer());
-}
 
 function slicePointByteFixture(fixture: Uint8Array, pointBytes: number, count: number): Uint8Array {
   const byteLength = count * pointBytes;

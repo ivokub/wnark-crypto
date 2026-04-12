@@ -1,3 +1,5 @@
+import { bytesToHex } from "./browser_utils.js";
+
 export type ScalarBatch = {
   hexes: string[];
   words: Uint32Array;
@@ -199,8 +201,4 @@ function makeRandomScalarData(seed: number): { hex: string; words: Uint32Array }
     words[i >>> 2] |= value << ((i & 3) * 8);
   }
   return { hex: bytesToHex(bytes), words };
-}
-
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }

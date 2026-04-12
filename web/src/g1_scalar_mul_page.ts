@@ -1,5 +1,12 @@
 export {};
 
+import {
+  appendAdapterDiagnostics,
+  bytesToHex,
+  createPageUI,
+  fetchText,
+  hexToBytes,
+} from "./curvegpu/browser_utils.js";
 import { fetchShaderParts } from "./curvegpu/shaders.js";
 
 type AffinePoint = {
@@ -95,6 +102,7 @@ const CONFIGS: Record<string, G1ScalarConfig> = {
 const runButton = document.getElementById("run") as HTMLButtonElement;
 const statusEl = document.getElementById("status") as HTMLSpanElement;
 const logEl = document.getElementById("log") as HTMLPreElement;
+const { setStatus, setPageState, writeLog } = createPageUI(statusEl, logEl);
 
 function getConfig(): G1ScalarConfig {
   const curve = new URLSearchParams(window.location.search).get("curve") ?? "bn254";
@@ -105,69 +113,9 @@ function getConfig(): G1ScalarConfig {
   return config;
 }
 
-function setStatus(text: string): void {
-  statusEl.textContent = text;
-}
-
-function setPageState(state: "idle" | "running" | "pass" | "fail"): void {
-  document.body.dataset.status = state;
-}
-
-function writeLog(lines: string[]): void {
-  logEl.textContent = lines.join("\n");
-}
-
-async function fetchText(path: string): Promise<string> {
-  const response = await fetch(path);
-  if (!response.ok) {
-    throw new Error(`failed to load ${path}: ${response.status} ${response.statusText}`);
-  }
-  return response.text();
-}
-
 async function fetchVectors(config: G1ScalarConfig): Promise<Phase7Vectors> {
   const text = await fetchText(config.vectorPath);
   return JSON.parse(text) as Phase7Vectors;
-}
-
-async function getAdapterInfo(adapter: GPUAdapter): Promise<GPUAdapterInfo | null> {
-  if ("info" in adapter && adapter.info) {
-    return adapter.info;
-  }
-  const compatAdapter = adapter as GPUAdapter & { requestAdapterInfo?: () => Promise<GPUAdapterInfo> };
-  if (typeof compatAdapter.requestAdapterInfo === "function") {
-    try {
-      return await compatAdapter.requestAdapterInfo();
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
-async function appendAdapterDiagnostics(adapter: GPUAdapter, lines: string[]): Promise<void> {
-  if ("isFallbackAdapter" in adapter) {
-    lines.push(`adapter.isFallbackAdapter = ${String(adapter.isFallbackAdapter)}`);
-  }
-  const info = await getAdapterInfo(adapter);
-  if (!info) {
-    lines.push("adapter.info = unavailable");
-    return;
-  }
-  if (info.vendor) lines.push(`adapter.vendor = ${info.vendor}`);
-  if (info.architecture) lines.push(`adapter.architecture = ${info.architecture}`);
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  const out = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < out.length; i += 1) {
-    out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  }
-  return out;
-}
-
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function createStorageBuffer(device: GPUDevice, label: string, size: number, usage: GPUBufferUsageFlags): GPUBuffer {
