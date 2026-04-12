@@ -18,8 +18,15 @@ type target struct {
 }
 
 var targets = []target{
-	{name: "bn254-fr-vectors", args: []string{"go", "run", "./cmd/bn254-fr-vector-gen"}},
-	{name: "bn254-fp-vectors", args: []string{"go", "run", "./cmd/bn254-fp-vector-gen"}},
+	{name: "bn254-fr-vectors", run: func(root string) error {
+		return writeJSON(filepath.Join(root, "testdata/vectors/fr/bn254_phase2_ops.json"), testgen.BuildBN254FROpsVectors())
+	}},
+	{name: "bn254-fp-vectors", run: func(root string) error {
+		return writeJSON(filepath.Join(root, "testdata/vectors/fp/bn254_phase3_ops.json"), testgen.BuildBN254FPOpsVectors())
+	}},
+	{name: "bn254-fr-vector-ops", run: func(root string) error {
+		return writeJSON(filepath.Join(root, "testdata/vectors/fr/bn254_phase4_vector_ops.json"), testgen.BuildBN254FRVectorOps())
+	}},
 	{name: "bn254-g1-vectors", run: func(root string) error {
 		return writeJSON(filepath.Join(root, "testdata/vectors/g1/bn254_phase6_g1_ops.json"), testgen.BuildBN254G1OpsVectors())
 	}},
@@ -29,10 +36,18 @@ var targets = []target{
 	{name: "bn254-g1-msm-vectors", run: func(root string) error {
 		return writeJSON(filepath.Join(root, "testdata/vectors/g1/bn254_phase8_msm.json"), testgen.BuildBN254G1MSMVectors())
 	}},
-	{name: "bn254-fr-ntt-domains", args: []string{"go", "run", "./cmd/bn254-fr-ntt-domain-gen"}},
-	{name: "bn254-fr-ntt-vectors", args: []string{"go", "run", "./cmd/bn254-fr-ntt-vector-gen"}},
-	{name: "bls12-381-fr-vectors", args: []string{"go", "run", "./cmd/bls12-381-fr-vector-gen"}},
-	{name: "bls12-381-fp-vectors", args: []string{"go", "run", "./cmd/bls12-381-fp-vector-gen"}},
+	{name: "bn254-fr-ntt-domains", run: func(root string) error {
+		return writeJSON(filepath.Join(root, "testdata/vectors/fr/bn254_ntt_domains.json"), testgen.BuildBN254NTTDomainFile(10, 20))
+	}},
+	{name: "bn254-fr-ntt-vectors", run: func(root string) error {
+		return writeJSON(filepath.Join(root, "testdata/vectors/fr/bn254_phase5_ntt.json"), testgen.BuildBN254NTTVectors())
+	}},
+	{name: "bls12-381-fr-vectors", run: func(root string) error {
+		return writeJSON(filepath.Join(root, "testdata/vectors/fr/bls12_381_phase2_ops.json"), testgen.BuildBLS12381FROpsVectors())
+	}},
+	{name: "bls12-381-fp-vectors", run: func(root string) error {
+		return writeJSON(filepath.Join(root, "testdata/vectors/fp/bls12_381_phase3_ops.json"), testgen.BuildBLS12381FPOpsVectors())
+	}},
 	{name: "bls12-381-g1-vectors", run: func(root string) error {
 		return writeJSON(filepath.Join(root, "testdata/vectors/g1/bls12_381_phase6_g1_ops.json"), testgen.BuildBLS12381G1OpsVectors())
 	}},
