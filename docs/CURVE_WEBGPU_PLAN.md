@@ -1,7 +1,7 @@
 # Pairing-Friendly Curve WebGPU Plan
 
-Status: BN254 baseline complete; BN254 browser performance tracks benchmarked; BLS12-381 `fr`, `fp`, G1, scalar-mul, and MSM baselines complete; optimized browser MSM paths exist for BN254 and BLS12-381; Heliax browser/native BLS12-381 MSM wrapper benchmarked
-Last updated: 2026-04-12
+Status: browser multi-curve library scaffold complete; public TS API in place; browser smoke/bench harnesses moved onto the library API; BN254 and BLS12-381 `fr`, `fp`, G1, NTT, scalar-mul, and MSM browser paths validated; optimized browser MSM paths exist for BN254 and BLS12-381; Heliax browser/native BLS12-381 MSM wrapper benchmarked
+Last updated: 2026-04-13
 
 ## Goal
 
@@ -39,6 +39,16 @@ This remains a primitive-layer project. It is not yet a Groth16 prover or pairin
   - G1 scalar multiplication
   - G1 MSM smoke
   - G1 MSM benchmark
+- A public browser library entrypoint now exists at `web/src/index.ts`.
+- Public browser WebGPU API layers now exist for:
+  - shared context creation
+  - curve module creation
+  - `fr` / `fp` field modules
+  - G1 operations
+  - scalar-field NTT
+  - G1 MSM
+- Browser harness pages now consume the library API rather than owning shader/runtime logic directly.
+- A consumer-oriented browser example now exists at `web/static/library_example.html`.
 - Browser MSM benchmark base selection now follows one shared priority order:
   - fixture if available
   - otherwise benchmark server if available
@@ -115,19 +125,22 @@ This means Heliax remains an important architectural reference, but the current 
 
 ## Near-Term Priorities
 
-### 1. Finish the shared multi-curve browser MSM framework
+### 1. Polish the production browser library surface
 
-Continue reducing BN254/BLS12-381 duplication so the two paths differ mostly by curve config:
+The library boundary now exists, but it still needs more productization work:
 
-- point packing / unpacking
-- shader paths and entrypoint sets
-- vector or fixture sources
-- field/point buffer sizes
-- window-selection policy if curve-specific
+- tighten a few remaining public API rough edges
+- decide what low-level primitives should remain internal vs public
+- add more consumer-facing documentation and examples
+- eventually package the browser entrypoint as a more explicit distributable module
 
-The target shape is a config-driven or generated MSM driver rather than handwritten per-curve benchmark pages.
+The goal is for benchmarks and smokes to remain harnesses, while the maintained entrypoint for users is the typed library API.
 
-### 2. Expand the Go-backed benchmark data server and fixture model
+### 2. Keep refining the shared multi-curve browser runtime
+
+Most browser runtime duplication is gone, but there is still room to simplify the remaining curve-config seams so the implementation differs mostly by declarative curve metadata.
+
+### 3. Expand the Go-backed benchmark data server and fixture model
 
 The benchmark server is in place and already serves BN254 and BLS12-381 base sets, but the overall data-source model still needs refinement. The static `2^19` BLS12-381 fixture remains useful as a proving-key-style benchmark, but it has limits:
 
@@ -144,7 +157,7 @@ Next benchmark infrastructure task:
 
 This should better model the practical workflow of loading proving-key-like base sets without forcing us to check in larger and larger blobs.
 
-### 3. Consolidate the remaining generation model around `pkg/testgen`
+### 4. Consolidate the remaining generation model around `pkg/testgen`
 
 The user-facing generator surface is now where it should be:
 
@@ -157,11 +170,11 @@ Remaining work here is narrower:
 - move toward a more manifest-driven generation model
 - adopt more of the `gnark-crypto/internal/generator` style for constants and curve-specific bindings
 
-### 4. Push the optimized BLS12-381 MSM path into shared/runtime code
+### 5. Push the optimized BLS12-381 MSM path into shared/runtime code
 
 The BLS12-381 optimized browser path is correct and fast enough to treat as a real backend now. The next engineering step is to make it a first-class shared pipeline rather than a benchmark-only special case.
 
-### 5. Extend multi-curve generation beyond shape/layout scaffolding
+### 6. Extend multi-curve generation beyond shape/layout scaffolding
 
 Adopt more of the `gnark-crypto/internal/generator` style:
 
@@ -170,7 +183,7 @@ Adopt more of the `gnark-crypto/internal/generator` style:
 - generated curve-specific wrapper/config layers
 - minimize hand-maintained per-curve boilerplate
 
-### 6. Continue repository cleanup as refactors settle
+### 7. Continue repository cleanup as refactors settle
 
 The large browser-page cleanup is already done, but there is still normal follow-up cleanup to keep doing as the framework stabilizes:
 
@@ -200,4 +213,4 @@ Current practical validation policy remains:
 
 ## Immediate Next Step
 
-Continue extracting the optimized browser MSM pipeline into a curve-config-driven shared driver, while tracking the remaining real BLS12-381 source files and deleting any leftover build/debug artifacts that are not part of the maintained framework.
+Stabilize the library-facing browser API as the primary maintained entrypoint, while continuing to shrink the remaining curve-specific runtime seams underneath it.
