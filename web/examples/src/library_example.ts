@@ -6,7 +6,7 @@ import {
   type CurveGPUAffinePoint,
   type CurveGPUElementBytes,
   type SupportedCurveID,
-} from "./index.js";
+} from "../../src/index.js";
 
 const EXAMPLE_BASES: Record<SupportedCurveID, CurveGPUAffinePoint> = {
   bn254: {

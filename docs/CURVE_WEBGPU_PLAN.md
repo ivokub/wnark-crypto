@@ -31,7 +31,7 @@ This remains a primitive-layer project. It is not yet a Groth16 prover or pairin
   - benchmark page runner
   - sparse signed Pippenger benchmark driver
 - Shared browser benchmark base-source helpers now exist for both BN254 and BLS12-381.
-- A unified browser suite launcher now exists at `web/static/curvegpu.html`.
+- A unified browser suite launcher now exists at `web/tests/browser/curvegpu.html`.
 - Shared browser suite entrypoints now exist for:
   - `fr` ops
   - `fp` ops
@@ -48,7 +48,7 @@ This remains a primitive-layer project. It is not yet a Groth16 prover or pairin
   - scalar-field NTT
   - G1 MSM
 - Browser harness pages now consume the library API rather than owning shader/runtime logic directly.
-- A consumer-oriented browser example now exists at `web/static/library_example.html`.
+- A consumer-oriented browser example now exists at `web/examples/library_example.html`.
 - Browser MSM benchmark base selection now follows one shared priority order:
   - fixture if available
   - otherwise benchmark server if available

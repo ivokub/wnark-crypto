@@ -6,8 +6,8 @@
     "strict": true,
     "noEmitOnError": true,
     "outDir": "dist",
-    "rootDir": "src",
+    "rootDir": ".",
     "lib": ["ES2022", "DOM"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["index.ts", "src/**/*.ts", "tests/browser/src/**/*.ts", "examples/src/**/*.ts"]
 }

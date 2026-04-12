@@ -3,7 +3,7 @@ import {
   createPageUI,
   fetchText,
   mustElement,
-} from "./curvegpu/browser_utils.js";
+} from "../../../src/curvegpu/browser_utils.js";
 
 const FR_OP_TO_MONT = 11;
 

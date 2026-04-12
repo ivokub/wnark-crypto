@@ -6,7 +6,7 @@ import {
   createPageUI,
   fetchText,
   hexToBytes,
-} from "./curvegpu/browser_utils.js";
+} from "../../../src/curvegpu/browser_utils.js";
 
 type VectorConfig = {
   curve: string;

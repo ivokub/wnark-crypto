@@ -6,18 +6,18 @@ import {
   fetchJSON,
   hexToBytes,
   mustElement,
-} from "./curvegpu/browser_utils.js";
-import { benchmarkTotalDuration } from "./curvegpu/bench_total.js";
-import { createPreferredByteBaseSource } from "./curvegpu/msm_bench_sources.js";
-import { makeRandomScalarBatch } from "./curvegpu/msm_shared.js";
+} from "../../../src/curvegpu/browser_utils.js";
+import { benchmarkTotalDuration } from "./shared/bench_total.js";
+import { createPreferredByteBaseSource } from "../../../src/curvegpu/msm_bench_sources.js";
+import { makeRandomScalarBatch } from "../../../src/curvegpu/msm_shared.js";
 import type {
   CurveGPUAffinePoint,
   CurveGPUElementBytes,
   CurveGPUJacobianPoint,
   CurveModule,
   SupportedCurveID,
-} from "./index.js";
-import { appendContextDiagnostics, createRequestedCurveModule, getRequestedCurveId } from "./page_library.js";
+} from "../../../src/index.js";
+import { appendContextDiagnostics, createRequestedCurveModule, getRequestedCurveId } from "./shared/page_library.js";
 
 type AffinePoint = {
   x_bytes_le: string;

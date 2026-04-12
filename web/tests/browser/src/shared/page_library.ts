@@ -4,7 +4,7 @@ import {
   type CurveGPUContext,
   type CurveModule,
   type SupportedCurveID,
-} from "./index.js";
+} from "../../../../src/index.js";
 
 export function getRequestedCurveId(search = window.location.search): SupportedCurveID {
   const curve = new URLSearchParams(search).get("curve") ?? "bn254";

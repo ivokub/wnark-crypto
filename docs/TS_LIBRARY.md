@@ -52,8 +52,8 @@ context.close();
 
 There is one small consumer-oriented browser example page:
 
-- `web/static/library_example.html?curve=bn254`
-- `web/static/library_example.html?curve=bls12_381`
+- `web/examples/library_example.html?curve=bn254`
+- `web/examples/library_example.html?curve=bls12_381`
 
 That example uses only the public library entrypoint and demonstrates:
 
@@ -64,8 +64,8 @@ That example uses only the public library entrypoint and demonstrates:
 
 ## Test and benchmark harnesses
 
-Smoke tests and benchmarks stay under the unified suite page:
+Smoke tests and benchmarks stay under the unified browser harness page:
 
-- `web/static/curvegpu.html`
+- `web/tests/browser/curvegpu.html`
 
 Those pages are harnesses for validation and performance work. They are not the intended production entrypoint for consumers of the library.

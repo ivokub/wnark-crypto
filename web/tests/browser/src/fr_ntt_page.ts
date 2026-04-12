@@ -1,8 +1,8 @@
 export {};
 
-import { bytesToHex, createPageUI, fetchJSON, hexToBytes } from "./curvegpu/browser_utils.js";
-import type { CurveGPUElementBytes, SupportedCurveID } from "./index.js";
-import { appendContextDiagnostics, createRequestedCurveModule, curveDisplayName, getRequestedCurveId } from "./page_library.js";
+import { bytesToHex, createPageUI, fetchJSON, hexToBytes } from "../../../src/curvegpu/browser_utils.js";
+import type { CurveGPUElementBytes, SupportedCurveID } from "../../../src/index.js";
+import { appendContextDiagnostics, createRequestedCurveModule, curveDisplayName, getRequestedCurveId } from "./shared/page_library.js";
 
 type NTTCase = {
   name: string;
