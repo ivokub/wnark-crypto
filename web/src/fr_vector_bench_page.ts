@@ -9,6 +9,15 @@ const ELEMENT_WORDS = 8;
 const ELEMENT_BYTES = 32;
 const UNIFORM_BYTES = 32;
 
+type BenchConfig = {
+  curve: string;
+  title: string;
+  arithShaderPath: string;
+  vectorShaderPath: string;
+  arithLabel: string;
+  vectorLabel: string;
+};
+
 type Kernel = {
   pipeline: GPUComputePipeline;
   bindGroupLayout: GPUBindGroupLayout;
@@ -43,6 +52,34 @@ const itersEl = document.getElementById("iters") as HTMLInputElement | null;
 const runButton = document.getElementById("run") as HTMLButtonElement | null;
 const statusEl = document.getElementById("status") as HTMLElement | null;
 const logEl = document.getElementById("log") as HTMLElement | null;
+
+const CONFIGS: Record<string, BenchConfig> = {
+  bn254: {
+    curve: "bn254",
+    title: "BN254 fr Vector Browser Benchmark",
+    arithShaderPath: "/shaders/curves/bn254/fr_arith.wgsl",
+    vectorShaderPath: "/shaders/curves/bn254/fr_vector.wgsl",
+    arithLabel: "bn254-fr",
+    vectorLabel: "bn254-fr-vector",
+  },
+  bls12_381: {
+    curve: "bls12_381",
+    title: "BLS12-381 fr Vector Browser Benchmark",
+    arithShaderPath: "/shaders/curves/bls12_381/fr_arith.wgsl",
+    vectorShaderPath: "/shaders/curves/bls12_381/fr_vector.wgsl",
+    arithLabel: "bls12-381-fr",
+    vectorLabel: "bls12-381-fr-vector",
+  },
+};
+
+function getConfig(): BenchConfig {
+  const curve = new URLSearchParams(window.location.search).get("curve") ?? "bn254";
+  const config = CONFIGS[curve];
+  if (!config) {
+    throw new Error(`unsupported curve: ${curve}`);
+  }
+  return config;
+}
 
 function mustElement<T>(value: T | null, name: string): T {
   if (value === null) {
@@ -283,7 +320,8 @@ async function benchOp(
 }
 
 async function runBenchmark(): Promise<void> {
-  const lines = ["=== BN254 fr Vector Browser Benchmark ===", ""];
+  const config = getConfig();
+  const lines = [`=== ${config.title} ===`, ""];
   writeLog(lines);
   setStatus("Running");
   setPageState("running");
@@ -311,13 +349,13 @@ async function runBenchmark(): Promise<void> {
     const device = await adapter.requestDevice();
 
     const [arithShader, vectorShader] = await Promise.all([
-      fetchText("/shaders/curves/bn254/fr_arith.wgsl"),
-      fetchText("/shaders/curves/bn254/fr_vector.wgsl"),
+      fetchText(config.arithShaderPath),
+      fetchText(config.vectorShaderPath),
     ]);
     lines.push("3. Loading shaders... OK");
 
-    const arithKernel = createKernel(device, "bn254-fr", arithShader, "fr_ops_main");
-    const vectorKernel = createKernel(device, "bn254-fr-vector", vectorShader, "fr_vector_main");
+    const arithKernel = createKernel(device, config.arithLabel, arithShader, "fr_ops_main");
+    const vectorKernel = createKernel(device, config.vectorLabel, vectorShader, "fr_vector_main");
     const initElapsed = performance.now() - initStart;
     lines.push("4. Creating pipelines... OK");
     lines.push(`init_ms = ${initElapsed.toFixed(3)}`);
@@ -348,7 +386,7 @@ async function runBenchmark(): Promise<void> {
     }
 
     lines.push("");
-    lines.push("PASS: BN254 fr vector browser benchmark completed");
+    lines.push(`PASS: ${config.curve} fr vector browser benchmark completed`);
     writeLog(lines);
     setStatus("Pass");
     setPageState("pass");

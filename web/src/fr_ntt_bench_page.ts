@@ -75,8 +75,12 @@ const CONFIGS: Record<string, NTTConfig> = {
   bls12_381: {
     curve: "bls12_381",
     title: "BLS12-381 fr NTT Browser Benchmark",
-    supported: false,
-    unsupportedReason: "BLS12-381 NTT vectors and domain metadata are not implemented yet.",
+    supported: true,
+    arithShaderPath: "/shaders/curves/bls12_381/fr_arith.wgsl",
+    vectorShaderPath: "/shaders/curves/bls12_381/fr_vector.wgsl",
+    nttShaderPath: "/shaders/curves/bls12_381/fr_ntt.wgsl",
+    domainPath: "/testdata/vectors/fr/bls12_381_ntt_domains.json",
+    modulus: BigInt("0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001"),
   },
 };
 
@@ -387,7 +391,7 @@ function createStageResource(device: GPUDevice, stageWords: Uint32Array, stageIn
   device.queue.writeBuffer(twiddleBuffer, 0, stageWords.buffer, stageWords.byteOffset, stageWords.byteLength);
   const uniformBuffer = device.createBuffer({ label: `ntt-stage-params-${stageIndex}`, size: UNIFORM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const params = new Uint32Array(UNIFORM_BYTES / 4);
-  params[1] = stageIndex;
+  params[1] = 1 << stageIndex;
   device.queue.writeBuffer(uniformBuffer, 0, params.buffer);
   return { twiddleBuffer, uniformBuffer };
 }
@@ -421,7 +425,7 @@ async function benchmarkNTT(
       device.queue.writeBuffer(inputA, 0, state.buffer, state.byteOffset, state.byteLength);
       const params = new Uint32Array(UNIFORM_BYTES / 4);
       params[0] = size;
-      params[1] = i;
+      params[1] = 1 << i;
       params[2] = inverse ? 1 : 0;
       device.queue.writeBuffer(stageRes.uniformBuffer, 0, params.buffer);
       const bindGroup = device.createBindGroup({

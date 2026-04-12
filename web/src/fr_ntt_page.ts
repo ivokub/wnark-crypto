@@ -56,8 +56,12 @@ const CONFIGS: Record<string, NTTConfig> = {
   bls12_381: {
     curve: "bls12_381",
     title: "BLS12-381 fr NTT Browser Smoke",
-    supported: false,
-    unsupportedReason: "BLS12-381 NTT vectors and domain metadata are not implemented yet.",
+    supported: true,
+    vectorPath: "/testdata/vectors/fr/bls12_381_phase5_ntt.json",
+    arithShaderPath: "/shaders/curves/bls12_381/fr_arith.wgsl",
+    vectorShaderPath: "/shaders/curves/bls12_381/fr_vector.wgsl",
+    nttShaderPath: "/shaders/curves/bls12_381/fr_ntt.wgsl",
+    labelPrefix: "bls12-381-fr-ntt",
   },
 };
 
@@ -317,7 +321,7 @@ async function runNTTStages(
     device.queue.writeBuffer(inputB, 0, twiddleBytes.buffer.slice(twiddleBytes.byteOffset, twiddleBytes.byteOffset + twiddleBytes.byteLength));
     const params = new Uint32Array(UNIFORM_BYTES / 4);
     params[0] = count;
-    params[1] = stage;
+    params[1] = 1 << stage;
     device.queue.writeBuffer(uniform, 0, params.buffer);
 
     const bindGroup = device.createBindGroup({

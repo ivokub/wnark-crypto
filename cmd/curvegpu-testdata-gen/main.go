@@ -43,6 +43,15 @@ var targets = []target{
 	{name: "bls12-381-fr-vectors", run: func(root string) error {
 		return writeJSON(filepath.Join(root, "testdata/vectors/fr/bls12_381_phase2_ops.json"), testgen.BuildBLS12381FROpsVectors())
 	}},
+	{name: "bls12-381-fr-vector-ops", run: func(root string) error {
+		return writeJSON(filepath.Join(root, "testdata/vectors/fr/bls12_381_phase4_vector_ops.json"), testgen.BuildBLS12381FRVectorOps())
+	}},
+	{name: "bls12-381-fr-ntt-domains", run: func(root string) error {
+		return writeJSON(filepath.Join(root, "testdata/vectors/fr/bls12_381_ntt_domains.json"), testgen.BuildBLS12381NTTDomainFile(10, 20))
+	}},
+	{name: "bls12-381-fr-ntt-vectors", run: func(root string) error {
+		return writeJSON(filepath.Join(root, "testdata/vectors/fr/bls12_381_phase5_ntt.json"), testgen.BuildBLS12381NTTVectors())
+	}},
 	{name: "bls12-381-fp-vectors", run: func(root string) error {
 		return writeJSON(filepath.Join(root, "testdata/vectors/fp/bls12_381_phase3_ops.json"), testgen.BuildBLS12381FPOpsVectors())
 	}},

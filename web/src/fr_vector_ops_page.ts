@@ -1,5 +1,15 @@
 export {};
 
+type VectorConfig = {
+  curve: string;
+  title: string;
+  vectorPath: string;
+  arithShaderPath: string;
+  vectorShaderPath: string;
+  arithLabel: string;
+  vectorLabel: string;
+};
+
 type VectorCase = {
   name: string;
   regular_inputs_le: string[];
@@ -45,6 +55,27 @@ const FR_VECTOR_OP_BIT_REVERSE_COPY = 4;
 const ELEMENT_BYTES = 32;
 const UNIFORM_BYTES = 32;
 
+const CONFIGS: Record<string, VectorConfig> = {
+  bn254: {
+    curve: "bn254",
+    title: "BN254 fr Phase 4 Browser Smoke",
+    vectorPath: "/testdata/vectors/fr/bn254_phase4_vector_ops.json",
+    arithShaderPath: "/shaders/curves/bn254/fr_arith.wgsl",
+    vectorShaderPath: "/shaders/curves/bn254/fr_vector.wgsl",
+    arithLabel: "bn254-fr",
+    vectorLabel: "bn254-fr-vector",
+  },
+  bls12_381: {
+    curve: "bls12_381",
+    title: "BLS12-381 fr Phase 4 Browser Smoke",
+    vectorPath: "/testdata/vectors/fr/bls12_381_phase4_vector_ops.json",
+    arithShaderPath: "/shaders/curves/bls12_381/fr_arith.wgsl",
+    vectorShaderPath: "/shaders/curves/bls12_381/fr_vector.wgsl",
+    arithLabel: "bls12-381-fr",
+    vectorLabel: "bls12-381-fr-vector",
+  },
+};
+
 const runButton = document.getElementById("run") as HTMLButtonElement;
 const statusEl = document.getElementById("status") as HTMLSpanElement;
 const logEl = document.getElementById("log") as HTMLPreElement;
@@ -69,8 +100,17 @@ async function fetchText(path: string): Promise<string> {
   return response.text();
 }
 
-async function fetchVectors(): Promise<Phase4Vectors> {
-  const text = await fetchText("/testdata/vectors/fr/bn254_phase4_vector_ops.json");
+function getConfig(): VectorConfig {
+  const curve = new URLSearchParams(window.location.search).get("curve") ?? "bn254";
+  const config = CONFIGS[curve];
+  if (!config) {
+    throw new Error(`unsupported curve: ${curve}`);
+  }
+  return config;
+}
+
+async function fetchVectors(config: VectorConfig): Promise<Phase4Vectors> {
+  const text = await fetchText(config.vectorPath);
   return JSON.parse(text) as Phase4Vectors;
 }
 
@@ -237,7 +277,8 @@ function expectBatch(name: string, got: readonly string[], want: readonly string
 }
 
 async function runSmoke(): Promise<void> {
-  const lines = ["=== BN254 fr Phase 4 Browser Smoke ===", ""];
+  const config = getConfig();
+  const lines = [`=== ${config.title} ===`, ""];
   writeLog(lines);
   setStatus("Running");
   setPageState("running");
@@ -257,15 +298,15 @@ async function runSmoke(): Promise<void> {
     lines.push("2. Requesting device... OK");
 
     const [arithShader, vectorShader, vectors] = await Promise.all([
-      fetchText("/shaders/curves/bn254/fr_arith.wgsl"),
-      fetchText("/shaders/curves/bn254/fr_vector.wgsl"),
-      fetchVectors(),
+      fetchText(config.arithShaderPath),
+      fetchText(config.vectorShaderPath),
+      fetchVectors(config),
     ]);
     lines.push("3. Loading shaders and vectors... OK");
     lines.push(`cases.vector = ${vectors.vector_cases.length}`);
 
-    const arithKernel = createKernel(device, "bn254-fr", arithShader, "fr_ops_main");
-    const vectorKernel = createKernel(device, "bn254-fr-vector", vectorShader, "fr_vector_main");
+    const arithKernel = createKernel(device, config.arithLabel, arithShader, "fr_ops_main");
+    const vectorKernel = createKernel(device, config.vectorLabel, vectorShader, "fr_vector_main");
     lines.push("4. Creating pipelines... OK");
 
     for (const vectorCase of vectors.vector_cases) {
@@ -288,7 +329,7 @@ async function runSmoke(): Promise<void> {
     lines.push("mul_factors: OK");
     lines.push("bit_reverse_copy: OK");
     lines.push("");
-    lines.push("PASS: BN254 fr Phase 4 browser smoke succeeded");
+    lines.push(`PASS: ${config.title} succeeded`);
     writeLog(lines);
     setStatus("Pass");
     setPageState("pass");

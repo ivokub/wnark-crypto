@@ -5,6 +5,8 @@ import (
 	"math/bits"
 	"math/rand"
 
+	gnarkbls12381fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
+	gnarkbls12381fft "github.com/consensys/gnark-crypto/ecc/bls12-381/fr/fft"
 	gnarkbn254fr "github.com/consensys/gnark-crypto/ecc/bn254/fr"
 	gnarkfft "github.com/consensys/gnark-crypto/ecc/bn254/fr/fft"
 	"github.com/consensys/gnark-crypto/utils"
@@ -64,6 +66,33 @@ func BuildBN254NTTVectors() BN254NTTVectorsJSON {
 	}
 }
 
+func BuildBLS12381NTTDomainFile(minLog, maxLog int) BN254NTTDomainFileJSON {
+	out := BN254NTTDomainFileJSON{
+		Domains: make([]BN254NTTDomainJSON, 0, maxLog-minLog+1),
+	}
+	for logN := minLog; logN <= maxLog; logN++ {
+		size := 1 << logN
+		domain := gnarkbls12381fft.NewDomain(uint64(size))
+		out.Domains = append(out.Domains, BN254NTTDomainJSON{
+			LogN:              logN,
+			Size:              size,
+			OmegaHex:          domain.Generator.BigInt(new(big.Int)).Text(16),
+			OmegaInvHex:       domain.GeneratorInv.BigInt(new(big.Int)).Text(16),
+			CardinalityInvHex: domain.CardinalityInv.BigInt(new(big.Int)).Text(16),
+		})
+	}
+	return out
+}
+
+func BuildBLS12381NTTVectors() BN254NTTVectorsJSON {
+	return BN254NTTVectorsJSON{
+		NTTCases: []BN254NTTCaseJSON{
+			buildBLS12381NTTCase("n8_random", 8, rand.New(rand.NewSource(2026040403))),
+			buildBLS12381NTTCase("n16_random", 16, rand.New(rand.NewSource(2026040404))),
+		},
+	}
+}
+
 func buildBN254NTTCase(name string, size int, rng *rand.Rand) BN254NTTCaseJSON {
 	domain := gnarkfft.NewDomain(uint64(size))
 	twiddles, err := domain.Twiddles()
@@ -117,10 +146,71 @@ func buildBN254NTTCase(name string, size int, rng *rand.Rand) BN254NTTCaseJSON {
 	}
 }
 
+func buildBLS12381NTTCase(name string, size int, rng *rand.Rand) BN254NTTCaseJSON {
+	domain := gnarkbls12381fft.NewDomain(uint64(size))
+	twiddles, err := domain.Twiddles()
+	if err != nil {
+		panic(err)
+	}
+	twiddlesInv, err := domain.TwiddlesInv()
+	if err != nil {
+		panic(err)
+	}
+
+	input := make([]gnarkbls12381fr.Element, size)
+	for i := range input {
+		input[i].SetBigInt(randomBLS12381FRFieldBigInt(rng))
+	}
+
+	forward := make([]gnarkbls12381fr.Element, size)
+	copy(forward, input)
+	utils.BitReverse(forward)
+	domain.FFT(forward, gnarkbls12381fft.DIT)
+
+	inverse := make([]gnarkbls12381fr.Element, size)
+	copy(inverse, forward)
+	utils.BitReverse(inverse)
+	domain.FFTInverse(inverse, gnarkbls12381fft.DIT)
+
+	logN := bits.Len(uint(size)) - 1
+	stageTwiddles := make([][]string, logN)
+	inverseStageTwiddles := make([][]string, logN)
+	for stage := 1; stage <= logN; stage++ {
+		m := 1 << (stage - 1)
+		src := twiddles[logN-stage]
+		srcInv := twiddlesInv[logN-stage]
+		stageTwiddles[stage-1] = make([]string, m)
+		inverseStageTwiddles[stage-1] = make([]string, m)
+		for i := 0; i < m; i++ {
+			stageTwiddles[stage-1][i] = bls12381FrElementHex(src[i])
+			inverseStageTwiddles[stage-1][i] = bls12381FrElementHex(srcInv[i])
+		}
+	}
+
+	return BN254NTTCaseJSON{
+		Name:                   name,
+		Size:                   size,
+		InputMontLE:            encodeBLS12381FRBatch(input),
+		ForwardExpectedLE:      encodeBLS12381FRBatch(forward),
+		InverseExpectedLE:      encodeBLS12381FRBatch(inverse),
+		StageTwiddlesLE:        stageTwiddles,
+		InverseStageTwiddlesLE: inverseStageTwiddles,
+		InverseScaleLE:         bls12381FrElementHex(domain.CardinalityInv),
+	}
+}
+
 func encodeBN254FRBatch(in []gnarkbn254fr.Element) []string {
 	out := make([]string, len(in))
 	for i := range in {
 		out[i] = bn254FrElementHex(in[i])
+	}
+	return out
+}
+
+func encodeBLS12381FRBatch(in []gnarkbls12381fr.Element) []string {
+	out := make([]string, len(in))
+	for i := range in {
+		out[i] = bls12381FrElementHex(in[i])
 	}
 	return out
 }

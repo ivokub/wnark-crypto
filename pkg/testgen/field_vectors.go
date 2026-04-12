@@ -237,6 +237,15 @@ func BuildBN254FRVectorOps() BN254VectorOpsJSON {
 	}
 }
 
+func BuildBLS12381FRVectorOps() BN254VectorOpsJSON {
+	return BN254VectorOpsJSON{
+		VectorCases: []BN254VectorCaseJSON{
+			buildBLS12381FRVectorCase("n8_random", 8, rand.New(rand.NewSource(2026040401))),
+			buildBLS12381FRVectorCase("n16_random", 16, rand.New(rand.NewSource(2026040402))),
+		},
+	}
+}
+
 func buildBN254FRVectorCase(name string, size int, rng *rand.Rand) BN254VectorCaseJSON {
 	out := BN254VectorCaseJSON{
 		Name:               name,
@@ -271,6 +280,51 @@ func buildBN254FRVectorCase(name string, size int, rng *rand.Rand) BN254VectorCa
 		out.MulExpected[i] = bn254FrElementHex(mul)
 		out.ToMontExpected[i] = bn254FrElementHex(aMont)
 		out.FromMontExpected[i] = bn254FRRegularHex(aRegular)
+	}
+
+	logCount := bits.Len(uint(size)) - 1
+	for i := 0; i < size; i++ {
+		j := int(bits.Reverse64(uint64(i)) >> (64 - logCount))
+		out.BitReverseExpected[i] = out.MontInputs[j]
+	}
+
+	return out
+}
+
+func buildBLS12381FRVectorCase(name string, size int, rng *rand.Rand) BN254VectorCaseJSON {
+	out := BN254VectorCaseJSON{
+		Name:               name,
+		RegularInputs:      make([]string, size),
+		MontInputs:         make([]string, size),
+		MontFactors:        make([]string, size),
+		AddExpected:        make([]string, size),
+		SubExpected:        make([]string, size),
+		MulExpected:        make([]string, size),
+		ToMontExpected:     make([]string, size),
+		FromMontExpected:   make([]string, size),
+		BitReverseExpected: make([]string, size),
+	}
+
+	for i := 0; i < size; i++ {
+		aRegular := randomBLS12381FRFieldBigInt(rng)
+		bRegular := randomBLS12381FRFieldBigInt(rng)
+		var aMont, bMont gnarkbls12381fr.Element
+		aMont.SetBigInt(aRegular)
+		bMont.SetBigInt(bRegular)
+
+		var add, sub, mul gnarkbls12381fr.Element
+		add.Add(&aMont, &bMont)
+		sub.Sub(&aMont, &bMont)
+		mul.Mul(&aMont, &bMont)
+
+		out.RegularInputs[i] = blsFRRegularHex(aRegular)
+		out.MontInputs[i] = bls12381FrElementHex(aMont)
+		out.MontFactors[i] = bls12381FrElementHex(bMont)
+		out.AddExpected[i] = bls12381FrElementHex(add)
+		out.SubExpected[i] = bls12381FrElementHex(sub)
+		out.MulExpected[i] = bls12381FrElementHex(mul)
+		out.ToMontExpected[i] = bls12381FrElementHex(aMont)
+		out.FromMontExpected[i] = blsFRRegularHex(aRegular)
 	}
 
 	logCount := bits.Len(uint(size)) - 1
