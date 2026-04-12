@@ -349,4 +349,8 @@ mustElement(runButton, "run").addEventListener("click", () => {
   void runBenchmark();
 });
 
+if (new URLSearchParams(window.location.search).get("autorun") === "1") {
+  void runBenchmark();
+}
+
 export {};

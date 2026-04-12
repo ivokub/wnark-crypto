@@ -70,6 +70,11 @@ Smoke tests and benchmarks stay under the unified browser harness page:
 
 Those pages are harnesses for validation and performance work. They are not the intended production entrypoint for consumers of the library.
 
+For repeatable local browser runs, use:
+
+- `make browser-suite CURVE=bn254 SUITE=g1_ops`
+- `make browser-suite CURVE=bls12_381 SUITE=g1_msm_bench MIN_LOG=10 MAX_LOG=19 ITERS=1`
+
 For MSM benchmarks, fixed G1 base fixtures live under `testdata/fixtures/g1`. The checked-in BLS12-381 fixture is used automatically, and larger local fixtures can be generated with:
 
 - `make fixture-bn254-g1 COUNT=<points>`

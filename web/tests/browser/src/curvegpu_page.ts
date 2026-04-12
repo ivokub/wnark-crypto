@@ -294,6 +294,7 @@ function updateSuiteOptions(suiteSelect: HTMLSelectElement, curve: string, selec
 }
 
 function applyPageConfig(selected: SuiteConfig): void {
+  const params = new URLSearchParams(window.location.search);
   document.title = selected.title;
   getById<HTMLElement>("heading").textContent = selected.title;
   getById<HTMLElement>("description").textContent = selected.description;
@@ -305,15 +306,12 @@ function applyPageConfig(selected: SuiteConfig): void {
     const minLogEl = getById<HTMLInputElement>("min-log");
     const maxLogEl = getById<HTMLInputElement>("max-log");
     const itersEl = getById<HTMLInputElement>("iters");
-    if (selected.defaultMinLog !== undefined) {
-      minLogEl.value = `${selected.defaultMinLog}`;
-    }
-    if (selected.defaultMaxLog !== undefined) {
-      maxLogEl.value = `${selected.defaultMaxLog}`;
-    }
-    if (selected.defaultIters !== undefined) {
-      itersEl.value = `${selected.defaultIters}`;
-    }
+    const minLog = params.get("min-log") ?? params.get("minLog");
+    const maxLog = params.get("max-log") ?? params.get("maxLog");
+    const iters = params.get("iters");
+    minLogEl.value = minLog ?? `${selected.defaultMinLog ?? 10}`;
+    maxLogEl.value = maxLog ?? `${selected.defaultMaxLog ?? 19}`;
+    itersEl.value = iters ?? `${selected.defaultIters ?? 1}`;
   } else {
     benchControls.hidden = true;
   }

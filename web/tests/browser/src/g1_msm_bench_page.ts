@@ -235,3 +235,14 @@ async function runBenchmark(): Promise<void> {
 mustElement(runButton, "run").addEventListener("click", () => {
   void runBenchmark();
 });
+
+const config = getConfig();
+writeLog([
+  `=== ${config.title} ===`,
+  "",
+  `Press Run to benchmark ${config.curve === "bn254" ? "BN254" : "BLS12-381"} G1 MSM in browser WebGPU.`,
+]);
+
+if (new URLSearchParams(window.location.search).get("autorun") === "1") {
+  void runBenchmark();
+}
