@@ -45,6 +45,8 @@ This remains a primitive-layer project. It is not yet a Groth16 prover or pairin
   - otherwise generated bases
 - A shared `pkg/testgen` package now exists for reusable benchmark/test data generation.
 - `go generate ./testdata` now regenerates the tracked curve testdata through a single repo entrypoint: `cmd/curvegpu-testdata-gen`.
+- `cmd/curvegpu-testdata-gen` now calls `pkg/testgen` directly for field ops, vector ops, G1 ops, scalar-mul vectors, MSM vectors, BN254 NTT data, and the BLS12-381 base fixture.
+- The old per-dataset `cmd/*-vector-gen` and `cmd/*-ntt-domain-gen` wrappers have been removed.
 
 ### BN254
 
@@ -140,19 +142,18 @@ Next benchmark infrastructure task:
 
 This should better model the practical workflow of loading proving-key-like base sets without forcing us to check in larger and larger blobs.
 
-### 3. Move more generator logic into `pkg/testgen`
+### 3. Consolidate the remaining generation model around `pkg/testgen`
 
-The first generator extraction is in place, but most curve testdata still lives inside separate `cmd/*-vector-gen` implementations.
+The user-facing generator surface is now where it should be:
 
-Next generator work:
+- `go generate ./testdata`
+- or directly `go run ./cmd/curvegpu-testdata-gen`
 
-- move more vector/fixture construction into `pkg/testgen`
-- keep user-facing regeneration centered on `cmd/curvegpu-testdata-gen`
-- collapse the old per-dataset command wrappers as shared generators replace them
-- reuse the same generators from the benchmark server where practical
-- keep `go generate ./testdata` as the single regeneration entrypoint
+Remaining work here is narrower:
 
-This is the direction needed to match the `gnark-crypto/internal/generator` style more closely.
+- reuse more of `pkg/testgen` between fixture generation and the benchmark server
+- move toward a more manifest-driven generation model
+- adopt more of the `gnark-crypto/internal/generator` style for constants and curve-specific bindings
 
 ### 4. Push the optimized BLS12-381 MSM path into shared/runtime code
 
@@ -167,16 +168,14 @@ Adopt more of the `gnark-crypto/internal/generator` style:
 - generated curve-specific wrapper/config layers
 - minimize hand-maintained per-curve boilerplate
 
-### 6. Clean up placeholder and debugging files
+### 6. Continue repository cleanup as refactors settle
 
-There are still temporary or debugging artifacts in the repo that should be removed or consolidated once the current refactor settles:
+The large browser-page cleanup is already done, but there is still normal follow-up cleanup to keep doing as the framework stabilizes:
 
-- stale one-off static harness copies
-- temporary benchmark/debug assets no longer used
-- placeholder files kept only for early bring-up
-- old per-suite page wrappers that are superseded by the unified launcher
-
-This cleanup should happen after the current shared-driver refactor is stable, so we do not delete files still serving as temporary references.
+- remove generated/build artifacts from version control
+- keep one supported browser launcher path
+- delete temporary bring-up helpers once the shared runtime replaces them
+- avoid reintroducing per-curve wrappers when a shared entrypoint is already sufficient
 
 ## Later Optimization Tracks
 
@@ -198,4 +197,4 @@ Current practical validation policy remains:
 
 ## Immediate Next Step
 
-Continue extracting the optimized browser MSM pipeline into a curve-config-driven shared driver, while moving more curve testdata generation into `pkg/testgen` and removing obsolete one-off browser harness files as they become superseded.
+Continue extracting the optimized browser MSM pipeline into a curve-config-driven shared driver, while tracking the remaining real BLS12-381 source files and deleting any leftover build/debug artifacts that are not part of the maintained framework.
