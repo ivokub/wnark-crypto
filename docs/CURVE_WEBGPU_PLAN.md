@@ -67,6 +67,8 @@ This remains a primitive-layer project. It is not yet a Groth16 prover or pairin
 
 - `fr` baseline: complete and browser/Metal validated
 - `fp` baseline: complete and browser/Metal validated
+- `fr` vector ops baseline: complete and browser validated
+- `fr` NTT baseline: complete and browser validated
 - G1 baseline arithmetic: complete and browser/Metal validated
 - scalar multiplication baseline: complete and browser validated
 - MSM baseline: complete and browser validated
@@ -193,6 +195,7 @@ Current practical validation policy remains:
 
 - browser WebGPU on headed Chrome is the primary correctness and performance signal
 - Metal native smokes are used where stable
+- native BLS12-381 `fr` vector/NTT bench commands now exist, but repeated native GPU-heavy runs still hit the same `gogpu/wgpu` Metal `resource already released` instability, so they are not yet treated as authoritative performance signals
 - broad repeated native GPU-heavy test sweeps are treated cautiously when `gogpu/wgpu` backend instability shows up
 
 ## Immediate Next Step
