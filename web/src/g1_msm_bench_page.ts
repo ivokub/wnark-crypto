@@ -11,8 +11,8 @@ import {
   MSMProfile,
 } from "./curvegpu/msm_bench_shared.js";
 import { runMSMBenchmarkPage } from "./curvegpu/msm_page_runner.js";
-import { runSparseSignedPippengerMSMProfiled } from "./curvegpu/msm_pippenger_bench.js";
-import { createGeneratedBaseSource } from "./curvegpu/msm_bench_sources.js";
+import { runSparseSignedPippengerMSMProfiled, type PippengerBenchKernels } from "./curvegpu/msm_pippenger_bench.js";
+import { createPreferredByteBaseSource } from "./curvegpu/msm_bench_sources.js";
 import {
   createBindGroupForBuffers as sharedCreateBindGroupForBuffers,
   createEmptyPointStorageBuffer as sharedCreateEmptyPointStorageBuffer,
@@ -42,7 +42,27 @@ type Phase7Vectors = {
   one_mont_z: string;
 };
 
-type BN254BaseSource = "generated" | "server";
+type CurveId = "bn254" | "bls12_381";
+
+type CurveBenchConfig = {
+  id: CurveId;
+  title: string;
+  successMessage: string;
+  opsKernelLabel: string;
+  pippengerKernelLabel: string;
+  fpBytes: number;
+  pointBytes: number;
+  zeroHex: string;
+  opsShaderPath: string;
+  pippengerShaderPath: string;
+  phase7Path: string;
+  fixtureJSONPath?: string;
+  fixtureBinPath?: string;
+  serverBinPath?: string;
+  pippengerMode: "simple" | "weighted";
+  includeNaive: boolean;
+  hasScalarMulOpcode: boolean;
+};
 
 type OpProfile = {
   uploadMs: number;
@@ -61,20 +81,74 @@ type ScalarBatch = {
   words: Uint32Array;
 };
 
-declare const GPUShaderStage: { COMPUTE: number };
-declare const GPUBufferUsage: { STORAGE: number; COPY_DST: number; COPY_SRC: number; MAP_READ: number; UNIFORM: number };
+declare const GPUBufferUsage: {
+  STORAGE: number;
+  COPY_DST: number;
+  COPY_SRC: number;
+  MAP_READ: number;
+  UNIFORM: number;
+};
 declare const GPUMapMode: { READ: number };
 
-const FP_BYTES = 32;
-const POINT_BYTES = 96;
 const UNIFORM_BYTES = 32;
-const ZERO_HEX = "0000000000000000000000000000000000000000000000000000000000000000";
 const INDEX_SIGN_BIT = 0x80000000;
+const G1_OP_JAC_INFINITY = 1;
 const G1_OP_DOUBLE_JAC = 4;
 const G1_OP_ADD_MIXED = 5;
 const G1_OP_JAC_TO_AFFINE = 6;
 const G1_OP_AFFINE_ADD = 7;
 const G1_OP_SCALAR_MUL_AFFINE = 8;
+
+const CURVE_CONFIGS: Record<CurveId, CurveBenchConfig> = {
+  bn254: {
+    id: "bn254",
+    title: "BN254 G1 MSM Browser Benchmark",
+    successMessage: "BN254 G1 MSM browser benchmark completed",
+    opsKernelLabel: "bn254-g1",
+    pippengerKernelLabel: "bn254-g1",
+    fpBytes: 32,
+    pointBytes: 96,
+    zeroHex: "0000000000000000000000000000000000000000000000000000000000000000",
+    opsShaderPath: "/shaders/curves/bn254/g1_arith.wgsl",
+    pippengerShaderPath: "/shaders/curves/bn254/g1_arith.wgsl",
+    phase7Path: "/testdata/vectors/g1/bn254_phase7_scalar_mul.json",
+    serverBinPath: "/api/bn254/g1/bases.bin",
+    pippengerMode: "simple",
+    includeNaive: true,
+    hasScalarMulOpcode: true,
+  },
+  bls12_381: {
+    id: "bls12_381",
+    title: "BLS12-381 G1 MSM Browser Benchmark",
+    successMessage: "BLS12-381 G1 MSM browser benchmark completed",
+    opsKernelLabel: "bls12-381-g1",
+    pippengerKernelLabel: "bls12-381-g1",
+    fpBytes: 48,
+    pointBytes: 144,
+    zeroHex:
+      "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    opsShaderPath: "/shaders/curves/bls12_381/g1_arith.wgsl?v=1",
+    pippengerShaderPath: "/shaders/curves/bls12_381/g1_msm.wgsl?v=1",
+    phase7Path: "/testdata/vectors/g1/bls12_381_phase7_scalar_mul.json",
+    fixtureJSONPath: "/testdata/fixtures/g1/bls12_381_bases_2pow19_jacobian.json?v=1",
+    fixtureBinPath: "/testdata/fixtures/g1/bls12_381_bases_2pow19_jacobian.bin?v=1",
+    serverBinPath: "/api/bls12-381/g1/bases.bin",
+    pippengerMode: "weighted",
+    includeNaive: false,
+    hasScalarMulOpcode: false,
+  },
+};
+
+function getCurveConfig(): CurveBenchConfig {
+  const params = new URLSearchParams(window.location.search);
+  const curve = (params.get("curve") ?? "bn254") as CurveId;
+  return CURVE_CONFIGS[curve] ?? CURVE_CONFIGS.bn254;
+}
+
+const curveConfig = getCurveConfig();
+const FP_BYTES = curveConfig.fpBytes;
+const POINT_BYTES = curveConfig.pointBytes;
+const ZERO_HEX = curveConfig.zeroHex;
 
 const minLogEl = document.getElementById("min-log") as HTMLInputElement | null;
 const maxLogEl = document.getElementById("max-log") as HTMLInputElement | null;
@@ -122,22 +196,6 @@ async function fetchBytes(path: string): Promise<Uint8Array> {
   return new Uint8Array(await response.arrayBuffer());
 }
 
-function getBaseSource(): BN254BaseSource {
-  const params = new URLSearchParams(window.location.search);
-  const source = params.get("base-source") ?? params.get("baseSource") ?? "generated";
-  return source === "server" ? "server" : "generated";
-}
-
-function getBaseSeed(): number {
-  const params = new URLSearchParams(window.location.search);
-  const raw = params.get("seed");
-  if (!raw) {
-    return 1;
-  }
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isInteger(parsed) ? parsed : 1;
-}
-
 async function getAdapterInfo(adapter: GPUAdapter): Promise<GPUAdapterInfo | null> {
   const adapterWithInfo = adapter as GPUAdapter & {
     info?: GPUAdapterInfo;
@@ -175,7 +233,7 @@ async function appendAdapterDiagnostics(adapter: GPUAdapter, lines: string[]): P
 }
 
 function createKernel(device: GPUDevice, shaderCode: string, entryPoint = "g1_ops_main"): Kernel {
-  return sharedCreateMSMKernel(device, shaderCode, "bn254-g1", entryPoint);
+  return sharedCreateMSMKernel(device, shaderCode, curveConfig.opsKernelLabel, entryPoint);
 }
 
 function hexToBytes(hex: string): Uint8Array {
@@ -192,6 +250,13 @@ function bytesToHex(bytes: Uint8Array): string {
 
 function zeroPoint(): JacobianPoint {
   return { x_bytes_le: ZERO_HEX, y_bytes_le: ZERO_HEX, z_bytes_le: ZERO_HEX };
+}
+
+function jacToAffinePoint(point: JacobianPoint, oneMontZ: string): JacobianPoint {
+  if (point.z_bytes_le === ZERO_HEX) {
+    return zeroPoint();
+  }
+  return { x_bytes_le: point.x_bytes_le, y_bytes_le: point.y_bytes_le, z_bytes_le: oneMontZ };
 }
 
 function isInfinityPoint(point: JacobianPoint): boolean {
@@ -325,14 +390,6 @@ function affineToKernelPoint(point: AffinePoint, oneMontZ: string): JacobianPoin
   };
 }
 
-function scalarToKernelPoint(scalarHexLE: string): JacobianPoint {
-  return {
-    x_bytes_le: scalarHexLE,
-    y_bytes_le: ZERO_HEX,
-    z_bytes_le: ZERO_HEX,
-  };
-}
-
 function packPointBatch(points: readonly JacobianPoint[]): Uint8Array {
   const out = new Uint8Array(points.length * POINT_BYTES);
   points.forEach((point, index) => {
@@ -365,6 +422,21 @@ function makeScalarHexLEFromUint64(value: bigint): string {
     x >>= 8n;
   }
   return bytesToHex(out);
+}
+
+function scalarBit(scalarHexLE: string, bit: number): boolean {
+  const bytes = hexToBytes(scalarHexLE);
+  const byteIndex = Math.floor(bit / 8);
+  const bitIndex = bit % 8;
+  return ((bytes[byteIndex] >> bitIndex) & 1) !== 0;
+}
+
+function anyMask(mask: readonly boolean[]): boolean {
+  return mask.some(Boolean);
+}
+
+function maskedAffine(base: readonly JacobianPoint[], mask: readonly boolean[]): JacobianPoint[] {
+  return base.map((point, index) => (mask[index] ? point : zeroPoint()));
 }
 
 function makeRandomScalarHexLE(seed: number): string {
@@ -492,6 +564,57 @@ async function runOpProfiled(
   };
 }
 
+async function runScalarMulAffineProfiled(
+  device: GPUDevice,
+  kernel: Kernel,
+  base: readonly JacobianPoint[],
+  scalarsHexLE: readonly string[],
+): Promise<{ out: JacobianPoint[]; profile: MSMProfile }> {
+  const totalStart = performance.now();
+  let uploadMs = 0;
+  let kernelMs = 0;
+  let readbackMs = 0;
+  let acc = await runOpProfiled(device, kernel, G1_OP_JAC_INFINITY, base.map(() => zeroPoint()), base.map(() => zeroPoint()));
+  uploadMs += acc.profile.uploadMs;
+  kernelMs += acc.profile.kernelMs;
+  readbackMs += acc.profile.readbackMs;
+  for (let bit = 255; bit >= 0; bit -= 1) {
+    const doubled = await runOpProfiled(device, kernel, G1_OP_DOUBLE_JAC, acc.out, acc.out.map(() => zeroPoint()));
+    uploadMs += doubled.profile.uploadMs;
+    kernelMs += doubled.profile.kernelMs;
+    readbackMs += doubled.profile.readbackMs;
+    acc = doubled;
+    const mask = scalarsHexLE.map((scalar) => scalarBit(scalar, bit));
+    if (!anyMask(mask)) {
+      continue;
+    }
+    const added = await runOpProfiled(device, kernel, G1_OP_ADD_MIXED, acc.out, maskedAffine(base, mask));
+    uploadMs += added.profile.uploadMs;
+    kernelMs += added.profile.kernelMs;
+    readbackMs += added.profile.readbackMs;
+    acc = added;
+  }
+  const affine = await runOpProfiled(device, kernel, G1_OP_JAC_TO_AFFINE, acc.out, acc.out.map(() => zeroPoint()));
+  uploadMs += affine.profile.uploadMs;
+  kernelMs += affine.profile.kernelMs;
+  readbackMs += affine.profile.readbackMs;
+  return {
+    out: affine.out,
+    profile: {
+      partitionMs: 0,
+      uploadMs,
+      kernelMs,
+      readbackMs,
+      scalarMulTotalMs: performance.now() - totalStart,
+      bucketReductionTotalMs: 0,
+      windowReductionTotalMs: 0,
+      finalReductionTotalMs: 0,
+      reductionTotalMs: 0,
+      totalMs: performance.now() - totalStart,
+    },
+  };
+}
+
 function createPointStorageBuffer(
   device: GPUDevice,
   label: string,
@@ -501,6 +624,15 @@ function createPointStorageBuffer(
   const bytes = packPointBatch(points.length === 0 ? [zeroPoint()] : points);
   const count = Math.max(minCount, points.length === 0 ? 1 : points.length);
   return createStorageBufferFromBytes(device, label, bytes, count * POINT_BYTES);
+}
+
+function createPointStorageBufferFromBytes(
+  device: GPUDevice,
+  label: string,
+  bytes: Uint8Array,
+  count: number,
+): { buffer: GPUBuffer; uploadMs: number } {
+  return createStorageBufferFromBytes(device, label, bytes, Math.max(1, count) * POINT_BYTES);
 }
 
 function createU32StorageBuffer(
@@ -565,19 +697,6 @@ async function readbackPointBufferProfiled(
   return { points: unpackPointBatch(result.bytes, count), readbackMs: result.readbackMs };
 }
 
-async function buildBases(
-  device: GPUDevice,
-  kernel: Kernel,
-  generator: AffinePoint,
-  oneMontZ: string,
-  count: number,
-): Promise<JacobianPoint[]> {
-  const generatorKernel = affineToKernelPoint(generator, oneMontZ);
-  const bases = Array.from({ length: count }, () => generatorKernel);
-  const scalars = Array.from({ length: count }, (_, index) => scalarToKernelPoint(makeScalarHexLEFromUint64(BigInt(index + 1))));
-  return (await runOpProfiled(device, kernel, G1_OP_SCALAR_MUL_AFFINE, bases, scalars)).out;
-}
-
 function makeMSMScalars(count: number): ScalarBatch {
   return makeRandomScalarBatch(count);
 }
@@ -587,6 +706,7 @@ async function runMSMProfiled(
   kernel: Kernel,
   bases: readonly JacobianPoint[],
   scalars: readonly string[],
+  mode: "scalar_mul_opcode" | "host_scalar_mul",
 ): Promise<MSMProfile> {
   const totalStart = performance.now();
   let uploadMs = 0;
@@ -595,24 +715,32 @@ async function runMSMProfiled(
   let scalarMulTotalMs = 0;
   let reductionTotalMs = 0;
 
-  const scalarInputs = scalars.map((scalar) => scalarToKernelPoint(scalar));
-  let stage = await runOpProfiled(device, kernel, G1_OP_SCALAR_MUL_AFFINE, bases, scalarInputs);
-  uploadMs += stage.profile.uploadMs;
-  kernelMs += stage.profile.kernelMs;
-  readbackMs += stage.profile.readbackMs;
-  scalarMulTotalMs += stage.profile.totalMs;
+  const scalarMul =
+    mode === "scalar_mul_opcode"
+      ? await runOpProfiled(device, kernel, G1_OP_SCALAR_MUL_AFFINE, bases, scalars.map((scalar) => ({
+          x_bytes_le: scalar,
+          y_bytes_le: ZERO_HEX,
+          z_bytes_le: ZERO_HEX,
+        })))
+      : await runScalarMulAffineProfiled(device, kernel, bases, scalars);
+  uploadMs += scalarMul.profile.uploadMs;
+  kernelMs += scalarMul.profile.kernelMs;
+  readbackMs += scalarMul.profile.readbackMs;
+  scalarMulTotalMs += scalarMul.profile.totalMs;
 
   let width = bases.length;
-  let state = stage.out;
+  let state = scalarMul.out;
   while (width > 1) {
     const nextWidth = Math.ceil(width / 2);
     const left: JacobianPoint[] = [];
     const right: JacobianPoint[] = [];
     for (let j = 0; j < nextWidth; j += 1) {
-      left.push(state[2 * j]);
-      right.push(2 * j + 1 < width ? state[2 * j + 1] : { x_bytes_le: ZERO_HEX, y_bytes_le: ZERO_HEX, z_bytes_le: ZERO_HEX });
+      left.push(jacToAffinePoint(state[2 * j], bases[0]?.z_bytes_le ?? ZERO_HEX));
+      right.push(
+        2 * j + 1 < width ? jacToAffinePoint(state[2 * j + 1], bases[0]?.z_bytes_le ?? ZERO_HEX) : zeroPoint(),
+      );
     }
-    stage = await runOpProfiled(device, kernel, G1_OP_AFFINE_ADD, left, right);
+    const stage = await runOpProfiled(device, kernel, G1_OP_AFFINE_ADD, left, right);
     uploadMs += stage.profile.uploadMs;
     kernelMs += stage.profile.kernelMs;
     readbackMs += stage.profile.readbackMs;
@@ -633,6 +761,20 @@ async function runMSMProfiled(
     reductionTotalMs,
     totalMs: performance.now() - totalStart,
   };
+}
+
+async function buildBases(
+  device: GPUDevice,
+  kernel: Kernel,
+  generator: AffinePoint,
+  oneMontZ: string,
+  count: number,
+): Promise<Uint8Array> {
+  const generatorKernel = affineToKernelPoint(generator, oneMontZ);
+  const bases = Array.from({ length: count }, () => generatorKernel);
+  const scalars = Array.from({ length: count }, (_, index) => makeScalarHexLEFromUint64(BigInt(index + 1)));
+  const generated = await runScalarMulAffineProfiled(device, kernel, bases, scalars);
+  return packPointBatch(generated.out);
 }
 
 async function reduceAffineBucketsProfiled(
@@ -845,38 +987,33 @@ async function combineWindowsProfiled(
 
 async function runPippengerMSMProfiled(
   device: GPUDevice,
-  kernels: {
-    bucket: Kernel;
-    windowSparse: Kernel;
-    combine: Kernel;
-  },
-  bases: readonly JacobianPoint[],
+  kernels: PippengerBenchKernels,
+  basesBytes: Uint8Array,
   scalars: ScalarBatch,
   window: number,
 ): Promise<MSMProfile> {
   return runSparseSignedPippengerMSMProfiled({
     device,
-    kernels: { mode: "simple", ...kernels },
-    basesBytes: packPointBatch(bases),
+    kernels,
+    basesBytes,
     pointBytes: POINT_BYTES,
     uniformBytes: UNIFORM_BYTES,
     zeroPointBytes: packPointBatch([zeroPoint()]),
     scalarWords: scalars.words,
     count: 1,
-    termsPerInstance: bases.length,
+    termsPerInstance: Math.floor(basesBytes.byteLength / POINT_BYTES),
     window,
     labelPrefix: "g1-pip",
   });
 }
 
 async function runBenchmark(): Promise<void> {
-  const baseSource = getBaseSource();
-  const baseSeed = getBaseSeed();
+  const tableHeader =
+    "size,op,window,init_ms,prep_ms,cold_partition_ms,cold_upload_ms,cold_kernel_ms,cold_readback_ms,cold_scalar_mul_total_ms,cold_bucket_reduction_ms,cold_window_reduction_ms,cold_final_reduction_ms,cold_reduction_total_ms,cold_total_ms,cold_with_init_prep_ms,warm_partition_ms,warm_upload_ms,warm_kernel_ms,warm_readback_ms,warm_scalar_mul_total_ms,warm_bucket_reduction_ms,warm_window_reduction_ms,warm_final_reduction_ms,warm_reduction_total_ms,warm_total_ms";
   await runMSMBenchmarkPage({
-    title: "BN254 G1 MSM Browser Benchmark",
-    successMessage: "BN254 G1 MSM browser benchmark completed",
-    tableHeader:
-      "size,op,window,init_ms,cold_partition_ms,cold_upload_ms,cold_kernel_ms,cold_readback_ms,cold_scalar_mul_total_ms,cold_bucket_reduction_ms,cold_window_reduction_ms,cold_final_reduction_ms,cold_reduction_total_ms,cold_total_ms,cold_with_init_ms,warm_partition_ms,warm_upload_ms,warm_kernel_ms,warm_readback_ms,warm_scalar_mul_total_ms,warm_bucket_reduction_ms,warm_window_reduction_ms,warm_final_reduction_ms,warm_reduction_total_ms,warm_total_ms",
+    title: curveConfig.title,
+    successMessage: curveConfig.successMessage,
+    tableHeader,
     elements: {
       minLogEl: mustElement(minLogEl, "min-log"),
       maxLogEl: mustElement(maxLogEl, "max-log"),
@@ -886,42 +1023,46 @@ async function runBenchmark(): Promise<void> {
     ui: { setStatus, setPageState, writeLog },
     appendAdapterDiagnostics,
     init: async ({ device, lines }) => {
-      const [shaderText, phase7] = await Promise.all([
-        fetchText("/shaders/curves/bn254/g1_arith.wgsl"),
-        fetchJSON<Phase7Vectors>("/testdata/vectors/g1/bn254_phase7_scalar_mul.json"),
+      const [opsShaderText, pippengerShaderText, phase7] = await Promise.all([
+        fetchText(curveConfig.opsShaderPath),
+        fetchText(curveConfig.pippengerShaderPath),
+        fetchJSON<Phase7Vectors>(curveConfig.phase7Path),
       ]);
-      lines.push("3. Loading shader and generator metadata... OK");
-      const kernel = createKernel(device, shaderText);
-      const pippengerKernels = createMSMKernelSet(device, shaderText, "bn254-g1", {
-        bucket: "g1_msm_bucket_sparse_main",
-        windowSparse: "g1_msm_window_sparse_main",
-        combine: "g1_msm_combine_main",
+      const opsKernel = createKernel(device, opsShaderText);
+      const baseSourceProvider = createPreferredByteBaseSource({
+        locationSearch: window.location.search,
+        pointBytes: POINT_BYTES,
+        fixtureJSONPath: curveConfig.fixtureJSONPath,
+        fixtureBinPath: curveConfig.fixtureBinPath,
+        serverBinPath: curveConfig.serverBinPath,
+        generatedLoadBases: async (size) =>
+          buildBases(device, opsKernel, phase7.generator_affine, phase7.one_mont_z, size),
       });
-      const baseSourceProvider = createGeneratedBaseSource({
-        loadBases: async (size: number) => {
-          if (baseSource === "server") {
-            const bytes = await fetchBytes(`/api/bn254/g1/bases.bin?count=${size}&seed=${baseSeed}`);
-            if (bytes.byteLength !== size * POINT_BYTES) {
-              throw new Error(`server base length mismatch: got ${bytes.byteLength}, want ${size * POINT_BYTES}`);
+      const baseSourceInit = await baseSourceProvider.init();
+      lines.push(`3. Loading shader and base source... OK (${baseSourceInit.context.baseSource})`);
+      const pippengerKernels: PippengerBenchKernels =
+        curveConfig.pippengerMode === "weighted"
+          ? {
+              mode: "weighted",
+              ...createMSMKernelSet(device, pippengerShaderText, curveConfig.pippengerKernelLabel, {
+                bucket: "g1_msm_bucket_sparse_main",
+                weightBuckets: "g1_msm_weight_buckets_main",
+                subsumPhase1: "g1_msm_subsum_phase1_main",
+                combine: "g1_msm_combine_main",
+              }),
             }
-            return unpackPointBatch(bytes, size);
-          }
-          return buildBases(
-            device,
-            kernel,
-            phase7.generator_affine,
-            phase7.one_mont_z,
-            size,
-          );
-        },
-      });
+          : {
+              mode: "simple",
+              ...createMSMKernelSet(device, pippengerShaderText, curveConfig.pippengerKernelLabel, {
+                bucket: "g1_msm_bucket_sparse_main",
+                windowSparse: "g1_msm_window_sparse_main",
+                combine: "g1_msm_combine_main",
+              }),
+            };
       return {
-        context: { device, kernel, phase7, pippengerKernels, baseSourceProvider },
+        context: { device, opsKernel, phase7, pippengerKernels, baseSourceProvider, baseSourceContext: baseSourceInit.context },
         preMetricLines: ["4. Creating pipeline... OK"],
-        postMetricLines:
-          baseSource === "server"
-            ? [`base_source = server`, `base_seed = ${baseSeed}`]
-            : [`base_source = generated`],
+        postMetricLines: baseSourceInit.postMetricLines,
       };
     },
     runSizes: async ({ context, lines, initMs, minLog, maxLog, iters, writeLog }) => {
@@ -933,31 +1074,44 @@ async function runBenchmark(): Promise<void> {
         iters,
         writeLog,
         makeSizeBenchmarks: async ({ size }) => {
-          const { bases } = await context.baseSourceProvider.loadBases({
-            context: null,
+          const { bases: basesBytes, prepMs } = await context.baseSourceProvider.loadBases({
+            context: context.baseSourceContext,
             size,
           });
           const scalars = makeMSMScalars(size);
+          const bases = unpackPointBatch(basesBytes, size);
+          const entries = [];
+          if (curveConfig.includeNaive) {
+            entries.push({
+              label: "msm_naive_affine",
+              window: 0,
+              run: () =>
+                runMSMProfiled(
+                  context.device,
+                  context.opsKernel,
+                  bases,
+                  scalars.hexes,
+                  curveConfig.hasScalarMulOpcode ? "scalar_mul_opcode" : "host_scalar_mul",
+                ),
+            });
+          }
+          const window = bestPippengerWindow(size);
+          entries.push({
+            label: "msm_pippenger_affine",
+            window,
+            run: () =>
+              runPippengerMSMProfiled(
+                context.device,
+                context.pippengerKernels,
+                basesBytes,
+                scalars,
+                window,
+              ),
+          });
           return {
-            entries: [
-              {
-                label: "msm_naive_affine",
-                window: 0,
-                run: () => runMSMProfiled(context.device, context.kernel, bases, scalars.hexes),
-              },
-              {
-                label: "msm_pippenger_affine",
-                window: bestPippengerWindow(size),
-                run: () =>
-                  runPippengerMSMProfiled(
-                    context.device,
-                    context.pippengerKernels,
-                    bases,
-                    scalars,
-                    bestPippengerWindow(size),
-                  ),
-              },
-            ],
+            prepMs,
+            includePrepMs: true,
+            entries,
           };
         },
       });

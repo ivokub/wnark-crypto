@@ -1,0 +1,15 @@
+package testdata
+
+//go:generate sh -c "cd .. && go run ./cmd/bn254-fr-vector-gen"
+//go:generate sh -c "cd .. && go run ./cmd/bn254-fp-vector-gen"
+//go:generate sh -c "cd .. && go run ./cmd/bn254-g1-vector-gen"
+//go:generate sh -c "cd .. && go run ./cmd/bn254-g1-scalar-vector-gen"
+//go:generate sh -c "cd .. && go run ./cmd/bn254-g1-msm-vector-gen"
+//go:generate sh -c "cd .. && go run ./cmd/bn254-fr-ntt-domain-gen"
+//go:generate sh -c "cd .. && go run ./cmd/bn254-fr-ntt-vector-gen"
+//go:generate sh -c "cd .. && go run ./cmd/bls12-381-fr-vector-gen"
+//go:generate sh -c "cd .. && go run ./cmd/bls12-381-fp-vector-gen"
+//go:generate sh -c "cd .. && go run ./cmd/bls12-381-g1-vector-gen"
+//go:generate sh -c "cd .. && go run ./cmd/bls12-381-g1-scalar-vector-gen"
+//go:generate sh -c "cd .. && go run ./cmd/bls12-381-g1-msm-vector-gen"
+//go:generate sh -c "cd .. && go run ./cmd/bls12-381-g1-bases-fixture-gen"

@@ -5,25 +5,17 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"math/rand"
 	"net/http"
 	"path/filepath"
 	"strconv"
 	"sync"
 
-	gnarkbls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
-	gnarkfp "github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
-	gnarkfr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
-	gnarkbn254 "github.com/consensys/gnark-crypto/ecc/bn254"
-	gnarkbn254fp "github.com/consensys/gnark-crypto/ecc/bn254/fp"
-	gnarkbn254fr "github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/ivokub/wnark-crypto/pkg/testgen"
 )
 
 const (
-	bn254FpBytes    = 32
-	bn254PointBytes = 96
-	fpBytes         = 48
-	pointBytes      = 144
+	bn254PointBytes = testgen.BN254PointBytes
+	pointBytes      = testgen.BLS12381PointBytes
 )
 
 type basesResponse struct {
@@ -152,7 +144,7 @@ func (c *baseCache) getOrBuild(count int, seed int64) ([]byte, error) {
 	}
 	c.mu.RUnlock()
 
-	bytes, err := buildRandomBases(count, seed)
+	bytes, err := testgen.BuildRandomBLS12381G1Bases(count, seed)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +164,7 @@ func (c *baseCache) getOrBuildBN254(count int, seed int64) ([]byte, error) {
 	}
 	c.mu.RUnlock()
 
-	bytes, err := buildRandomBasesBN254(count, seed)
+	bytes, err := testgen.BuildRandomBN254G1Bases(count, seed)
 	if err != nil {
 		return nil, err
 	}
@@ -181,98 +173,4 @@ func (c *baseCache) getOrBuildBN254(count int, seed int64) ([]byte, error) {
 	c.entries[key] = bytes
 	c.mu.Unlock()
 	return bytes, nil
-}
-
-func buildRandomBases(count int, seed int64) ([]byte, error) {
-	_, _, genAff, _ := gnarkbls12381.Generators()
-	oneMontZ := montOne()
-	rng := rand.New(rand.NewSource(seed))
-	scalars := make([]gnarkfr.Element, count)
-	for i := range scalars {
-		var raw [32]byte
-		for j := range raw {
-			raw[j] = byte(rng.Uint32())
-		}
-		scalars[i].SetBytes(raw[:])
-		if scalars[i].IsZero() {
-			scalars[i].SetUint64(1)
-		}
-	}
-	points := gnarkbls12381.BatchScalarMultiplicationG1(&genAff, scalars)
-
-	out := make([]byte, count*pointBytes)
-	for i := range points {
-		base := i * pointBytes
-		writeElementLE(out[base:base+fpBytes], points[i].X)
-		writeElementLE(out[base+fpBytes:base+2*fpBytes], points[i].Y)
-		writeElementLE(out[base+2*fpBytes:base+3*fpBytes], oneMontZ)
-	}
-	return out, nil
-}
-
-func buildRandomBasesBN254(count int, seed int64) ([]byte, error) {
-	_, _, genAff, _ := gnarkbn254.Generators()
-	oneMontZ := montOneBN254()
-	rng := rand.New(rand.NewSource(seed))
-	scalars := make([]gnarkbn254fr.Element, count)
-	for i := range scalars {
-		var raw [32]byte
-		for j := range raw {
-			raw[j] = byte(rng.Uint32())
-		}
-		scalars[i].SetBytes(raw[:])
-		if scalars[i].IsZero() {
-			scalars[i].SetUint64(1)
-		}
-	}
-	points := gnarkbn254.BatchScalarMultiplicationG1(&genAff, scalars)
-
-	out := make([]byte, count*bn254PointBytes)
-	for i := range points {
-		base := i * bn254PointBytes
-		writeElementLE4(out[base:base+bn254FpBytes], points[i].X)
-		writeElementLE4(out[base+bn254FpBytes:base+2*bn254FpBytes], points[i].Y)
-		writeElementLE4(out[base+2*bn254FpBytes:base+3*bn254FpBytes], oneMontZ)
-	}
-	return out, nil
-}
-
-func montOne() gnarkfp.Element {
-	var one gnarkfp.Element
-	one.SetOne()
-	return one
-}
-
-func montOneBN254() gnarkbn254fp.Element {
-	var one gnarkbn254fp.Element
-	one.SetOne()
-	return one
-}
-
-func writeElementLE(dst []byte, v gnarkfp.Element) {
-	for i, word := range [6]uint64(v) {
-		base := i * 8
-		dst[base+0] = byte(word)
-		dst[base+1] = byte(word >> 8)
-		dst[base+2] = byte(word >> 16)
-		dst[base+3] = byte(word >> 24)
-		dst[base+4] = byte(word >> 32)
-		dst[base+5] = byte(word >> 40)
-		dst[base+6] = byte(word >> 48)
-		dst[base+7] = byte(word >> 56)
-	}
-}
-
-func writeElementLE4(dst []byte, v gnarkbn254fp.Element) {
-	for i, word := range [4]uint64(v) {
-		base := i * 8
-		dst[base+0] = byte(word)
-		dst[base+1] = byte(word >> 8)
-		dst[base+2] = byte(word >> 16)
-		dst[base+3] = byte(word >> 24)
-		dst[base+4] = byte(word >> 32)
-		dst[base+5] = byte(word >> 40)
-		dst[base+6] = byte(word >> 48)
-		dst[base+7] = byte(word >> 56)
-	}
 }
