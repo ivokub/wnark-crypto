@@ -1,8 +1,12 @@
 export type {
+  CurveGPUAffinePoint,
   CurveGPUAdapterDiagnostics,
   CurveGPUContext,
   CurveGPUContextOptions,
   CurveGPURequestedLimits,
+  CurveGPUElementBytes,
+  CurveGPUJacobianPoint,
+  CurveGPUMSMOptions,
   CurveModule,
   FieldModule,
   G1Module,
