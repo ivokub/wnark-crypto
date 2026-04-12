@@ -14,8 +14,6 @@ import { fetchJSON } from "./browser_utils.js";
 const VECTOR_OP_MUL_FACTORS = 3;
 const VECTOR_OP_BIT_REVERSE_COPY = 4;
 const UNIFORM_WORDS = 8;
-const ELEMENT_BYTES = 32;
-
 type DomainMetadata = {
   log_n: number;
   size: number;
@@ -62,21 +60,21 @@ function bigIntToBytesLE(value: bigint, byteSize: number): Uint8Array {
   return out;
 }
 
-function buildRegularStageBytes(domain: DomainMetadata, inverse: boolean, modulus: bigint): Uint8Array[] {
+function buildRegularStageElements(domain: DomainMetadata, inverse: boolean, modulus: bigint, elementBytes: number): Uint8Array[][] {
   const logN = domain.log_n;
   const omega = hexToBigInt(inverse ? domain.omega_inv_hex : domain.omega_hex);
-  const stages: Uint8Array[] = [];
+  const stages: Uint8Array[][] = [];
   for (let stage = 1; stage <= logN; stage += 1) {
     const m = 1 << (stage - 1);
     const exponentShift = BigInt(logN - stage);
     const step = modPow(omega, 1n << exponentShift, modulus);
-    const bytes = new Uint8Array(m * ELEMENT_BYTES);
+    const stageElements: Uint8Array[] = [];
     let acc = 1n;
     for (let i = 0; i < m; i += 1) {
-      bytes.set(bigIntToBytesLE(acc, ELEMENT_BYTES), i * ELEMENT_BYTES);
+      stageElements.push(bigIntToBytesLE(acc, elementBytes));
       acc = (acc * step) % modulus;
     }
-    stages.push(bytes);
+    stages.push(stageElements);
   }
   return stages;
 }
@@ -94,7 +92,8 @@ export function createNTTModule(
 ): NTTModule {
   const { curve, vectorShaderPath, nttShaderPath, domainPath, modulusHex } = options;
   const label = `${curve}-fr-ntt`;
-  const zeroElement = new Uint8Array(ELEMENT_BYTES);
+  const elementBytes = fr.byteSize;
+  const zeroElement = new Uint8Array(elementBytes);
 
   const getVectorKernel = lazyAsync(async () => {
     const shaderCode = await loadShaderText(vectorShaderPath);
@@ -119,9 +118,15 @@ export function createNTTModule(
       if (!domain) {
         throw new Error(`${label}: missing domain metadata for size ${size}`);
       }
-      const forwardStageMont = await fr.toMontBatch(buildRegularStageBytes(domain, false, modulus));
-      const inverseStageMont = await fr.toMontBatch(buildRegularStageBytes(domain, true, modulus));
-      const inverseScaleMont = await fr.toMont(bigIntToBytesLE(hexToBigInt(domain.cardinality_inv_hex), ELEMENT_BYTES));
+      const forwardStageRegular = buildRegularStageElements(domain, false, modulus, elementBytes);
+      const inverseStageRegular = buildRegularStageElements(domain, true, modulus, elementBytes);
+      const forwardStageMont = await Promise.all(
+        forwardStageRegular.map(async (stage) => packElementBatch(await fr.toMontBatch(stage), elementBytes, `${label}.forwardStage`)),
+      );
+      const inverseStageMont = await Promise.all(
+        inverseStageRegular.map(async (stage) => packElementBatch(await fr.toMontBatch(stage), elementBytes, `${label}.inverseStage`)),
+      );
+      const inverseScaleMont = await fr.toMont(bigIntToBytesLE(hexToBigInt(domain.cardinality_inv_hex), elementBytes));
       return { forwardStageMont, inverseStageMont, inverseScaleMont };
     })();
     domainCache.set(size, promise);
@@ -135,13 +140,13 @@ export function createNTTModule(
       device: context.device,
       kernel,
       label: `${label}-vector-${opcode}`,
-      inputA: packElementBatch(values, ELEMENT_BYTES, `${label}.values`),
-      inputB: packElementBatch(factors ?? Array.from({ length: count }, () => zeroElement), ELEMENT_BYTES, `${label}.factors`),
-      outputBytes: count * ELEMENT_BYTES,
+      inputA: packElementBatch(values, elementBytes, `${label}.values`),
+      inputB: packElementBatch(factors ?? Array.from({ length: count }, () => zeroElement), elementBytes, `${label}.factors`),
+      outputBytes: count * elementBytes,
       uniformWords: Uint32Array.from([count, opcode, logCount, 0, 0, 0, 0, 0]),
       workgroups: Math.ceil(count / 64),
     });
-    return unpackElementBatch(output, ELEMENT_BYTES, count);
+    return unpackElementBatch(output, elementBytes, count);
   }
 
   async function runStages(values: readonly Uint8Array[], stages: readonly Uint8Array[], inverse: boolean): Promise<Uint8Array[]> {
@@ -153,13 +158,13 @@ export function createNTTModule(
         device: context.device,
         kernel,
         label: `${label}-stage-${stage}-${inverse ? "inv" : "fwd"}`,
-        inputA: packElementBatch(state, ELEMENT_BYTES, `${label}.state`),
+        inputA: packElementBatch(state, elementBytes, `${label}.state`),
         inputB: cloneBytes(stages[stage]),
-        outputBytes: count * ELEMENT_BYTES,
+        outputBytes: count * elementBytes,
         uniformWords: Uint32Array.from([count, 1 << stage, inverse ? 1 : 0, 0, 0, 0, 0, 0]),
         workgroups: Math.ceil(count / 64),
       });
-      state = unpackElementBatch(output, ELEMENT_BYTES, count);
+      state = unpackElementBatch(output, elementBytes, count);
     }
     return state;
   }
@@ -173,7 +178,7 @@ export function createNTTModule(
       return file.domains.map((domain) => domain.size).sort((a, b) => a - b);
     },
     async forward(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]> {
-      values.forEach((value, index) => ensureByteLength(value, ELEMENT_BYTES, `${label}.forward[${index}]`));
+      values.forEach((value, index) => ensureByteLength(value, elementBytes, `${label}.forward[${index}]`));
       const size = values.length;
       if (size === 0 || (size & (size - 1)) !== 0) {
         throw new Error(`${label}: NTT input length must be a non-zero power of two`);
@@ -183,7 +188,7 @@ export function createNTTModule(
       return runStages(bitReversed, domain.forwardStageMont, false);
     },
     async inverse(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]> {
-      values.forEach((value, index) => ensureByteLength(value, ELEMENT_BYTES, `${label}.inverse[${index}]`));
+      values.forEach((value, index) => ensureByteLength(value, elementBytes, `${label}.inverse[${index}]`));
       const size = values.length;
       if (size === 0 || (size & (size - 1)) !== 0) {
         throw new Error(`${label}: NTT input length must be a non-zero power of two`);

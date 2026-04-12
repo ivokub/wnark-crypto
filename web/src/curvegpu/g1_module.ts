@@ -96,6 +96,10 @@ function unpackJacobianPoints(bytes: Uint8Array, count: number, coordinateBytes:
   return out;
 }
 
+function isAffineInfinity(point: CurveGPUAffinePoint): boolean {
+  return point.x.every((byte) => byte === 0) && point.y.every((byte) => byte === 0);
+}
+
 function scalarBit(scalar: Uint8Array, bit: number): boolean {
   ensureByteLength(scalar, 32, "scalar");
   const byteIndex = Math.floor(bit / 8);
@@ -179,6 +183,29 @@ export function createG1Module(
     return unpackJacobianPoints(output, count, coordinateBytes, pointBytes);
   }
 
+  async function runAffineInputBatch(
+    opcode: G1OpCode,
+    inputA: readonly CurveGPUAffinePoint[],
+  ): Promise<CurveGPUJacobianPoint[]> {
+    const count = inputA.length;
+    if (count === 0) {
+      return [];
+    }
+    const kernel = await getKernel();
+    const oneMontZ = await getOneMontgomery();
+    const output = await runSimpleKernel({
+      device: context.device,
+      kernel,
+      label: `${label}-op-${opcode}`,
+      inputA: packAffinePoints(inputA, coordinateBytes, pointBytes, oneMontZ, zeroCoordinate, `${label}.inputA`),
+      inputB: packJacobianPoints(makeZeroJacobianBatch(count), coordinateBytes, pointBytes, `${label}.inputB`),
+      outputBytes: count * pointBytes,
+      uniformWords: Uint32Array.from([count, opcode, 0, 0, 0, 0, 0, 0]),
+      workgroups: Math.ceil(count / 64),
+    });
+    return unpackJacobianPoints(output, count, coordinateBytes, pointBytes);
+  }
+
   async function runJacobianUnary(opcode: G1OpCode, point: CurveGPUJacobianPoint): Promise<CurveGPUJacobianPoint> {
     return (await runJacobianBatch(opcode, [point], [zeroJacobianPoint]))[0];
   }
@@ -188,7 +215,7 @@ export function createG1Module(
   }
 
   async function runAffineUnary(opcode: G1OpCode, affine: CurveGPUAffinePoint): Promise<CurveGPUJacobianPoint> {
-    return (await runMixedBatch(opcode, [zeroJacobianPoint], [affine]))[0];
+    return (await runAffineInputBatch(opcode, [affine]))[0];
   }
 
   function makeZeroJacobianBatch(count: number): CurveGPUJacobianPoint[] {
@@ -228,7 +255,7 @@ export function createG1Module(
       return runAffineUnary(OP_AFFINE_TO_JAC, point);
     },
     async affineToJacobianBatch(points: readonly CurveGPUAffinePoint[]): Promise<CurveGPUJacobianPoint[]> {
-      return runMixedBatch(OP_AFFINE_TO_JAC, Array.from({ length: points.length }, () => zeroJacobianPoint), points);
+      return runAffineInputBatch(OP_AFFINE_TO_JAC, points);
     },
     async negJacobian(point: CurveGPUJacobianPoint): Promise<CurveGPUJacobianPoint> {
       return runJacobianUnary(OP_NEG_JAC, point);
@@ -255,11 +282,11 @@ export function createG1Module(
       return runJacobianBatch(OP_JAC_TO_AFFINE, points, makeZeroJacobianBatch(points.length));
     },
     async affineAdd(a: CurveGPUAffinePoint, b: CurveGPUAffinePoint): Promise<CurveGPUJacobianPoint> {
-      const left = await runMixedBatch(OP_AFFINE_TO_JAC, makeZeroJacobianBatch(1), [a]);
+      const left = await runAffineInputBatch(OP_AFFINE_TO_JAC, [a]);
       return (await runMixedBatch(OP_AFFINE_ADD, left, [b]))[0];
     },
     async affineAddBatch(a: readonly CurveGPUAffinePoint[], b: readonly CurveGPUAffinePoint[]): Promise<CurveGPUJacobianPoint[]> {
-      const left = await runMixedBatch(OP_AFFINE_TO_JAC, makeZeroJacobianBatch(a.length), a);
+      const left = await runAffineInputBatch(OP_AFFINE_TO_JAC, a);
       return runMixedBatch(OP_AFFINE_ADD, left, b);
     },
     async scalarMulAffine(base: CurveGPUAffinePoint, scalar: CurveGPUElementBytes): Promise<CurveGPUJacobianPoint> {
@@ -274,7 +301,7 @@ export function createG1Module(
       for (let bit = 255; bit >= 0; bit -= 1) {
         acc = await runJacobianBatch(OP_DOUBLE_JAC, acc, zeros);
         const activeBases = bases.map((point, index) => (scalarBit(scalars[index], bit) ? point : cloneAffine(zeroAffinePoint)));
-        if (activeBases.every((point) => point.x.every((byte) => byte === 0) && point.y.every((byte) => byte === 0))) {
+        if (activeBases.every(isAffineInfinity)) {
           continue;
         }
         acc = await runMixedBatch(OP_ADD_MIXED, acc, activeBases);

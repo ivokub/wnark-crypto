@@ -107,15 +107,11 @@ async function naiveMSMAffine(
   if (scaled.length === 0) {
     return curve.g1.jacobianInfinity();
   }
-
-  let accAffine = curve.g1.affineInfinity();
-  let accJacobian = await curve.g1.jacobianInfinity();
-  for (const point of scaled) {
-    accJacobian = await curve.g1.affineAdd(accAffine, toAffinePoint(point));
-    accJacobian = await curve.g1.jacobianToAffine(accJacobian);
-    accAffine = toAffinePoint(accJacobian);
+  let accJacobian = await curve.g1.affineToJacobian(toAffinePoint(scaled[0]));
+  for (let i = 1; i < scaled.length; i += 1) {
+    accJacobian = await curve.g1.addMixed(accJacobian, toAffinePoint(scaled[i]));
   }
-  return accJacobian;
+  return curve.g1.jacobianToAffine(accJacobian);
 }
 
 async function runSmoke(config: G1MSMConfig): Promise<void> {

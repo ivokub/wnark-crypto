@@ -35,7 +35,7 @@ var targets = []target{
 		return writeJSON(filepath.Join(root, "testdata/vectors/g1/bn254_g1_msm.json"), testgen.BuildBN254G1MSMVectors())
 	}},
 	{name: "bn254-fr-ntt-domains", run: func(root string) error {
-		return writeJSON(filepath.Join(root, "testdata/vectors/fr/bn254_ntt_domains.json"), testgen.BuildBN254NTTDomainFile(10, 20))
+		return writeJSON(filepath.Join(root, "testdata/vectors/fr/bn254_ntt_domains.json"), testgen.BuildBN254NTTDomainFile(3, 20))
 	}},
 	{name: "bn254-fr-ntt-vectors", run: func(root string) error {
 		return writeJSON(filepath.Join(root, "testdata/vectors/fr/bn254_fr_ntt.json"), testgen.BuildBN254NTTVectors())
@@ -47,7 +47,7 @@ var targets = []target{
 		return writeJSON(filepath.Join(root, "testdata/vectors/fr/bls12_381_fr_vector_ops.json"), testgen.BuildBLS12381FRVectorOps())
 	}},
 	{name: "bls12-381-fr-ntt-domains", run: func(root string) error {
-		return writeJSON(filepath.Join(root, "testdata/vectors/fr/bls12_381_ntt_domains.json"), testgen.BuildBLS12381NTTDomainFile(10, 20))
+		return writeJSON(filepath.Join(root, "testdata/vectors/fr/bls12_381_ntt_domains.json"), testgen.BuildBLS12381NTTDomainFile(3, 20))
 	}},
 	{name: "bls12-381-fr-ntt-vectors", run: func(root string) error {
 		return writeJSON(filepath.Join(root, "testdata/vectors/fr/bls12_381_fr_ntt.json"), testgen.BuildBLS12381NTTVectors())

@@ -1,6 +1,55 @@
 {
   "domains": [
     {
+      "log_n": 3,
+      "size": 8,
+      "omega_hex": "2b337de1c8c14f22ec9b9e2f96afef3652627366f8170a0a948dad4ac1bd5e80",
+      "omega_inv_hex": "130b17119778465cfb3acaee30f81dee20710ead41671f568b11d9ab07b95a9b",
+      "cardinality_inv_hex": "2a57c4a4850b6c2481463cffb1512d51832d6b3f6a82427f1b65b6e172000001"
+    },
+    {
+      "log_n": 4,
+      "size": 16,
+      "omega_hex": "21082ca216cbbf4e1c6e4f4594dd508c996dfbe1174efb98b11509c6e306460b",
+      "omega_inv_hex": "2e40daf409556c02bfc85eb303402b774954d30aeb0337eb85a71e6373428de",
+      "cardinality_inv_hex": "2d5e098bb31e86271ccb415b196942d755b0a9c3f21dd9882fa3d63ab1000001"
+    },
+    {
+      "log_n": 5,
+      "size": 32,
+      "omega_hex": "9c532c6306b93d29678200d47c0b2a99c18d51b838eeb1d3eed4c533bb512d0",
+      "omega_inv_hex": "2724713603bfbd790aeaf3e7df25d8e7ef8f311334905b4d8c99980cf210979d",
+      "cardinality_inv_hex": "2ee12bff4a2813286a8dc388cd754d9a3ef2490635eba50cb9c2e5e750800001"
+    },
+    {
+      "log_n": 6,
+      "size": 64,
+      "omega_hex": "1418144d5b080fcac24cdb7649bdadf246a6cb2426e324bedb94fb05118f023a",
+      "omega_inv_hex": "26177cf2b2a13d3a035cdc7567a8a676d80396ec1d3213ee78ce6a0b763d698f",
+      "cardinality_inv_hex": "2fa2bd3915acd9a9116f049fa77b52fbb39318a757d28acefed26dbda0400001"
+    },
+    {
+      "log_n": 7,
+      "size": 128,
+      "omega_hex": "16e73dfdad310991df5ce19ce85943e01dcb5564b6f24c799d0e470cba9d1811",
+      "omega_inv_hex": "1641c0537969b732427c045f5def8b04aa4f964aa49e95bddddf985fc64427d7",
+      "cardinality_inv_hex": "300385d5fb6f3ce964dfa52b147e55ac6de38077e8c5fdb0215a31a8c8200001"
+    },
+    {
+      "log_n": 8,
+      "size": 256,
+      "omega_hex": "7b0c561a6148404f086204a9f36ffb0617942546750f230c893619174a57a76",
+      "omega_inv_hex": "204bd3277422fad364751ad938e2b5e6a54cf8c68712848a692c553d0329f5d6",
+      "cardinality_inv_hex": "3033ea246e506e898e97f570caffd704cb0bb460313fb720b29e139e5c100001"
+    },
+    {
+      "log_n": 9,
+      "size": 512,
+      "omega_hex": "f1ded1ef6e72f5bffc02c0edd9b0675e8302a41fc782d75893a7fa1470157ce",
+      "omega_inv_hex": "9d8f821aa9995b3546875d5e4fcfcab4c277a07f0bcc0c852f26c0faf6b3e4e",
+      "cardinality_inv_hex": "304c1c4ba7c10759a3741d93a64097b0f99fce54557c93d8fb40049926080001"
+    },
+    {
       "log_n": 10,
       "size": 1024,
       "omega_hex": "6fd19c17017a420ebbebc2bb08771e339ba79c0a8d2d7ab11f995e1bc2e5912",
