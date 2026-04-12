@@ -44,7 +44,7 @@ This remains a primitive-layer project. It is not yet a Groth16 prover or pairin
   - otherwise benchmark server if available
   - otherwise generated bases
 - A shared `pkg/testgen` package now exists for reusable benchmark/test data generation.
-- `go generate ./testdata` now regenerates the tracked curve testdata from repo root.
+- `go generate ./testdata` now regenerates the tracked curve testdata through a single repo entrypoint: `cmd/curvegpu-testdata-gen`.
 
 ### BN254
 
@@ -147,7 +147,8 @@ The first generator extraction is in place, but most curve testdata still lives 
 Next generator work:
 
 - move more vector/fixture construction into `pkg/testgen`
-- keep the command binaries as thin wrappers around shared generators
+- keep user-facing regeneration centered on `cmd/curvegpu-testdata-gen`
+- collapse the old per-dataset command wrappers as shared generators replace them
 - reuse the same generators from the benchmark server where practical
 - keep `go generate ./testdata` as the single regeneration entrypoint
 
