@@ -14,7 +14,6 @@ import { fetchShaderParts } from "./curvegpu/shaders.js";
 
 import {
   bestPippengerWindow as sharedBestPippengerWindow,
-  buildSparseSignedBucketMetadataWords,
   makeRandomScalarBatch,
 } from "./curvegpu/msm_shared.js";
 import {
@@ -23,19 +22,12 @@ import {
   MSMProfile,
 } from "./curvegpu/msm_bench_shared.js";
 import { runMSMBenchmarkPage } from "./curvegpu/msm_page_runner.js";
-import { runSparseSignedPippengerMSMProfiled, type PippengerBenchKernels } from "./curvegpu/msm_pippenger_bench.js";
+import { runSparseSignedPippengerMSMBenchmark, type PippengerBenchKernels } from "./curvegpu/msm_pippenger_bench.js";
 import { createPreferredByteBaseSource } from "./curvegpu/msm_bench_sources.js";
 import {
-  createBindGroupForBuffers as sharedCreateBindGroupForBuffers,
-  createEmptyPointStorageBuffer as sharedCreateEmptyPointStorageBuffer,
   createMSMKernel as sharedCreateMSMKernel,
   createMSMKernelSet,
-  createParamsBuffer as sharedCreateParamsBuffer,
-  createStorageBufferFromBytes,
-  createU32StorageBuffer as sharedCreateU32StorageBuffer,
   Kernel,
-  readbackBufferProfiled,
-  submitKernelProfiled as sharedSubmitKernelProfiled,
 } from "./curvegpu/msm_gpu_runtime.js";
 
 type AffinePoint = {
@@ -74,16 +66,11 @@ type CurveBenchConfig = {
   pippengerMode: "simple" | "weighted";
 };
 
-type OpProfile = {
+type OpBenchmark = {
   uploadMs: number;
   kernelMs: number;
   readbackMs: number;
   totalMs: number;
-};
-
-type GpuPointBatch = {
-  count: number;
-  storage: GPUBuffer;
 };
 
 type ScalarBatch = {
@@ -101,13 +88,10 @@ declare const GPUBufferUsage: {
 declare const GPUMapMode: { READ: number };
 
 const UNIFORM_BYTES = 32;
-const INDEX_SIGN_BIT = 0x80000000;
 const G1_OP_JAC_INFINITY = 1;
 const G1_OP_DOUBLE_JAC = 4;
 const G1_OP_ADD_MIXED = 5;
 const G1_OP_JAC_TO_AFFINE = 6;
-const G1_OP_AFFINE_ADD = 7;
-const G1_OP_SCALAR_MUL_AFFINE = 8;
 
 const CURVE_CONFIGS: Record<CurveId, CurveBenchConfig> = {
   bn254: {
@@ -199,126 +183,8 @@ function jacToAffinePoint(point: JacobianPoint, oneMontZ: string): JacobianPoint
   return { x_bytes_le: point.x_bytes_le, y_bytes_le: point.y_bytes_le, z_bytes_le: oneMontZ };
 }
 
-function isInfinityPoint(point: JacobianPoint): boolean {
-  return point.x_bytes_le === ZERO_HEX && point.y_bytes_le === ZERO_HEX;
-}
-
-function scalarHexLEToBigInt(hex: string): bigint {
-  const bytes = hexToBytes(hex);
-  let out = 0n;
-  for (let i = bytes.length - 1; i >= 0; i -= 1) {
-    out = (out << 8n) | BigInt(bytes[i]);
-  }
-  return out;
-}
-
-function extractWindowDigit(scalar: bigint, bitOffset: number, window: number): number {
-  if (window <= 0) {
-    return 0;
-  }
-  const mask = (1n << BigInt(window)) - 1n;
-  return Number((scalar >> BigInt(bitOffset)) & mask);
-}
-
 function bestPippengerWindow(count: number): number {
   return sharedBestPippengerWindow(count);
-}
-
-function extractWindowDigitWords(words: Uint32Array, scalarBase: number, bitOffset: number, window: number): number {
-  if (window <= 0) {
-    return 0;
-  }
-  const word = Math.floor(bitOffset / 32);
-  const shift = bitOffset % 32;
-  const mask = (1 << window) - 1;
-  if (word >= 8) {
-    return 0;
-  }
-  const lo = words[scalarBase + word] >>> shift;
-  if (shift + window <= 32 || word + 1 >= 8) {
-    return lo & mask;
-  }
-  const highWidth = shift + window - 32;
-  const hiMask = (1 << highWidth) - 1;
-  const hi = words[scalarBase + word + 1] & hiMask;
-  return (lo | (hi << (32 - shift))) & mask;
-}
-
-function buildSparseBucketMetadata(
-  scalars: readonly string[],
-  count: number,
-  termsPerInstance: number,
-  window: number,
-): {
-  baseIndices: Uint32Array;
-  bucketPointers: Uint32Array;
-  bucketSizes: Uint32Array;
-} {
-  const numWindows = Math.ceil(256 / window);
-  const bucketCount = (1 << window) - 1;
-  const totalBuckets = count * numWindows * bucketCount;
-  const bucketSizes = new Uint32Array(totalBuckets);
-  const scalarBigs = scalars.map((scalar) => scalarHexLEToBigInt(scalar));
-  for (let instance = 0; instance < count; instance += 1) {
-    const baseOffset = instance * termsPerInstance;
-    for (let term = 0; term < termsPerInstance; term += 1) {
-      const idx = baseOffset + term;
-      const scalar = scalarBigs[idx];
-      for (let win = 0; win < numWindows; win += 1) {
-        const digit = extractWindowDigit(scalar, win * window, window);
-        if (digit === 0) {
-          continue;
-        }
-        const bucketIndex = ((instance * numWindows + win) * bucketCount) + (digit - 1);
-        bucketSizes[bucketIndex] += 1;
-      }
-    }
-  }
-  const bucketPointers = new Uint32Array(totalBuckets);
-  let totalEntries = 0;
-  for (let i = 0; i < totalBuckets; i += 1) {
-    bucketPointers[i] = totalEntries;
-    totalEntries += bucketSizes[i];
-  }
-  const fill = new Uint32Array(totalBuckets);
-  const baseIndices = new Uint32Array(totalEntries);
-  for (let instance = 0; instance < count; instance += 1) {
-    const baseOffset = instance * termsPerInstance;
-    for (let term = 0; term < termsPerInstance; term += 1) {
-      const idx = baseOffset + term;
-      const scalar = scalarBigs[idx];
-      for (let win = 0; win < numWindows; win += 1) {
-        const digit = extractWindowDigit(scalar, win * window, window);
-        if (digit === 0) {
-          continue;
-        }
-        const bucketIndex = ((instance * numWindows + win) * bucketCount) + (digit - 1);
-        const entryOffset = bucketPointers[bucketIndex] + fill[bucketIndex];
-        baseIndices[entryOffset] = idx;
-        fill[bucketIndex] += 1;
-      }
-    }
-  }
-  return { baseIndices, bucketPointers, bucketSizes };
-}
-
-function buildSparseSignedBucketMetadata(
-  scalarWords: Uint32Array,
-  count: number,
-  termsPerInstance: number,
-  window: number,
-  maxChunkSize = 256,
-): {
-  baseIndices: Uint32Array;
-  bucketPointers: Uint32Array;
-  bucketSizes: Uint32Array;
-  bucketValues: Uint32Array;
-  windowStarts: Uint32Array;
-  windowCounts: Uint32Array;
-  numWindows: number;
-  bucketCount: number;
-} {
-  return buildSparseSignedBucketMetadataWords(scalarWords, count, termsPerInstance, window, maxChunkSize);
 }
 
 function affineToKernelPoint(point: AffinePoint, oneMontZ: string): JacobianPoint {
@@ -379,34 +245,7 @@ function maskedAffine(base: readonly JacobianPoint[], mask: readonly boolean[]):
   return base.map((point, index) => (mask[index] ? point : zeroPoint()));
 }
 
-function makeRandomScalarHexLE(seed: number): string {
-  const out = new Uint8Array(32);
-  let state = seed >>> 0;
-  for (let i = 0; i < out.length; i += 1) {
-    state ^= state << 13;
-    state ^= state >>> 17;
-    state ^= state << 5;
-    out[i] = state & 0xff;
-  }
-  return bytesToHex(out);
-}
-
-function makeRandomScalarData(seed: number): { hex: string; words: Uint32Array } {
-  const bytes = new Uint8Array(32);
-  const words = new Uint32Array(8);
-  let state = seed >>> 0;
-  for (let i = 0; i < bytes.length; i += 1) {
-    state ^= state << 13;
-    state ^= state >>> 17;
-    state ^= state << 5;
-    const value = state & 0xff;
-    bytes[i] = value;
-    words[i >>> 2] |= value << ((i & 3) * 8);
-  }
-  return { hex: bytesToHex(bytes), words };
-}
-
-async function runOpProfiled(
+async function runOpBenchmark(
   device: GPUDevice,
   kernel: Kernel,
   opcode: number,
@@ -420,7 +259,7 @@ async function runOpProfiled(
     bucketCount?: number;
     rowWidth?: number;
   },
-): Promise<{ out: JacobianPoint[]; profile: OpProfile }> {
+): Promise<{ out: JacobianPoint[]; profile: OpBenchmark }> {
   const count = extraParams?.count ?? inputA.length;
   if (count === 0) {
     return {
@@ -504,7 +343,7 @@ async function runOpProfiled(
   };
 }
 
-async function runScalarMulAffineProfiled(
+async function runScalarMulAffineBenchmark(
   device: GPUDevice,
   kernel: Kernel,
   base: readonly JacobianPoint[],
@@ -514,12 +353,12 @@ async function runScalarMulAffineProfiled(
   let uploadMs = 0;
   let kernelMs = 0;
   let readbackMs = 0;
-  let acc = await runOpProfiled(device, kernel, G1_OP_JAC_INFINITY, base.map(() => zeroPoint()), base.map(() => zeroPoint()));
+  let acc = await runOpBenchmark(device, kernel, G1_OP_JAC_INFINITY, base.map(() => zeroPoint()), base.map(() => zeroPoint()));
   uploadMs += acc.profile.uploadMs;
   kernelMs += acc.profile.kernelMs;
   readbackMs += acc.profile.readbackMs;
   for (let bit = 255; bit >= 0; bit -= 1) {
-    const doubled = await runOpProfiled(device, kernel, G1_OP_DOUBLE_JAC, acc.out, acc.out.map(() => zeroPoint()));
+    const doubled = await runOpBenchmark(device, kernel, G1_OP_DOUBLE_JAC, acc.out, acc.out.map(() => zeroPoint()));
     uploadMs += doubled.profile.uploadMs;
     kernelMs += doubled.profile.kernelMs;
     readbackMs += doubled.profile.readbackMs;
@@ -528,13 +367,13 @@ async function runScalarMulAffineProfiled(
     if (!anyMask(mask)) {
       continue;
     }
-    const added = await runOpProfiled(device, kernel, G1_OP_ADD_MIXED, acc.out, maskedAffine(base, mask));
+    const added = await runOpBenchmark(device, kernel, G1_OP_ADD_MIXED, acc.out, maskedAffine(base, mask));
     uploadMs += added.profile.uploadMs;
     kernelMs += added.profile.kernelMs;
     readbackMs += added.profile.readbackMs;
     acc = added;
   }
-  const affine = await runOpProfiled(device, kernel, G1_OP_JAC_TO_AFFINE, acc.out, acc.out.map(() => zeroPoint()));
+  const affine = await runOpBenchmark(device, kernel, G1_OP_JAC_TO_AFFINE, acc.out, acc.out.map(() => zeroPoint()));
   uploadMs += affine.profile.uploadMs;
   kernelMs += affine.profile.kernelMs;
   readbackMs += affine.profile.readbackMs;
@@ -555,88 +394,6 @@ async function runScalarMulAffineProfiled(
   };
 }
 
-function createPointStorageBuffer(
-  device: GPUDevice,
-  label: string,
-  points: readonly JacobianPoint[],
-  minCount = points.length,
-): { buffer: GPUBuffer; uploadMs: number } {
-  const bytes = packPointBatch(points.length === 0 ? [zeroPoint()] : points);
-  const count = Math.max(minCount, points.length === 0 ? 1 : points.length);
-  return createStorageBufferFromBytes(device, label, bytes, count * POINT_BYTES);
-}
-
-function createPointStorageBufferFromBytes(
-  device: GPUDevice,
-  label: string,
-  bytes: Uint8Array,
-  count: number,
-): { buffer: GPUBuffer; uploadMs: number } {
-  return createStorageBufferFromBytes(device, label, bytes, Math.max(1, count) * POINT_BYTES);
-}
-
-function createU32StorageBuffer(
-  device: GPUDevice,
-  label: string,
-  values: Uint32Array,
-): { buffer: GPUBuffer; uploadMs: number } {
-  return sharedCreateU32StorageBuffer(device, label, values);
-}
-
-function createEmptyPointStorageBuffer(device: GPUDevice, label: string, count: number): GPUBuffer {
-  return sharedCreateEmptyPointStorageBuffer(device, label, count, POINT_BYTES);
-}
-
-function createParamsBuffer(
-  device: GPUDevice,
-  label: string,
-  values: {
-    count: number;
-    opcode?: number;
-    termsPerInstance?: number;
-    window?: number;
-    numWindows?: number;
-    bucketCount?: number;
-    rowWidth?: number;
-  },
-): { buffer: GPUBuffer; uploadMs: number } {
-  return sharedCreateParamsBuffer(device, label, UNIFORM_BYTES, values);
-}
-
-function createBindGroupForBuffers(
-  device: GPUDevice,
-  kernel: Kernel,
-  label: string,
-  inputA: GPUBuffer,
-  inputB: GPUBuffer,
-  output: GPUBuffer,
-  params: GPUBuffer,
-  meta0?: GPUBuffer,
-  meta1?: GPUBuffer,
-  meta2?: GPUBuffer,
-): GPUBindGroup {
-  return sharedCreateBindGroupForBuffers(device, kernel, label, inputA, inputB, output, params, meta0, meta1, meta2);
-}
-
-async function submitKernelProfiled(
-  device: GPUDevice,
-  kernel: Kernel,
-  bindGroup: GPUBindGroup,
-  count: number,
-  label: string,
-): Promise<number> {
-  return sharedSubmitKernelProfiled(device, kernel, bindGroup, count, label);
-}
-
-async function readbackPointBufferProfiled(
-  device: GPUDevice,
-  buffer: GPUBuffer,
-  count: number,
-): Promise<{ points: JacobianPoint[]; readbackMs: number }> {
-  const result = await readbackBufferProfiled(device, buffer, Math.max(1, count) * POINT_BYTES);
-  return { points: unpackPointBatch(result.bytes, count), readbackMs: result.readbackMs };
-}
-
 function makeMSMScalars(count: number): ScalarBatch {
   return makeRandomScalarBatch(count);
 }
@@ -651,226 +408,18 @@ async function buildBases(
   const generatorKernel = affineToKernelPoint(generator, oneMontZ);
   const bases = Array.from({ length: count }, () => generatorKernel);
   const scalars = Array.from({ length: count }, (_, index) => makeScalarHexLEFromUint64(BigInt(index + 1)));
-  const generated = await runScalarMulAffineProfiled(device, kernel, bases, scalars);
+  const generated = await runScalarMulAffineBenchmark(device, kernel, bases, scalars);
   return packPointBatch(generated.out);
 }
 
-async function reduceAffineBucketsProfiled(
-  device: GPUDevice,
-  kernel: Kernel,
-  bucketLists: JacobianPoint[][],
-): Promise<{ out: JacobianPoint[]; profile: MSMProfile }> {
-  const profile: MSMProfile = {
-    partitionMs: 0,
-    uploadMs: 0,
-    kernelMs: 0,
-    readbackMs: 0,
-    scalarMulTotalMs: 0,
-    bucketReductionTotalMs: 0,
-    windowReductionTotalMs: 0,
-    finalReductionTotalMs: 0,
-    reductionTotalMs: 0,
-    totalMs: 0,
-  };
-  const totalStart = performance.now();
-  let current = bucketLists.map((bucket) => bucket.slice());
-  for (;;) {
-    const next: JacobianPoint[][] = Array.from({ length: current.length }, () => []);
-    const left: JacobianPoint[] = [];
-    const right: JacobianPoint[] = [];
-    const mappings: Array<{ bucket: number; slot: number }> = [];
-    let work = false;
-    for (let bucketIndex = 0; bucketIndex < current.length; bucketIndex += 1) {
-      const bucket = current[bucketIndex];
-      if (bucket.length <= 1) {
-        next[bucketIndex] = bucket.slice();
-        continue;
-      }
-      work = true;
-      const nextCount = Math.ceil(bucket.length / 2);
-      next[bucketIndex] = new Array<JacobianPoint>(nextCount);
-      for (let j = 0; j < nextCount; j += 1) {
-        left.push(bucket[2 * j]);
-        right.push(2 * j + 1 < bucket.length ? bucket[2 * j + 1] : zeroPoint());
-        mappings.push({ bucket: bucketIndex, slot: j });
-      }
-    }
-    if (!work) {
-      profile.reductionTotalMs += profile.bucketReductionTotalMs;
-      profile.totalMs = performance.now() - totalStart;
-      return {
-        out: current.map((bucket) => (bucket.length === 1 ? bucket[0] : zeroPoint())),
-        profile,
-      };
-    }
-    const reduced = await runOpProfiled(device, kernel, G1_OP_AFFINE_ADD, left, right);
-    profile.uploadMs += reduced.profile.uploadMs;
-    profile.kernelMs += reduced.profile.kernelMs;
-    profile.readbackMs += reduced.profile.readbackMs;
-    profile.bucketReductionTotalMs += reduced.profile.totalMs;
-    for (let i = 0; i < reduced.out.length; i += 1) {
-      const mapping = mappings[i];
-      next[mapping.bucket][mapping.slot] = reduced.out[i];
-    }
-    current = next;
-  }
-}
-
-async function reduceWindowsProfiled(
-  device: GPUDevice,
-  kernel: Kernel,
-  bucketSums: readonly JacobianPoint[],
-  count: number,
-  numWindows: number,
-  bucketCount: number,
-): Promise<{ out: JacobianPoint[]; profile: MSMProfile }> {
-  const profile: MSMProfile = {
-    partitionMs: 0,
-    uploadMs: 0,
-    kernelMs: 0,
-    readbackMs: 0,
-    scalarMulTotalMs: 0,
-    bucketReductionTotalMs: 0,
-    windowReductionTotalMs: 0,
-    finalReductionTotalMs: 0,
-    reductionTotalMs: 0,
-    totalMs: 0,
-  };
-  const totalStart = performance.now();
-  const totalSlots = count * numWindows;
-  const running = Array.from({ length: totalSlots }, () => zeroPoint());
-  const totals = Array.from({ length: totalSlots }, () => zeroPoint());
-
-  for (let bucket = bucketCount - 1; bucket >= 0; bucket -= 1) {
-    const activeRunningIdx: number[] = [];
-    const activeRunning: JacobianPoint[] = [];
-    const activeBuckets: JacobianPoint[] = [];
-    for (let slot = 0; slot < totalSlots; slot += 1) {
-      const point = bucketSums[slot * bucketCount + bucket];
-      if (isInfinityPoint(point)) {
-        continue;
-      }
-      activeRunningIdx.push(slot);
-      activeRunning.push(running[slot]);
-      activeBuckets.push(point);
-    }
-    if (activeRunningIdx.length > 0) {
-      const nextRunning = await runOpProfiled(device, kernel, G1_OP_AFFINE_ADD, activeRunning, activeBuckets);
-      profile.uploadMs += nextRunning.profile.uploadMs;
-      profile.kernelMs += nextRunning.profile.kernelMs;
-      profile.readbackMs += nextRunning.profile.readbackMs;
-      profile.windowReductionTotalMs += nextRunning.profile.totalMs;
-      for (let i = 0; i < activeRunningIdx.length; i += 1) {
-        running[activeRunningIdx[i]] = nextRunning.out[i];
-      }
-    }
-
-    const activeTotalIdx: number[] = [];
-    const activeTotals: JacobianPoint[] = [];
-    const activeRunningTotals: JacobianPoint[] = [];
-    for (let slot = 0; slot < totalSlots; slot += 1) {
-      if (isInfinityPoint(running[slot])) {
-        continue;
-      }
-      activeTotalIdx.push(slot);
-      activeTotals.push(totals[slot]);
-      activeRunningTotals.push(running[slot]);
-    }
-    if (activeTotalIdx.length > 0) {
-      const nextTotals = await runOpProfiled(device, kernel, G1_OP_AFFINE_ADD, activeTotals, activeRunningTotals);
-      profile.uploadMs += nextTotals.profile.uploadMs;
-      profile.kernelMs += nextTotals.profile.kernelMs;
-      profile.readbackMs += nextTotals.profile.readbackMs;
-      profile.windowReductionTotalMs += nextTotals.profile.totalMs;
-      for (let i = 0; i < activeTotalIdx.length; i += 1) {
-        totals[activeTotalIdx[i]] = nextTotals.out[i];
-      }
-    }
-  }
-
-  profile.reductionTotalMs = profile.windowReductionTotalMs;
-  profile.totalMs = performance.now() - totalStart;
-  return { out: totals, profile };
-}
-
-async function combineWindowsProfiled(
-  device: GPUDevice,
-  kernel: Kernel,
-  windowSums: readonly JacobianPoint[],
-  count: number,
-  numWindows: number,
-  window: number,
-): Promise<{ out: JacobianPoint[]; profile: MSMProfile }> {
-  const profile: MSMProfile = {
-    partitionMs: 0,
-    uploadMs: 0,
-    kernelMs: 0,
-    readbackMs: 0,
-    scalarMulTotalMs: 0,
-    bucketReductionTotalMs: 0,
-    windowReductionTotalMs: 0,
-    finalReductionTotalMs: 0,
-    reductionTotalMs: 0,
-    totalMs: 0,
-  };
-  const totalStart = performance.now();
-  let acc = Array.from({ length: count }, () => zeroPoint());
-  const zeros = Array.from({ length: count }, () => zeroPoint());
-
-  for (let win = numWindows - 1; win >= 0; win -= 1) {
-    if (win !== numWindows - 1) {
-      for (let step = 0; step < window; step += 1) {
-        const doubled = await runOpProfiled(device, kernel, G1_OP_DOUBLE_JAC, acc, zeros);
-        profile.uploadMs += doubled.profile.uploadMs;
-        profile.kernelMs += doubled.profile.kernelMs;
-        profile.readbackMs += doubled.profile.readbackMs;
-        profile.finalReductionTotalMs += doubled.profile.totalMs;
-        acc = doubled.out;
-      }
-    }
-
-    const activeIdx: number[] = [];
-    const activeAcc: JacobianPoint[] = [];
-    const activeAff: JacobianPoint[] = [];
-    for (let instance = 0; instance < count; instance += 1) {
-      const point = windowSums[instance * numWindows + win];
-      if (isInfinityPoint(point)) {
-        continue;
-      }
-      activeIdx.push(instance);
-      activeAcc.push(acc[instance]);
-      activeAff.push(point);
-    }
-    if (activeIdx.length > 0) {
-      const nextAcc = await runOpProfiled(device, kernel, G1_OP_ADD_MIXED, activeAcc, activeAff);
-      profile.uploadMs += nextAcc.profile.uploadMs;
-      profile.kernelMs += nextAcc.profile.kernelMs;
-      profile.readbackMs += nextAcc.profile.readbackMs;
-      profile.finalReductionTotalMs += nextAcc.profile.totalMs;
-      for (let i = 0; i < activeIdx.length; i += 1) {
-        acc[activeIdx[i]] = nextAcc.out[i];
-      }
-    }
-  }
-
-  const affine = await runOpProfiled(device, kernel, G1_OP_JAC_TO_AFFINE, acc, zeros);
-  profile.uploadMs += affine.profile.uploadMs;
-  profile.kernelMs += affine.profile.kernelMs;
-  profile.readbackMs += affine.profile.readbackMs;
-  profile.finalReductionTotalMs += affine.profile.totalMs;
-  profile.reductionTotalMs = profile.finalReductionTotalMs;
-  profile.totalMs = performance.now() - totalStart;
-  return { out: affine.out, profile };
-}
-
-async function runPippengerMSMProfiled(
+async function runPippengerMSMBenchmark(
   device: GPUDevice,
   kernels: PippengerBenchKernels,
   basesBytes: Uint8Array,
   scalars: ScalarBatch,
   window: number,
 ): Promise<MSMProfile> {
-  return runSparseSignedPippengerMSMProfiled({
+  return runSparseSignedPippengerMSMBenchmark({
     device,
     kernels,
     basesBytes,
@@ -967,7 +516,7 @@ async function runBenchmark(): Promise<void> {
                 label: "msm_pippenger_affine",
                 window,
                 run: () =>
-                  runPippengerMSMProfiled(
+                  runPippengerMSMBenchmark(
                     context.device,
                     context.pippengerKernels,
                     basesBytes,

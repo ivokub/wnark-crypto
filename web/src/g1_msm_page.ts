@@ -22,8 +22,8 @@ import {
   createStorageBufferFromBytes,
   createU32StorageBuffer as sharedCreateU32StorageBuffer,
   Kernel as SharedMSMKernel,
-  readbackBufferProfiled,
-  submitKernelProfiled as sharedSubmitKernelProfiled,
+  readbackBuffer,
+  submitKernel,
 } from "./curvegpu/msm_gpu_runtime.js";
 
 type AffinePoint = {
@@ -438,11 +438,11 @@ async function runNaiveMSMBLS(
 function createPointStorageBufferBLS(device: GPUDevice, label: string, points: readonly JacobianPoint[], minCount = points.length): GPUBuffer {
   const bytes = packPointBatch(points.length === 0 ? [zeroPoint()] : points);
   const count = Math.max(minCount, points.length === 0 ? 1 : points.length);
-  return createStorageBufferFromBytes(device, label, bytes, count * POINT_BYTES).buffer;
+  return createStorageBufferFromBytes(device, label, bytes, count * POINT_BYTES);
 }
 
 function createU32StorageBufferBLS(device: GPUDevice, label: string, values: Uint32Array): GPUBuffer {
-  return sharedCreateU32StorageBuffer(device, label, values).buffer;
+  return sharedCreateU32StorageBuffer(device, label, values);
 }
 
 function createEmptyPointStorageBufferBLS(device: GPUDevice, label: string, count: number): GPUBuffer {
@@ -454,7 +454,7 @@ function createParamsBufferBLS(
   label: string,
   values: { count: number; termsPerInstance?: number; window?: number; numWindows?: number; bucketCount?: number; rowWidth?: number },
 ): GPUBuffer {
-  return sharedCreateParamsBuffer(device, label, UNIFORM_BYTES, values).buffer;
+  return sharedCreateParamsBuffer(device, label, UNIFORM_BYTES, values);
 }
 
 function createBindGroupForBuffersBLS(
@@ -473,12 +473,12 @@ function createBindGroupForBuffersBLS(
 }
 
 async function submitKernelBLS(device: GPUDevice, kernel: SharedMSMKernel, bindGroup: GPUBindGroup, count: number): Promise<void> {
-  await sharedSubmitKernelProfiled(device, kernel, bindGroup, count, curveConfig.msmKernelLabel);
+  await submitKernel(device, kernel, bindGroup, count, curveConfig.msmKernelLabel);
 }
 
 async function readbackPointBufferBLS(device: GPUDevice, buffer: GPUBuffer, count: number): Promise<JacobianPoint[]> {
-  const result = await readbackBufferProfiled(device, buffer, Math.max(1, count) * POINT_BYTES);
-  return unpackPointBatch(result.bytes, count);
+  const result = await readbackBuffer(device, buffer, Math.max(1, count) * POINT_BYTES);
+  return unpackPointBatch(result, count);
 }
 
 async function runOptimizedPippengerMSMBLS(

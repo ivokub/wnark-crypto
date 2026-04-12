@@ -258,7 +258,7 @@ async function prepareDomainMont(device: GPUDevice, arithKernel: Kernel, domain:
   return { inputMont, stageMont, inverseStageMont, scaleMont };
 }
 
-async function runBitReverseProfiled(device: GPUDevice, vectorKernel: Kernel, inputWords: Uint32Array): Promise<{ output: Uint32Array; ms: number }> {
+async function runBitReverseBenchmark(device: GPUDevice, vectorKernel: Kernel, inputWords: Uint32Array): Promise<{ output: Uint32Array; ms: number }> {
   const count = inputWords.byteLength / ELEMENT_BYTES;
   const dataBytes = inputWords.byteLength;
   const zeros = makeZeroBatch(count);
@@ -296,7 +296,7 @@ async function runBitReverseProfiled(device: GPUDevice, vectorKernel: Kernel, in
   return { output: out, ms };
 }
 
-async function runMulFactorsProfiled(device: GPUDevice, vectorKernel: Kernel, inputWords: Uint32Array, factorWords: Uint32Array): Promise<{ output: Uint32Array; ms: number }> {
+async function runMulFactorsBenchmark(device: GPUDevice, vectorKernel: Kernel, inputWords: Uint32Array, factorWords: Uint32Array): Promise<{ output: Uint32Array; ms: number }> {
   const count = inputWords.byteLength / ELEMENT_BYTES;
   const dataBytes = inputWords.byteLength;
   const repeated = new Uint32Array(count * ELEMENT_WORDS);
@@ -358,7 +358,7 @@ async function benchmarkNTT(
 ): Promise<{ cold: NTTProfile; warm: NTTProfile }> {
   async function runOnce(): Promise<NTTProfile> {
     let total = 0;
-    const bitReverse = await runBitReverseProfiled(device, vectorKernel, inputMont);
+    const bitReverse = await runBitReverseBenchmark(device, vectorKernel, inputMont);
     total += bitReverse.ms;
     let state = bitReverse.output;
     let stageUploadMs = 0;
@@ -407,7 +407,7 @@ async function benchmarkNTT(
     total += stageTotalMs;
     let scaleMs = 0;
     if (inverse) {
-      const scaled = await runMulFactorsProfiled(device, vectorKernel, state, scaleMont);
+      const scaled = await runMulFactorsBenchmark(device, vectorKernel, state, scaleMont);
       scaleMs = scaled.ms;
       total += scaleMs;
     }

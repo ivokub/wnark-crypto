@@ -7,8 +7,8 @@ import {
   createStorageBufferFromBytes,
   createU32StorageBuffer,
   Kernel,
-  readbackBufferProfiled,
-  submitKernelProfiled,
+  readbackBuffer,
+  submitKernel,
 } from "./msm_gpu_runtime.js";
 
 type PippengerSimpleKernels = {
@@ -28,7 +28,17 @@ export type PippengerBenchKernels =
   | ({ mode: "simple" } & PippengerSimpleKernels)
   | ({ mode: "weighted" } & PippengerWeightedKernels);
 
-export async function runSparseSignedPippengerMSMProfiled(options: {
+function measureSync<T>(fn: () => T): { value: T; ms: number } {
+  const start = performance.now();
+  return { value: fn(), ms: performance.now() - start };
+}
+
+async function measureAsync<T>(fn: () => Promise<T>): Promise<{ value: T; ms: number }> {
+  const start = performance.now();
+  return { value: await fn(), ms: performance.now() - start };
+}
+
+export async function runSparseSignedPippengerMSMBenchmark(options: {
   device: GPUDevice;
   kernels: PippengerBenchKernels;
   basesBytes: Uint8Array;
@@ -74,157 +84,157 @@ export async function runSparseSignedPippengerMSMProfiled(options: {
   const metadata = buildSparseSignedBucketMetadataWords(scalarWords, count, termsPerInstance, window, maxChunkSize);
   profile.partitionMs = performance.now() - partitionStart;
 
-  const zeroInput = createStorageBufferFromBytes(device, `${labelPrefix}-zero`, zeroPointBytes, pointBytes);
-  const basesInput = createStorageBufferFromBytes(
-    device,
-    `${labelPrefix}-bases`,
-    basesBytes,
-    Math.max(1, termsPerInstance) * pointBytes,
+  const zeroInput = measureSync(() => createStorageBufferFromBytes(device, `${labelPrefix}-zero`, zeroPointBytes, pointBytes));
+  const basesInput = measureSync(() =>
+    createStorageBufferFromBytes(device, `${labelPrefix}-bases`, basesBytes, Math.max(1, termsPerInstance) * pointBytes),
   );
-  const baseIndicesInput = createU32StorageBuffer(device, `${labelPrefix}-base-indices`, metadata.baseIndices);
-  const bucketPointersInput = createU32StorageBuffer(device, `${labelPrefix}-bucket-pointers`, metadata.bucketPointers);
-  const bucketSizesInput = createU32StorageBuffer(device, `${labelPrefix}-bucket-sizes`, metadata.bucketSizes);
-  profile.uploadMs +=
-    zeroInput.uploadMs +
-    basesInput.uploadMs +
-    baseIndicesInput.uploadMs +
-    bucketPointersInput.uploadMs +
-    bucketSizesInput.uploadMs;
+  const baseIndicesInput = measureSync(() => createU32StorageBuffer(device, `${labelPrefix}-base-indices`, metadata.baseIndices));
+  const bucketPointersInput = measureSync(() =>
+    createU32StorageBuffer(device, `${labelPrefix}-bucket-pointers`, metadata.bucketPointers),
+  );
+  const bucketSizesInput = measureSync(() => createU32StorageBuffer(device, `${labelPrefix}-bucket-sizes`, metadata.bucketSizes));
+  profile.uploadMs += zeroInput.ms + basesInput.ms + baseIndicesInput.ms + bucketPointersInput.ms + bucketSizesInput.ms;
 
   const bucketCountOut = metadata.bucketPointers.length;
   const bucketOutput = createEmptyPointStorageBuffer(device, `${labelPrefix}-bucket-out`, bucketCountOut, pointBytes);
-  const bucketParams = createParamsBuffer(device, `${labelPrefix}-bucket-params`, uniformBytes, {
-    count: bucketCountOut,
-    termsPerInstance,
-    window,
-    numWindows: metadata.numWindows,
-    bucketCount: metadata.bucketCount,
-  });
-  profile.uploadMs += bucketParams.uploadMs;
+  const bucketParams = measureSync(() =>
+    createParamsBuffer(device, `${labelPrefix}-bucket-params`, uniformBytes, {
+      count: bucketCountOut,
+      termsPerInstance,
+      window,
+      numWindows: metadata.numWindows,
+      bucketCount: metadata.bucketCount,
+    }),
+  );
+  profile.uploadMs += bucketParams.ms;
   const bucketBindGroup = createBindGroupForBuffers(
     device,
     kernels.bucket,
     `${labelPrefix}-bucket-bg`,
-    basesInput.buffer,
-    zeroInput.buffer,
+    basesInput.value,
+    zeroInput.value,
     bucketOutput,
-    bucketParams.buffer,
-    baseIndicesInput.buffer,
-    bucketPointersInput.buffer,
-    bucketSizesInput.buffer,
+    bucketParams.value,
+    baseIndicesInput.value,
+    bucketPointersInput.value,
+    bucketSizesInput.value,
   );
   const bucketStart = performance.now();
-  const bucketKernelMs = await submitKernelProfiled(device, kernels.bucket, bucketBindGroup, bucketCountOut, `${labelPrefix}-bucket`);
-  profile.kernelMs += bucketKernelMs;
+  const bucketKernel = await measureAsync(() =>
+    submitKernel(device, kernels.bucket, bucketBindGroup, bucketCountOut, `${labelPrefix}-bucket`),
+  );
+  profile.kernelMs += bucketKernel.ms;
   profile.bucketReductionTotalMs += performance.now() - bucketStart;
 
-  const bucketValuesInput = createU32StorageBuffer(device, `${labelPrefix}-bucket-values`, metadata.bucketValues);
-  const windowStartsInput = createU32StorageBuffer(device, `${labelPrefix}-window-starts`, metadata.windowStarts);
-  const windowCountsInput = createU32StorageBuffer(device, `${labelPrefix}-window-counts`, metadata.windowCounts);
-  profile.uploadMs += bucketValuesInput.uploadMs + windowStartsInput.uploadMs + windowCountsInput.uploadMs;
+  const bucketValuesInput = measureSync(() => createU32StorageBuffer(device, `${labelPrefix}-bucket-values`, metadata.bucketValues));
+  const windowStartsInput = measureSync(() =>
+    createU32StorageBuffer(device, `${labelPrefix}-window-starts`, metadata.windowStarts),
+  );
+  const windowCountsInput = measureSync(() => createU32StorageBuffer(device, `${labelPrefix}-window-counts`, metadata.windowCounts));
+  profile.uploadMs += bucketValuesInput.ms + windowStartsInput.ms + windowCountsInput.ms;
 
   let windowInput = bucketOutput;
   if (kernels.mode === "weighted") {
     const weightedBucketOutput = createEmptyPointStorageBuffer(device, `${labelPrefix}-weighted-out`, bucketCountOut, pointBytes);
-    const weightParams = createParamsBuffer(device, `${labelPrefix}-weight-params`, uniformBytes, {
-      count: bucketCountOut,
-    });
-    profile.uploadMs += weightParams.uploadMs;
+    const weightParams = measureSync(() =>
+      createParamsBuffer(device, `${labelPrefix}-weight-params`, uniformBytes, {
+        count: bucketCountOut,
+      }),
+    );
+    profile.uploadMs += weightParams.ms;
     const weightBindGroup = createBindGroupForBuffers(
       device,
       kernels.weightBuckets,
       `${labelPrefix}-weight-bg`,
       bucketOutput,
-      zeroInput.buffer,
+      zeroInput.value,
       weightedBucketOutput,
-      weightParams.buffer,
-      bucketValuesInput.buffer,
+      weightParams.value,
+      bucketValuesInput.value,
     );
     const weightStart = performance.now();
-    const weightKernelMs = await submitKernelProfiled(
-      device,
-      kernels.weightBuckets,
-      weightBindGroup,
-      bucketCountOut,
-      `${labelPrefix}-weight`,
+    const weightKernel = await measureAsync(() =>
+      submitKernel(device, kernels.weightBuckets, weightBindGroup, bucketCountOut, `${labelPrefix}-weight`),
     );
-    profile.kernelMs += weightKernelMs;
+    profile.kernelMs += weightKernel.ms;
     profile.windowReductionTotalMs += performance.now() - weightStart;
     bucketOutput.destroy();
-    weightParams.buffer.destroy();
+    weightParams.value.destroy();
     windowInput = weightedBucketOutput;
   }
 
   const windowOutput = createEmptyPointStorageBuffer(device, `${labelPrefix}-window-out`, count * metadata.numWindows, pointBytes);
-  const windowParams = createParamsBuffer(device, `${labelPrefix}-window-params`, uniformBytes, {
-    count: count * metadata.numWindows,
-    bucketCount: kernels.mode === "simple" ? metadata.bucketCount : 0,
-  });
-  profile.uploadMs += windowParams.uploadMs;
+  const windowParams = measureSync(() =>
+    createParamsBuffer(device, `${labelPrefix}-window-params`, uniformBytes, {
+      count: count * metadata.numWindows,
+      bucketCount: kernels.mode === "simple" ? metadata.bucketCount : 0,
+    }),
+  );
+  profile.uploadMs += windowParams.ms;
   const windowKernel = kernels.mode === "simple" ? kernels.windowSparse : kernels.subsumPhase1;
   const windowBindGroup = createBindGroupForBuffers(
     device,
     windowKernel,
     `${labelPrefix}-window-bg`,
     windowInput,
-    zeroInput.buffer,
+    zeroInput.value,
     windowOutput,
-    windowParams.buffer,
-    bucketValuesInput.buffer,
-    windowStartsInput.buffer,
-    windowCountsInput.buffer,
+    windowParams.value,
+    bucketValuesInput.value,
+    windowStartsInput.value,
+    windowCountsInput.value,
   );
   const windowStart = performance.now();
-  const windowKernelMs = await submitKernelProfiled(
-    device,
-    windowKernel,
-    windowBindGroup,
-    count * metadata.numWindows * 64,
-    `${labelPrefix}-window`,
+  const windowKernelRun = await measureAsync(() =>
+    submitKernel(device, windowKernel, windowBindGroup, count * metadata.numWindows * 64, `${labelPrefix}-window`),
   );
-  profile.kernelMs += windowKernelMs;
+  profile.kernelMs += windowKernelRun.ms;
   profile.windowReductionTotalMs += performance.now() - windowStart;
 
   const finalOutput = createEmptyPointStorageBuffer(device, `${labelPrefix}-final-out`, count, pointBytes);
-  const finalParams = createParamsBuffer(device, `${labelPrefix}-final-params`, uniformBytes, {
-    count,
-    termsPerInstance,
-    window,
-    numWindows: metadata.numWindows,
-    bucketCount: metadata.bucketCount,
-  });
-  profile.uploadMs += finalParams.uploadMs;
+  const finalParams = measureSync(() =>
+    createParamsBuffer(device, `${labelPrefix}-final-params`, uniformBytes, {
+      count,
+      termsPerInstance,
+      window,
+      numWindows: metadata.numWindows,
+      bucketCount: metadata.bucketCount,
+    }),
+  );
+  profile.uploadMs += finalParams.ms;
   const finalBindGroup = createBindGroupForBuffers(
     device,
     kernels.combine,
     `${labelPrefix}-final-bg`,
     windowOutput,
-    zeroInput.buffer,
+    zeroInput.value,
     finalOutput,
-    finalParams.buffer,
+    finalParams.value,
   );
   const finalStart = performance.now();
-  const finalKernelMs = await submitKernelProfiled(device, kernels.combine, finalBindGroup, count, `${labelPrefix}-final`);
-  profile.kernelMs += finalKernelMs;
+  const finalKernel = await measureAsync(() =>
+    submitKernel(device, kernels.combine, finalBindGroup, count, `${labelPrefix}-final`),
+  );
+  profile.kernelMs += finalKernel.ms;
   profile.finalReductionTotalMs += performance.now() - finalStart;
 
-  const readback = await readbackBufferProfiled(device, finalOutput, Math.max(1, count) * pointBytes);
-  profile.readbackMs += readback.readbackMs;
+  const readback = await measureAsync(() => readbackBuffer(device, finalOutput, Math.max(1, count) * pointBytes));
+  profile.readbackMs += readback.ms;
 
-  basesInput.buffer.destroy();
-  zeroInput.buffer.destroy();
-  baseIndicesInput.buffer.destroy();
-  bucketPointersInput.buffer.destroy();
-  bucketSizesInput.buffer.destroy();
-  bucketValuesInput.buffer.destroy();
-  windowStartsInput.buffer.destroy();
-  windowCountsInput.buffer.destroy();
+  basesInput.value.destroy();
+  zeroInput.value.destroy();
+  baseIndicesInput.value.destroy();
+  bucketPointersInput.value.destroy();
+  bucketSizesInput.value.destroy();
+  bucketValuesInput.value.destroy();
+  windowStartsInput.value.destroy();
+  windowCountsInput.value.destroy();
   windowInput.destroy();
-  bucketParams.buffer.destroy();
+  bucketParams.value.destroy();
   windowOutput.destroy();
-  windowParams.buffer.destroy();
+  windowParams.value.destroy();
   finalOutput.destroy();
-  finalParams.buffer.destroy();
+  finalParams.value.destroy();
 
   profile.reductionTotalMs =
     profile.bucketReductionTotalMs + profile.windowReductionTotalMs + profile.finalReductionTotalMs;

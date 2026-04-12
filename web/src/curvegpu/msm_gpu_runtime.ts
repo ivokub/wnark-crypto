@@ -65,34 +65,32 @@ export function createStorageBufferFromBytes(
   label: string,
   bytes: Uint8Array,
   size: number,
-): { buffer: GPUBuffer; uploadMs: number } {
+): GPUBuffer {
   const buffer = device.createBuffer({
     label,
     size,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
-  const start = performance.now();
   if (bytes.byteLength > 0) {
     device.queue.writeBuffer(buffer, 0, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
   }
-  return { buffer, uploadMs: performance.now() - start };
+  return buffer;
 }
 
 export function createU32StorageBuffer(
   device: GPUDevice,
   label: string,
   values: Uint32Array,
-): { buffer: GPUBuffer; uploadMs: number } {
+): GPUBuffer {
   const buffer = device.createBuffer({
     label,
     size: Math.max(4, values.byteLength),
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
-  const start = performance.now();
   if (values.byteLength > 0) {
     device.queue.writeBuffer(buffer, 0, values.buffer.slice(values.byteOffset, values.byteOffset + values.byteLength));
   }
-  return { buffer, uploadMs: performance.now() - start };
+  return buffer;
 }
 
 export function createEmptyPointStorageBuffer(
@@ -121,7 +119,7 @@ export function createParamsBuffer(
     bucketCount?: number;
     rowWidth?: number;
   },
-): { buffer: GPUBuffer; uploadMs: number } {
+): GPUBuffer {
   const buffer = device.createBuffer({
     label,
     size: uniformBytes,
@@ -135,9 +133,8 @@ export function createParamsBuffer(
   params[4] = values.numWindows ?? 0;
   params[5] = values.bucketCount ?? 0;
   params[6] = values.rowWidth ?? 0;
-  const start = performance.now();
   device.queue.writeBuffer(buffer, 0, params.buffer);
-  return { buffer, uploadMs: performance.now() - start };
+  return buffer;
 }
 
 export function createBindGroupForBuffers(
@@ -170,14 +167,13 @@ export function createBindGroupForBuffers(
   });
 }
 
-export async function submitKernelProfiled(
+export async function submitKernel(
   device: GPUDevice,
   kernel: Kernel,
   bindGroup: GPUBindGroup,
   count: number,
   label: string,
-): Promise<number> {
-  const start = performance.now();
+): Promise<void> {
   const encoder = device.createCommandEncoder({ label: `${label}-encoder` });
   const pass = encoder.beginComputePass({ label: `${label}-pass` });
   pass.setPipeline(kernel.pipeline);
@@ -186,20 +182,18 @@ export async function submitKernelProfiled(
   pass.end();
   device.queue.submit([encoder.finish()]);
   await device.queue.onSubmittedWorkDone();
-  return performance.now() - start;
 }
 
-export async function readbackBufferProfiled(
+export async function readbackBuffer(
   device: GPUDevice,
   buffer: GPUBuffer,
   size: number,
-): Promise<{ bytes: Uint8Array; readbackMs: number }> {
+): Promise<Uint8Array> {
   const staging = device.createBuffer({
     label: "g1-readback-staging",
     size,
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
   });
-  const start = performance.now();
   const encoder = device.createCommandEncoder({ label: "g1-readback-encoder" });
   encoder.copyBufferToBuffer(buffer, 0, staging, 0, size);
   device.queue.submit([encoder.finish()]);
@@ -207,5 +201,5 @@ export async function readbackBufferProfiled(
   const bytes = new Uint8Array(staging.getMappedRange()).slice();
   staging.unmap();
   staging.destroy();
-  return { bytes, readbackMs: performance.now() - start };
+  return bytes;
 }

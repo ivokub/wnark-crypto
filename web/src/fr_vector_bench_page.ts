@@ -132,7 +132,7 @@ function makeZeroBatch(count: number): Uint32Array {
   return new Uint32Array(count * ELEMENT_WORDS);
 }
 
-async function runFullPathProfiled(
+async function runFullPathBenchmark(
   device: GPUDevice,
   kernel: Kernel,
   inputA: Uint32Array,
@@ -226,7 +226,7 @@ async function runFullPathProfiled(
 
 async function toMontBatch(device: GPUDevice, arithKernel: Kernel, regularWords: Uint32Array): Promise<Uint32Array> {
   const zeros = makeZeroBatch(regularWords.byteLength / ELEMENT_BYTES);
-  return (await runFullPathProfiled(device, arithKernel, regularWords, zeros, FR_OP_TO_MONT, 0)).out;
+  return (await runFullPathBenchmark(device, arithKernel, regularWords, zeros, FR_OP_TO_MONT, 0)).out;
 }
 
 async function benchOp(
@@ -238,7 +238,7 @@ async function benchOp(
   logCount: number,
   iters: number,
 ): Promise<{ cold: Profile; warm: Profile }> {
-  const cold = await runFullPathProfiled(device, kernel, inputA, inputB, opcode, logCount);
+  const cold = await runFullPathBenchmark(device, kernel, inputA, inputB, opcode, logCount);
   if (iters === 1) {
     return { cold: cold.profile, warm: cold.profile };
   }
@@ -247,7 +247,7 @@ async function benchOp(
   let readbackMs = 0;
   let totalMs = 0;
   for (let i = 0; i < iters; i += 1) {
-    const warm = await runFullPathProfiled(device, kernel, inputA, inputB, opcode, logCount);
+    const warm = await runFullPathBenchmark(device, kernel, inputA, inputB, opcode, logCount);
     uploadMs += warm.profile.uploadMs;
     kernelMs += warm.profile.kernelMs;
     readbackMs += warm.profile.readbackMs;
