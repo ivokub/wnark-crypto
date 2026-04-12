@@ -77,7 +77,7 @@ const SUITES: SuiteConfig[] = [
     kind: "smoke",
     title: "BN254 G1 Phase 8 Browser Smoke",
     description: "Runs the BN254 G1 MSM smoke suite.",
-    script: "/web/dist/bn254_g1_msm.js",
+    script: "/web/dist/g1_msm_page.js",
   },
   {
     curve: "bn254",
@@ -179,7 +179,7 @@ const SUITES: SuiteConfig[] = [
     kind: "smoke",
     title: "BLS12-381 G1 Phase 8 Browser Smoke",
     description: "Runs the BLS12-381 G1 MSM smoke suite.",
-    script: "/web/dist/bls12_381_g1_msm.js",
+    script: "/web/dist/g1_msm_page.js",
   },
   {
     curve: "bls12_381",
