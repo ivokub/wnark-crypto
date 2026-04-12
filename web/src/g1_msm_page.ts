@@ -650,10 +650,6 @@ function scalarToKernelPointBN254(scalar: string): JacobianPoint {
   return { x_bytes_le: scalar, y_bytes_le: ZERO_HEX, z_bytes_le: ZERO_HEX };
 }
 
-function isInfinityPointBN254(point: JacobianPoint): boolean {
-  return point.x_bytes_le === ZERO_HEX && point.y_bytes_le === ZERO_HEX;
-}
-
 function createKernelBN254(device: GPUDevice, shaderCode: string, entryPoint = "g1_ops_main"): {
   pipeline: GPUComputePipeline;
   bindGroupLayout: GPUBindGroupLayout;
@@ -767,89 +763,6 @@ async function runOpBN254(
   return unpackPointBatch(result, count);
 }
 
-function buildBucketListsBN254(
-  bases: readonly JacobianPoint[],
-  scalars: readonly string[],
-  count: number,
-  termsPerInstance: number,
-  window: number,
-): JacobianPoint[][] {
-  const numWindows = Math.ceil(256 / window);
-  const bucketCount = (1 << window) - 1;
-  const bucketLists: JacobianPoint[][] = Array.from({ length: count * numWindows * bucketCount }, () => []);
-  const scalarBigs = scalars.map((scalar) => scalarHexLEToBigInt(scalar));
-  for (let instance = 0; instance < count; instance += 1) {
-    const baseOffset = instance * termsPerInstance;
-    for (let term = 0; term < termsPerInstance; term += 1) {
-      const idx = baseOffset + term;
-      const scalar = scalarBigs[idx];
-      for (let win = 0; win < numWindows; win += 1) {
-        const digit = extractWindowDigit(scalar, win * window, window);
-        if (digit === 0) {
-          continue;
-        }
-        const bucketIndex = ((instance * numWindows + win) * bucketCount) + (digit - 1);
-        bucketLists[bucketIndex].push(bases[idx]);
-      }
-    }
-  }
-  return bucketLists;
-}
-
-function buildSparseBucketMetadataBN254(
-  scalars: readonly string[],
-  count: number,
-  termsPerInstance: number,
-  window: number,
-): { baseIndices: Uint32Array; bucketPointers: Uint32Array; bucketSizes: Uint32Array } {
-  const numWindows = Math.ceil(256 / window);
-  const bucketCount = (1 << window) - 1;
-  const totalBuckets = count * numWindows * bucketCount;
-  const bucketSizes = new Uint32Array(totalBuckets);
-  const scalarBigs = scalars.map((scalar) => scalarHexLEToBigInt(scalar));
-  for (let instance = 0; instance < count; instance += 1) {
-    const baseOffset = instance * termsPerInstance;
-    for (let term = 0; term < termsPerInstance; term += 1) {
-      const idx = baseOffset + term;
-      const scalar = scalarBigs[idx];
-      for (let win = 0; win < numWindows; win += 1) {
-        const digit = extractWindowDigit(scalar, win * window, window);
-        if (digit === 0) {
-          continue;
-        }
-        const bucketIndex = ((instance * numWindows + win) * bucketCount) + (digit - 1);
-        bucketSizes[bucketIndex] += 1;
-      }
-    }
-  }
-  const bucketPointers = new Uint32Array(totalBuckets);
-  let totalEntries = 0;
-  for (let i = 0; i < totalBuckets; i += 1) {
-    bucketPointers[i] = totalEntries;
-    totalEntries += bucketSizes[i];
-  }
-  const fill = new Uint32Array(totalBuckets);
-  const baseIndices = new Uint32Array(totalEntries);
-  for (let instance = 0; instance < count; instance += 1) {
-    const baseOffset = instance * termsPerInstance;
-    for (let term = 0; term < termsPerInstance; term += 1) {
-      const idx = baseOffset + term;
-      const scalar = scalarBigs[idx];
-      for (let win = 0; win < numWindows; win += 1) {
-        const digit = extractWindowDigit(scalar, win * window, window);
-        if (digit === 0) {
-          continue;
-        }
-        const bucketIndex = ((instance * numWindows + win) * bucketCount) + (digit - 1);
-        const entryOffset = bucketPointers[bucketIndex] + fill[bucketIndex];
-        baseIndices[entryOffset] = idx;
-        fill[bucketIndex] += 1;
-      }
-    }
-  }
-  return { baseIndices, bucketPointers, bucketSizes };
-}
-
 async function runNaiveMSMBN254(
   device: GPUDevice,
   kernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
@@ -875,153 +788,6 @@ async function runNaiveMSMBN254(
     width = nextWidth;
   }
   return state;
-}
-
-async function reduceAffineBucketsBN254(
-  device: GPUDevice,
-  kernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
-  bucketLists: JacobianPoint[][],
-): Promise<JacobianPoint[]> {
-  let current = bucketLists.map((bucket) => bucket.slice());
-  for (;;) {
-    const next: JacobianPoint[][] = Array.from({ length: current.length }, () => []);
-    const left: JacobianPoint[] = [];
-    const right: JacobianPoint[] = [];
-    const mappings: Array<{ bucket: number; slot: number }> = [];
-    let work = false;
-    for (let bucketIndex = 0; bucketIndex < current.length; bucketIndex += 1) {
-      const bucket = current[bucketIndex];
-      if (bucket.length <= 1) {
-        next[bucketIndex] = bucket.slice();
-        continue;
-      }
-      work = true;
-      const nextCount = Math.ceil(bucket.length / 2);
-      next[bucketIndex] = new Array<JacobianPoint>(nextCount);
-      for (let j = 0; j < nextCount; j += 1) {
-        left.push(bucket[2 * j]);
-        right.push(2 * j + 1 < bucket.length ? bucket[2 * j + 1] : zeroPoint());
-        mappings.push({ bucket: bucketIndex, slot: j });
-      }
-    }
-    if (!work) {
-      return current.map((bucket) => (bucket.length === 1 ? bucket[0] : zeroPoint()));
-    }
-    const reduced = await runOpBN254(device, kernel, G1_OP_AFFINE_ADD, left, right);
-    for (let i = 0; i < reduced.length; i += 1) {
-      const mapping = mappings[i];
-      next[mapping.bucket][mapping.slot] = reduced[i];
-    }
-    current = next;
-  }
-}
-
-async function reduceWindowsBN254(
-  device: GPUDevice,
-  kernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
-  bucketSums: readonly JacobianPoint[],
-  count: number,
-  numWindows: number,
-  bucketCount: number,
-): Promise<JacobianPoint[]> {
-  const totalSlots = count * numWindows;
-  const running = Array.from({ length: totalSlots }, () => zeroPoint());
-  const totals = Array.from({ length: totalSlots }, () => zeroPoint());
-  for (let bucket = bucketCount - 1; bucket >= 0; bucket -= 1) {
-    const activeRunningIdx: number[] = [];
-    const activeRunning: JacobianPoint[] = [];
-    const activeBuckets: JacobianPoint[] = [];
-    for (let slot = 0; slot < totalSlots; slot += 1) {
-      const point = bucketSums[slot * bucketCount + bucket];
-      if (isInfinityPointBN254(point)) {
-        continue;
-      }
-      activeRunningIdx.push(slot);
-      activeRunning.push(running[slot]);
-      activeBuckets.push(point);
-    }
-    if (activeRunningIdx.length > 0) {
-      const nextRunning = await runOpBN254(device, kernel, G1_OP_AFFINE_ADD, activeRunning, activeBuckets);
-      for (let i = 0; i < activeRunningIdx.length; i += 1) {
-        running[activeRunningIdx[i]] = nextRunning[i];
-      }
-    }
-    const activeTotalIdx: number[] = [];
-    const activeTotals: JacobianPoint[] = [];
-    const activeRunningTotals: JacobianPoint[] = [];
-    for (let slot = 0; slot < totalSlots; slot += 1) {
-      if (isInfinityPointBN254(running[slot])) {
-        continue;
-      }
-      activeTotalIdx.push(slot);
-      activeTotals.push(totals[slot]);
-      activeRunningTotals.push(running[slot]);
-    }
-    if (activeTotalIdx.length > 0) {
-      const nextTotals = await runOpBN254(device, kernel, G1_OP_AFFINE_ADD, activeTotals, activeRunningTotals);
-      for (let i = 0; i < activeTotalIdx.length; i += 1) {
-        totals[activeTotalIdx[i]] = nextTotals[i];
-      }
-    }
-  }
-  return totals;
-}
-
-async function combineWindowsBN254(
-  device: GPUDevice,
-  kernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
-  windowSums: readonly JacobianPoint[],
-  count: number,
-  numWindows: number,
-  window: number,
-): Promise<JacobianPoint[]> {
-  let acc = Array.from({ length: count }, () => zeroPoint());
-  const zeros = Array.from({ length: count }, () => zeroPoint());
-  for (let win = numWindows - 1; win >= 0; win -= 1) {
-    if (win !== numWindows - 1) {
-      for (let step = 0; step < window; step += 1) {
-        acc = await runOpBN254(device, kernel, G1_OP_DOUBLE_JAC, acc, zeros);
-      }
-    }
-    const activeIdx: number[] = [];
-    const activeAcc: JacobianPoint[] = [];
-    const activeAff: JacobianPoint[] = [];
-    for (let instance = 0; instance < count; instance += 1) {
-      const point = windowSums[instance * numWindows + win];
-      if (isInfinityPointBN254(point)) {
-        continue;
-      }
-      activeIdx.push(instance);
-      activeAcc.push(acc[instance]);
-      activeAff.push(point);
-    }
-    if (activeIdx.length === 0) {
-      continue;
-    }
-    const nextAcc = await runOpBN254(device, kernel, G1_OP_ADD_MIXED, activeAcc, activeAff);
-    for (let i = 0; i < activeIdx.length; i += 1) {
-      acc[activeIdx[i]] = nextAcc[i];
-    }
-  }
-  return runOpBN254(device, kernel, G1_OP_JAC_TO_AFFINE, acc, zeros);
-}
-
-async function runPippengerMSMHostBN254(
-  device: GPUDevice,
-  kernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
-  bases: readonly JacobianPoint[],
-  scalars: readonly string[],
-  count: number,
-  termsPerInstance: number,
-  window: number,
-): Promise<{ bucketSums: JacobianPoint[]; windowSums: JacobianPoint[]; result: JacobianPoint[] }> {
-  const numWindows = Math.ceil(256 / window);
-  const bucketCount = (1 << window) - 1;
-  const bucketLists = buildBucketListsBN254(bases, scalars, count, termsPerInstance, window);
-  const bucketSums = await reduceAffineBucketsBN254(device, kernel, bucketLists);
-  const windowSums = await reduceWindowsBN254(device, kernel, bucketSums, count, numWindows, bucketCount);
-  const result = await combineWindowsBN254(device, kernel, windowSums, count, numWindows, window);
-  return { bucketSums, windowSums, result };
 }
 
 async function runSparseBucketOpBN254(
@@ -1258,10 +1024,7 @@ async function runSmokeBN254(lines: string[], device: GPUDevice): Promise<void> 
   lines.push(`cases.msm = ${vectors.msm_cases.length}`);
 
   const kernel = createKernelBN254(device, shaderText);
-  const bucketKernel = createKernelBN254(device, shaderText, "g1_msm_bucket_main");
   const sparseBucketKernel = createKernelBN254(device, shaderText, "g1_msm_bucket_sparse_main");
-  const windowWeightKernel = createKernelBN254(device, shaderText, "g1_msm_window_weight_main");
-  const windowReduceKernel = createKernelBN254(device, shaderText, "g1_msm_window_reduce_main");
   const sparseWindowKernel = createKernelBN254(device, shaderText, "g1_msm_window_sparse_main");
   const combineKernel = createKernelBN254(device, shaderText, "g1_msm_combine_main");
   lines.push("4. Creating pipeline... OK");
@@ -1283,62 +1046,8 @@ async function runSmokeBN254(lines: string[], device: GPUDevice): Promise<void> 
   lines.push("msm_naive_affine: OK");
 
   const window = bestPippengerWindow(vectors.terms_per_instance);
-  const bucketCount = (1 << window) - 1;
-  const numWindows = Math.ceil(256 / window);
-  const sparseMetadata = buildSparseBucketMetadataBN254(scalars, vectors.msm_cases.length, vectors.terms_per_instance, window);
-  const signedChunkedMetadata = buildSparseSignedBucketMetadata(scalars, vectors.msm_cases.length, vectors.terms_per_instance, window, 2);
-  const hostPippenger = await runPippengerMSMHostBN254(device, kernel, bases, scalars, vectors.msm_cases.length, vectors.terms_per_instance, window);
-  expectPointBatch("msm_pippenger_host", hostPippenger.result, want);
-  lines.push(`msm_pippenger_host (window=${window}): OK`);
-
-  const denseBucketSums = await runOpBN254(device, bucketKernel, 0, bases, scalars.map((scalar) => scalarToKernelPointBN254(scalar)), {
-    count: vectors.msm_cases.length * numWindows * bucketCount,
-    termsPerInstance: vectors.terms_per_instance,
-    window,
-    numWindows,
-    bucketCount,
-  });
-  expectPointBatch("msm_pippenger_bucket_stage_dense", denseBucketSums, hostPippenger.bucketSums);
-  lines.push(`msm_pippenger_bucket_stage_dense (window=${window}): OK`);
-
-  const sparseBucketSums = await runSparseBucketOpBN254(device, sparseBucketKernel, bases, sparseMetadata, vectors.msm_cases.length * numWindows * bucketCount);
-  expectPointBatch("msm_pippenger_bucket_stage_sparse", sparseBucketSums, hostPippenger.bucketSums);
-  lines.push(`msm_pippenger_bucket_stage_sparse (window=${window}): OK`);
-
-  let gpuWindowSums = await runOpBN254(device, windowWeightKernel, 0, sparseBucketSums, [], {
-    count: vectors.msm_cases.length * numWindows * bucketCount,
-    termsPerInstance: vectors.terms_per_instance,
-    window,
-    numWindows,
-    bucketCount,
-  });
-  let rowWidth = bucketCount;
-  while (rowWidth > 1) {
-    const nextWidth = Math.ceil(rowWidth / 2);
-    gpuWindowSums = await runOpBN254(device, windowReduceKernel, 0, gpuWindowSums, [], {
-      count: vectors.msm_cases.length * numWindows * nextWidth,
-      rowWidth,
-    });
-    rowWidth = nextWidth;
-  }
-  expectPointBatch("msm_pippenger_window_stage", gpuWindowSums, hostPippenger.windowSums);
-  lines.push(`msm_pippenger_window_stage (window=${window}): OK`);
-
   expectPointBatch(
     "msm_pippenger_affine",
-    await runOpBN254(device, combineKernel, 0, gpuWindowSums, [], {
-      count: vectors.msm_cases.length,
-      termsPerInstance: vectors.terms_per_instance,
-      window,
-      numWindows,
-      bucketCount,
-    }),
-    want,
-  );
-  lines.push(`msm_pippenger_affine (window=${window}): OK`);
-
-  expectPointBatch(
-    "msm_pippenger_signed_sparse_affine",
     await runPippengerMSMSignedSparseBN254(
       device,
       { bucketSparse: sparseBucketKernel, windowSparse: sparseWindowKernel, combine: combineKernel },
@@ -1350,7 +1059,7 @@ async function runSmokeBN254(lines: string[], device: GPUDevice): Promise<void> 
     ),
     want,
   );
-  lines.push(`msm_pippenger_signed_sparse_affine (window=${window}): OK`);
+  lines.push(`msm_pippenger_affine (window=${window}): OK`);
 }
 
 async function runSmoke(): Promise<void> {
