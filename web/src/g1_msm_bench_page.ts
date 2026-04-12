@@ -49,7 +49,7 @@ type JacobianPoint = {
   z_bytes_le: string;
 };
 
-type Phase7Vectors = {
+type G1ScalarMulVectors = {
   generator_affine: AffinePoint;
   one_mont_z: string;
 };
@@ -67,7 +67,7 @@ type CurveBenchConfig = {
   zeroHex: string;
   opsShaderParts: string[];
   pippengerShaderParts: string[];
-  phase7Path: string;
+  scalarVectorsPath: string;
   fixtureJSONPath?: string;
   fixtureBinPath?: string;
   serverBinPath?: string;
@@ -131,7 +131,7 @@ const CURVE_CONFIGS: Record<CurveId, CurveBenchConfig> = {
       "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-core",
       "/shaders/curves/bn254/g1_arith.wgsl?v=1",
     ],
-    phase7Path: "/testdata/vectors/g1/bn254_phase7_scalar_mul.json",
+    scalarVectorsPath: "/testdata/vectors/g1/bn254_g1_scalar_mul.json",
     serverBinPath: "/api/bn254/g1/bases.bin",
     pippengerMode: "simple",
   },
@@ -157,7 +157,7 @@ const CURVE_CONFIGS: Record<CurveId, CurveBenchConfig> = {
       "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-core",
       "/shaders/curves/bls12_381/g1_msm.wgsl?v=3",
     ],
-    phase7Path: "/testdata/vectors/g1/bls12_381_phase7_scalar_mul.json",
+    scalarVectorsPath: "/testdata/vectors/g1/bls12_381_g1_scalar_mul.json",
     fixtureJSONPath: "/testdata/fixtures/g1/bls12_381_bases_2pow19_jacobian.json?v=1",
     fixtureBinPath: "/testdata/fixtures/g1/bls12_381_bases_2pow19_jacobian.bin?v=1",
     serverBinPath: "/api/bls12-381/g1/bases.bin",
@@ -901,10 +901,10 @@ async function runBenchmark(): Promise<void> {
     ui: { setStatus, setPageState, writeLog },
     appendAdapterDiagnostics,
     init: async ({ device, lines }) => {
-      const [opsShaderText, pippengerShaderText, phase7] = await Promise.all([
+      const [opsShaderText, pippengerShaderText, scalarVectors] = await Promise.all([
         fetchShaderParts(curveConfig.opsShaderParts),
         fetchShaderParts(curveConfig.pippengerShaderParts),
-        fetchJSON<Phase7Vectors>(curveConfig.phase7Path),
+        fetchJSON<G1ScalarMulVectors>(curveConfig.scalarVectorsPath),
       ]);
       const opsKernel = createKernel(device, opsShaderText);
       const baseSourceProvider = createPreferredByteBaseSource({
@@ -914,7 +914,7 @@ async function runBenchmark(): Promise<void> {
         fixtureBinPath: curveConfig.fixtureBinPath,
         serverBinPath: curveConfig.serverBinPath,
         generatedLoadBases: async (size) =>
-          buildBases(device, opsKernel, phase7.generator_affine, phase7.one_mont_z, size),
+          buildBases(device, opsKernel, scalarVectors.generator_affine, scalarVectors.one_mont_z, size),
       });
       const baseSourceInit = await baseSourceProvider.init();
       lines.push(`3. Loading shader and base source... OK (${baseSourceInit.context.baseSource})`);

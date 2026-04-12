@@ -78,7 +78,7 @@ func TestListShaders(t *testing.T) {
 	}
 }
 
-type phase1Vectors struct {
+type wordLayoutVectors struct {
 	Word4 []layoutVector `json:"word4"`
 	Word6 []layoutVector `json:"word6"`
 }
@@ -90,18 +90,18 @@ type layoutVector struct {
 	BytesLE   string   `json:"bytes_le"`
 }
 
-func TestPhase1WordLayoutVectors(t *testing.T) {
+func TestWordLayoutVectors(t *testing.T) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime caller lookup failed")
 	}
-	vectorPath := filepath.Join(filepath.Dir(filename), "..", "..", "testdata", "vectors", "phase1_word_layout.json")
+	vectorPath := filepath.Join(filepath.Dir(filename), "..", "..", "testdata", "vectors", "word_layout.json")
 	data, err := os.ReadFile(vectorPath)
 	if err != nil {
 		t.Fatalf("read vectors: %v", err)
 	}
 
-	var vectors phase1Vectors
+	var vectors wordLayoutVectors
 	if err := json.Unmarshal(data, &vectors); err != nil {
 		t.Fatalf("unmarshal vectors: %v", err)
 	}

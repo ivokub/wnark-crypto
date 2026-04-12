@@ -24,7 +24,7 @@ type g1ScalarBaseCaseJSON struct {
 	ScalarMulBaseAffine g1JacJSON `json:"scalar_mul_base_affine"`
 }
 
-type phase7Vectors struct {
+type g1ScalarMulVectors struct {
 	GeneratorAffine g1AffineJSON           `json:"generator_affine"`
 	OneMontZ        string                 `json:"one_mont_z"`
 	ScalarCases     []g1ScalarCaseJSON     `json:"scalar_cases"`
@@ -32,9 +32,9 @@ type phase7Vectors struct {
 }
 
 func TestBN254G1ScalarMulKernelAgainstGnarkCrypto(t *testing.T) {
-	vectors, err := loadPhase7G1ScalarVectors()
+	vectors, err := loadG1ScalarMulVectors()
 	if err != nil {
-		t.Fatalf("loadPhase7G1ScalarVectors: %v", err)
+		t.Fatalf("loadG1ScalarMulVectors: %v", err)
 	}
 
 	t.Run("scalar_mul_affine", func(t *testing.T) {
@@ -75,19 +75,19 @@ func TestBN254G1ScalarMulKernelAgainstGnarkCrypto(t *testing.T) {
 	})
 }
 
-func loadPhase7G1ScalarVectors() (phase7Vectors, error) {
+func loadG1ScalarMulVectors() (g1ScalarMulVectors, error) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
-		return phase7Vectors{}, os.ErrNotExist
+		return g1ScalarMulVectors{}, os.ErrNotExist
 	}
-	path := filepath.Join(filepath.Dir(filename), "..", "..", "testdata", "vectors", "g1", "bn254_phase7_scalar_mul.json")
+	path := filepath.Join(filepath.Dir(filename), "..", "..", "testdata", "vectors", "g1", "bn254_g1_scalar_mul.json")
 	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
-		return phase7Vectors{}, err
+		return g1ScalarMulVectors{}, err
 	}
-	var out phase7Vectors
+	var out g1ScalarMulVectors
 	if err := json.Unmarshal(data, &out); err != nil {
-		return phase7Vectors{}, err
+		return g1ScalarMulVectors{}, err
 	}
 	return out, nil
 }

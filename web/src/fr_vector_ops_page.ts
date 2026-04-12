@@ -31,7 +31,7 @@ type VectorCase = {
   bit_reverse_expected_le: string[];
 };
 
-type Phase4Vectors = {
+type FRVectorOpsVectors = {
   vector_cases: VectorCase[];
 };
 
@@ -66,8 +66,8 @@ const UNIFORM_BYTES = 32;
 const CONFIGS: Record<string, VectorConfig> = {
   bn254: {
     curve: "bn254",
-    title: "BN254 fr Phase 4 Browser Smoke",
-    vectorPath: "/testdata/vectors/fr/bn254_phase4_vector_ops.json",
+    title: "BN254 fr Vector Ops Browser Smoke",
+    vectorPath: "/testdata/vectors/fr/bn254_fr_vector_ops.json",
     arithShaderPath: "/shaders/curves/bn254/fr_arith.wgsl",
     vectorShaderPath: "/shaders/curves/bn254/fr_vector.wgsl",
     arithLabel: "bn254-fr",
@@ -75,8 +75,8 @@ const CONFIGS: Record<string, VectorConfig> = {
   },
   bls12_381: {
     curve: "bls12_381",
-    title: "BLS12-381 fr Phase 4 Browser Smoke",
-    vectorPath: "/testdata/vectors/fr/bls12_381_phase4_vector_ops.json",
+    title: "BLS12-381 fr Vector Ops Browser Smoke",
+    vectorPath: "/testdata/vectors/fr/bls12_381_fr_vector_ops.json",
     arithShaderPath: "/shaders/curves/bls12_381/fr_arith.wgsl",
     vectorShaderPath: "/shaders/curves/bls12_381/fr_vector.wgsl",
     arithLabel: "bls12-381-fr",
@@ -98,9 +98,9 @@ function getConfig(): VectorConfig {
   return config;
 }
 
-async function fetchVectors(config: VectorConfig): Promise<Phase4Vectors> {
+async function fetchVectors(config: VectorConfig): Promise<FRVectorOpsVectors> {
   const text = await fetchText(config.vectorPath);
-  return JSON.parse(text) as Phase4Vectors;
+  return JSON.parse(text) as FRVectorOpsVectors;
 }
 
 function packHexBatch(hexValues: readonly string[]): Uint8Array {

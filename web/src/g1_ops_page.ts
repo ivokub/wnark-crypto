@@ -32,7 +32,7 @@ type G1Case = {
   affine_add_p_plus_q: JacobianPoint;
 };
 
-type Phase6Vectors = {
+type G1OpsVectors = {
   point_cases: G1Case[];
 };
 
@@ -71,8 +71,8 @@ const UNIFORM_BYTES = 32;
 const CONFIGS: Record<string, G1OpsConfig> = {
   bn254: {
     curve: "bn254",
-    title: "BN254 G1 Phase 6 Browser Smoke",
-    vectorPath: "/testdata/vectors/g1/bn254_phase6_g1_ops.json",
+    title: "BN254 G1 Ops Browser Smoke",
+    vectorPath: "/testdata/vectors/g1/bn254_g1_ops.json",
     shaderParts: [
       "/shaders/curves/bn254/fp_arith.wgsl?v=2#section=fp-types",
       "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-consts",
@@ -86,8 +86,8 @@ const CONFIGS: Record<string, G1OpsConfig> = {
   },
   bls12_381: {
     curve: "bls12_381",
-    title: "BLS12-381 G1 Phase 6 Browser Smoke",
-    vectorPath: "/testdata/vectors/g1/bls12_381_phase6_g1_ops.json?v=1",
+    title: "BLS12-381 G1 Ops Browser Smoke",
+    vectorPath: "/testdata/vectors/g1/bls12_381_g1_ops.json?v=1",
     shaderParts: [
       "/shaders/curves/bls12_381/fp_arith.wgsl?v=3#section=fp-types",
       "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-consts",
@@ -115,9 +115,9 @@ function getConfig(): G1OpsConfig {
   return config;
 }
 
-async function fetchVectors(config: G1OpsConfig): Promise<Phase6Vectors> {
+async function fetchVectors(config: G1OpsConfig): Promise<G1OpsVectors> {
   const text = await fetchText(config.vectorPath);
-  return JSON.parse(text) as Phase6Vectors;
+  return JSON.parse(text) as G1OpsVectors;
 }
 
 function createStorageBuffer(device: GPUDevice, label: string, size: number, usage: GPUBufferUsageFlags): GPUBuffer {
@@ -153,7 +153,7 @@ function createKernel(device: GPUDevice, shaderCode: string, config: G1OpsConfig
   return { pipeline, bindGroupLayout };
 }
 
-function findOneMontZ(vectors: Phase6Vectors, zeroHex: string): string {
+function findOneMontZ(vectors: G1OpsVectors, zeroHex: string): string {
   for (const pointCase of vectors.point_cases) {
     if (pointCase.p_jacobian.z_bytes_le !== zeroHex) {
       return pointCase.p_jacobian.z_bytes_le;
@@ -334,7 +334,7 @@ async function runSmoke(config: G1OpsConfig): Promise<void> {
     lines.push("affine_add: OK");
 
     lines.push("");
-    lines.push(`PASS: ${config.curve === "bn254" ? "BN254" : "BLS12-381"} G1 Phase 6 browser smoke succeeded`);
+    lines.push(`PASS: ${config.curve === "bn254" ? "BN254" : "BLS12-381"} G1 Ops browser smoke succeeded`);
     writeLog(lines);
     setStatus("Pass");
     setPageState("pass");

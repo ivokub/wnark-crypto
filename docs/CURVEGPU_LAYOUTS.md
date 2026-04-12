@@ -67,7 +67,7 @@ to replace curve-specific canonical field encodings.
 The shared conversion vectors live under:
 
 ```text
-testdata/vectors/phase1_word_layout.json
+testdata/vectors/word_layout.json
 ```
 
 These vectors are intentionally generic and validate:

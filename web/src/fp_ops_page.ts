@@ -33,7 +33,7 @@ type ConvertCase = {
   mont_bytes_le: string;
 };
 
-type Phase3Vectors = {
+type FPOpsVectors = {
   element_cases: ElementCase[];
   edge_cases: ElementCase[];
   differential_cases: ElementCase[];
@@ -80,8 +80,8 @@ const FP_UNIFORM_BYTES = 32;
 const CONFIGS: Record<string, FpOpsConfig> = {
   bn254: {
     curve: "bn254",
-    title: "BN254 fp Phase 3 Browser Smoke",
-    vectorPath: "/testdata/vectors/fp/bn254_phase3_ops.json",
+    title: "BN254 fp Ops Browser Smoke",
+    vectorPath: "/testdata/vectors/fp/bn254_fp_ops.json",
     shaderPath: "/shaders/curves/bn254/fp_arith.wgsl",
     labelPrefix: "bn254-fp",
     elementBytes: 32,
@@ -89,8 +89,8 @@ const CONFIGS: Record<string, FpOpsConfig> = {
   },
   bls12_381: {
     curve: "bls12_381",
-    title: "BLS12-381 fp Phase 3 Browser Smoke",
-    vectorPath: "/testdata/vectors/fp/bls12_381_phase3_ops.json?v=1",
+    title: "BLS12-381 fp Ops Browser Smoke",
+    vectorPath: "/testdata/vectors/fp/bls12_381_fp_ops.json?v=1",
     shaderPath: "/shaders/curves/bls12_381/fp_arith.wgsl?v=1",
     labelPrefix: "bls12-381-fp",
     elementBytes: 48,
@@ -124,9 +124,9 @@ function packHexBatch(hexValues: readonly string[], elementBytes: number): Uint8
   return out;
 }
 
-async function fetchVectors(config: FpOpsConfig): Promise<Phase3Vectors> {
+async function fetchVectors(config: FpOpsConfig): Promise<FPOpsVectors> {
   const text = await fetchText(config.vectorPath);
-  return JSON.parse(text) as Phase3Vectors;
+  return JSON.parse(text) as FPOpsVectors;
 }
 
 function createStorageBuffer(device: GPUDevice, label: string, size: number, usage: GPUBufferUsageFlags): GPUBuffer {
@@ -264,7 +264,7 @@ function mustFindConvertCase(cases: readonly ConvertCase[], name: string): Conve
   return found;
 }
 
-function combineElementCases(vectors: Phase3Vectors): ElementCase[] {
+function combineElementCases(vectors: FPOpsVectors): ElementCase[] {
   return [...vectors.element_cases, ...vectors.edge_cases, ...vectors.differential_cases];
 }
 

@@ -16,7 +16,7 @@ import (
 func Run() error { return run() }
 
 func run() error {
-	fmt.Println("=== BN254 fr Phase 4 Vector Metal Smoke ===")
+	fmt.Println("=== BN254 fr Vector Ops Metal Smoke ===")
 	fmt.Println()
 
 	deviceSet, err := bn254gpu.NewHeadlessDevice()
@@ -109,7 +109,7 @@ func run() error {
 	}
 
 	fmt.Println()
-	fmt.Println("PASS: BN254 fr Phase 4 vector Metal smoke succeeded")
+	fmt.Println("PASS: BN254 fr vector ops Metal smoke succeeded")
 	return nil
 }
 

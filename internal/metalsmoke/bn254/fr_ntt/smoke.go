@@ -12,7 +12,7 @@ import (
 	bn254gpu "github.com/ivokub/wnark-crypto/go/curvegpu/bn254"
 )
 
-type phase5Vectors struct {
+type frNTTVectors struct {
 	NTTCases []nttCase `json:"ntt_cases"`
 }
 
@@ -30,7 +30,7 @@ type nttCase struct {
 func Run() error { return run() }
 
 func run() error {
-	fmt.Println("=== BN254 fr Phase 5 NTT Metal Smoke ===")
+	fmt.Println("=== BN254 fr NTT Metal Smoke ===")
 	fmt.Println()
 
 	vectors, err := loadVectors()
@@ -78,23 +78,23 @@ func run() error {
 	}
 
 	fmt.Println()
-	fmt.Println("PASS: BN254 fr Phase 5 NTT Metal smoke succeeded")
+	fmt.Println("PASS: BN254 fr NTT Metal smoke succeeded")
 	return nil
 }
 
-func loadVectors() (phase5Vectors, error) {
+func loadVectors() (frNTTVectors, error) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
-		return phase5Vectors{}, os.ErrNotExist
+		return frNTTVectors{}, os.ErrNotExist
 	}
-	path := filepath.Join(filepath.Dir(filename), "..", "..", "..", "..", "testdata", "vectors", "fr", "bn254_phase5_ntt.json")
+	path := filepath.Join(filepath.Dir(filename), "..", "..", "..", "..", "testdata", "vectors", "fr", "bn254_fr_ntt.json")
 	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
-		return phase5Vectors{}, err
+		return frNTTVectors{}, err
 	}
-	var out phase5Vectors
+	var out frNTTVectors
 	if err := json.Unmarshal(data, &out); err != nil {
-		return phase5Vectors{}, err
+		return frNTTVectors{}, err
 	}
 	return out, nil
 }

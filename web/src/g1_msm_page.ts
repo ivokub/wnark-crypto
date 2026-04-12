@@ -44,7 +44,7 @@ type MSMCase = {
   expected_affine: JacobianPoint;
 };
 
-type Phase8Vectors = {
+type G1MSMVectors = {
   terms_per_instance: number;
   msm_cases: MSMCase[];
   one_mont_z: string;
@@ -89,14 +89,14 @@ const INDEX_SIGN_BIT = 0x80000000;
 const CURVE_CONFIGS: Record<CurveId, CurveConfig> = {
   bn254: {
     id: "bn254",
-    logTitle: "=== BN254 G1 Phase 8 Browser Smoke ===",
-    passLine: "PASS: BN254 G1 Phase 8 browser smoke succeeded",
+    logTitle: "=== BN254 G1 MSM Browser Smoke ===",
+    passLine: "PASS: BN254 G1 MSM browser smoke succeeded",
     opsKernelLabel: "bn254-g1",
     msmKernelLabel: "bn254-g1-msm",
     fpBytes: 32,
     pointBytes: 96,
     zeroHex: "0000000000000000000000000000000000000000000000000000000000000000",
-    vectorsPath: "/testdata/vectors/g1/bn254_phase8_msm.json",
+    vectorsPath: "/testdata/vectors/g1/bn254_g1_msm.json",
     opsShaderParts: [
       "/shaders/curves/bn254/fp_arith.wgsl?v=2#section=fp-types",
       "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-consts",
@@ -112,15 +112,15 @@ const CURVE_CONFIGS: Record<CurveId, CurveConfig> = {
   },
   bls12_381: {
     id: "bls12_381",
-    logTitle: "=== BLS12-381 G1 Phase 8 Browser Smoke ===",
-    passLine: "PASS: BLS12-381 G1 Phase 8 browser smoke succeeded",
+    logTitle: "=== BLS12-381 G1 MSM Browser Smoke ===",
+    passLine: "PASS: BLS12-381 G1 MSM browser smoke succeeded",
     opsKernelLabel: "bls12-381-g1",
     msmKernelLabel: "bls12-381-g1-msm",
     fpBytes: 48,
     pointBytes: 144,
     zeroHex:
       "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-    vectorsPath: "/testdata/vectors/g1/bls12_381_phase8_msm.json?v=1",
+    vectorsPath: "/testdata/vectors/g1/bls12_381_g1_msm.json?v=1",
     opsShaderParts: [
       "/shaders/curves/bls12_381/fp_arith.wgsl?v=3#section=fp-types",
       "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-consts",
@@ -152,9 +152,9 @@ const statusEl = document.getElementById("status") as HTMLSpanElement;
 const logEl = document.getElementById("log") as HTMLPreElement;
 const { setStatus, setPageState, writeLog } = createPageUI(statusEl, logEl);
 
-async function fetchVectors(): Promise<Phase8Vectors> {
+async function fetchVectors(): Promise<G1MSMVectors> {
   const text = await fetchText(curveConfig.vectorsPath);
-  return JSON.parse(text) as Phase8Vectors;
+  return JSON.parse(text) as G1MSMVectors;
 }
 
 function createStorageBuffer(device: GPUDevice, label: string, size: number, usage: GPUBufferUsageFlags): GPUBuffer {
@@ -395,7 +395,7 @@ async function runScalarMulAffineBLS(
 async function runNaiveMSMBLS(
   device: GPUDevice,
   kernel: { pipeline: GPUComputePipeline; bindGroupLayout: GPUBindGroupLayout },
-  vectors: Phase8Vectors,
+  vectors: G1MSMVectors,
 ): Promise<JacobianPoint[]> {
   const oneMontZ = vectors.one_mont_z;
   const bases: JacobianPoint[] = [];

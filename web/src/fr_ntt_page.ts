@@ -31,7 +31,7 @@ type NTTCase = {
   inverse_scale_le: string;
 };
 
-type Phase5Vectors = {
+type FRNTTVectors = {
   ntt_cases: NTTCase[];
 };
 
@@ -55,7 +55,7 @@ const CONFIGS: Record<string, NTTConfig> = {
     curve: "bn254",
     title: "BN254 fr NTT Browser Smoke",
     supported: true,
-    vectorPath: "/testdata/vectors/fr/bn254_phase5_ntt.json",
+    vectorPath: "/testdata/vectors/fr/bn254_fr_ntt.json",
     arithShaderPath: "/shaders/curves/bn254/fr_arith.wgsl",
     vectorShaderPath: "/shaders/curves/bn254/fr_vector.wgsl",
     nttShaderPath: "/shaders/curves/bn254/fr_ntt.wgsl",
@@ -65,7 +65,7 @@ const CONFIGS: Record<string, NTTConfig> = {
     curve: "bls12_381",
     title: "BLS12-381 fr NTT Browser Smoke",
     supported: true,
-    vectorPath: "/testdata/vectors/fr/bls12_381_phase5_ntt.json",
+    vectorPath: "/testdata/vectors/fr/bls12_381_fr_ntt.json",
     arithShaderPath: "/shaders/curves/bls12_381/fr_arith.wgsl",
     vectorShaderPath: "/shaders/curves/bls12_381/fr_vector.wgsl",
     nttShaderPath: "/shaders/curves/bls12_381/fr_ntt.wgsl",
@@ -87,8 +87,8 @@ function getConfig(): NTTConfig {
   return config;
 }
 
-async function fetchVectors(config: NTTConfig): Promise<Phase5Vectors> {
-  return JSON.parse(await fetchText(config.vectorPath!)) as Phase5Vectors;
+async function fetchVectors(config: NTTConfig): Promise<FRNTTVectors> {
+  return JSON.parse(await fetchText(config.vectorPath!)) as FRNTTVectors;
 }
 
 function packHexBatch(hexValues: readonly string[]): Uint8Array {

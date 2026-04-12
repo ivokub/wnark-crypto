@@ -38,14 +38,14 @@ type g1Case struct {
 	AffineAddPPlusQ     jacPoint    `json:"affine_add_p_plus_q"`
 }
 
-type phase6Vectors struct {
+type g1OpsVectors struct {
 	PointCases []g1Case `json:"point_cases"`
 }
 
 func Run() error { return run() }
 
 func run() error {
-	fmt.Println("=== BLS12-381 G1 Phase 6 Metal Smoke ===")
+	fmt.Println("=== BLS12-381 G1 Ops Metal Smoke ===")
 	fmt.Println()
 
 	vectors, err := loadVectors()
@@ -123,7 +123,7 @@ func run() error {
 	}
 
 	fmt.Println()
-	fmt.Println("PASS: BLS12-381 G1 Phase 6 Metal smoke succeeded")
+	fmt.Println("PASS: BLS12-381 G1 Ops Metal smoke succeeded")
 	return nil
 }
 
@@ -150,19 +150,19 @@ func verify(name string, got []bls12381gpu.G1Jac, err error, want []bls12381gpu.
 	return nil
 }
 
-func loadVectors() (phase6Vectors, error) {
+func loadVectors() (g1OpsVectors, error) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
-		return phase6Vectors{}, os.ErrNotExist
+		return g1OpsVectors{}, os.ErrNotExist
 	}
-	path := filepath.Join(filepath.Dir(filename), "..", "..", "..", "..", "testdata", "vectors", "g1", "bls12_381_phase6_g1_ops.json")
+	path := filepath.Join(filepath.Dir(filename), "..", "..", "..", "..", "testdata", "vectors", "g1", "bls12_381_g1_ops.json")
 	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
-		return phase6Vectors{}, err
+		return g1OpsVectors{}, err
 	}
-	var out phase6Vectors
+	var out g1OpsVectors
 	if err := json.Unmarshal(data, &out); err != nil {
-		return phase6Vectors{}, err
+		return g1OpsVectors{}, err
 	}
 	return out, nil
 }

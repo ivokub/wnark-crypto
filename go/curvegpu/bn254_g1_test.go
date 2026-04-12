@@ -38,14 +38,14 @@ type g1CaseJSON struct {
 	AffineAddPPlusQ     g1JacJSON    `json:"affine_add_p_plus_q"`
 }
 
-type phase6Vectors struct {
+type g1OpsVectors struct {
 	PointCases []g1CaseJSON `json:"point_cases"`
 }
 
 func TestBN254G1KernelAgainstGnarkCrypto(t *testing.T) {
-	vectors, err := loadPhase6G1Vectors()
+	vectors, err := loadG1OpsVectors()
 	if err != nil {
-		t.Fatalf("loadPhase6G1Vectors: %v", err)
+		t.Fatalf("loadG1OpsVectors: %v", err)
 	}
 
 	pAff := make([]bn254gpu.G1Affine, len(vectors.PointCases))
@@ -164,19 +164,19 @@ func newG1TestKernel(t *testing.T) *bn254gpu.G1Kernel {
 	return kernel
 }
 
-func loadPhase6G1Vectors() (phase6Vectors, error) {
+func loadG1OpsVectors() (g1OpsVectors, error) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
-		return phase6Vectors{}, os.ErrNotExist
+		return g1OpsVectors{}, os.ErrNotExist
 	}
-	path := filepath.Join(filepath.Dir(filename), "..", "..", "testdata", "vectors", "g1", "bn254_phase6_g1_ops.json")
+	path := filepath.Join(filepath.Dir(filename), "..", "..", "testdata", "vectors", "g1", "bn254_g1_ops.json")
 	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
-		return phase6Vectors{}, err
+		return g1OpsVectors{}, err
 	}
-	var out phase6Vectors
+	var out g1OpsVectors
 	if err := json.Unmarshal(data, &out); err != nil {
-		return phase6Vectors{}, err
+		return g1OpsVectors{}, err
 	}
 	return out, nil
 }

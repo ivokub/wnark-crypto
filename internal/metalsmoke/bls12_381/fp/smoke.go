@@ -16,7 +16,7 @@ import (
 	bls12_381gpu "github.com/ivokub/wnark-crypto/go/curvegpu/bls12_381"
 )
 
-type phase3Vectors struct {
+type fpOpsVectors struct {
 	ElementCases      []elementCase   `json:"element_cases"`
 	EdgeCases         []elementCase   `json:"edge_cases"`
 	DifferentialCases []elementCase   `json:"differential_cases"`
@@ -52,7 +52,7 @@ type convertCase struct {
 func Run() error { return run() }
 
 func run() error {
-	fmt.Println("=== BLS12-381 fp Phase 3 Metal Smoke ===")
+	fmt.Println("=== BLS12-381 fp Ops Metal Smoke ===")
 	fmt.Println()
 
 	vectors, err := loadVectors()
@@ -113,7 +113,7 @@ func run() error {
 	}
 
 	fmt.Println()
-	fmt.Println("PASS: BLS12-381 fp Phase 3 Metal smoke succeeded")
+	fmt.Println("PASS: BLS12-381 fp Ops Metal smoke succeeded")
 	return nil
 }
 
@@ -376,17 +376,17 @@ func elementToRegularHex(z gnarkfp.Element) string {
 	return hex.EncodeToString(data)
 }
 
-func loadVectors() (*phase3Vectors, error) {
+func loadVectors() (*fpOpsVectors, error) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		return nil, fmt.Errorf("resolve caller path")
 	}
-	path := filepath.Join(filepath.Dir(file), "..", "..", "..", "..", "testdata", "vectors", "fp", "bls12_381_phase3_ops.json")
+	path := filepath.Join(filepath.Dir(file), "..", "..", "..", "..", "testdata", "vectors", "fp", "bls12_381_fp_ops.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read vectors: %w", err)
 	}
-	var vectors phase3Vectors
+	var vectors fpOpsVectors
 	if err := json.Unmarshal(data, &vectors); err != nil {
 		return nil, fmt.Errorf("decode vectors: %w", err)
 	}

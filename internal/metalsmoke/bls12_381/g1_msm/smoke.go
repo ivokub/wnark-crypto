@@ -33,7 +33,7 @@ type msmCase struct {
 	ExpectedAffine jacPoint      `json:"expected_affine"`
 }
 
-type phase8Vectors struct {
+type g1MSMVectors struct {
 	TermsPerInstance int       `json:"terms_per_instance"`
 	MSMCases         []msmCase `json:"msm_cases"`
 	OneMontZ         string    `json:"one_mont_z"`
@@ -42,7 +42,7 @@ type phase8Vectors struct {
 func Run() error { return run() }
 
 func run() error {
-	fmt.Println("=== BLS12-381 G1 Phase 8 Metal Smoke ===")
+	fmt.Println("=== BLS12-381 G1 MSM Metal Smoke ===")
 	fmt.Println()
 
 	vectors, err := loadVectors()
@@ -88,7 +88,7 @@ func run() error {
 	}
 	fmt.Println("4. msm_naive_affine... OK")
 	fmt.Println()
-	fmt.Println("PASS: BLS12-381 G1 Phase 8 Metal smoke succeeded")
+	fmt.Println("PASS: BLS12-381 G1 MSM Metal smoke succeeded")
 	return nil
 }
 
@@ -113,19 +113,19 @@ func verifyBatch(label string, got, want []bls12381gpu.G1Jac) error {
 	return nil
 }
 
-func loadVectors() (phase8Vectors, error) {
+func loadVectors() (g1MSMVectors, error) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
-		return phase8Vectors{}, os.ErrNotExist
+		return g1MSMVectors{}, os.ErrNotExist
 	}
-	path := filepath.Join(filepath.Dir(filename), "..", "..", "..", "..", "testdata", "vectors", "g1", "bls12_381_phase8_msm.json")
+	path := filepath.Join(filepath.Dir(filename), "..", "..", "..", "..", "testdata", "vectors", "g1", "bls12_381_g1_msm.json")
 	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
-		return phase8Vectors{}, err
+		return g1MSMVectors{}, err
 	}
-	var out phase8Vectors
+	var out g1MSMVectors
 	if err := json.Unmarshal(data, &out); err != nil {
-		return phase8Vectors{}, err
+		return g1MSMVectors{}, err
 	}
 	return out, nil
 }

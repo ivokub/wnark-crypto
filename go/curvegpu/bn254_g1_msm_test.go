@@ -18,16 +18,16 @@ type g1MSMCaseJSON struct {
 	ExpectedAffine g1JacJSON      `json:"expected_affine"`
 }
 
-type phase8Vectors struct {
+type g1MSMVectors struct {
 	TermsPerInstance int             `json:"terms_per_instance"`
 	MSMCases         []g1MSMCaseJSON `json:"msm_cases"`
 	OneMontZ         string          `json:"one_mont_z"`
 }
 
 func TestBN254G1MSMKernelAgainstGnarkCrypto(t *testing.T) {
-	vectors, err := loadPhase8G1MSMVectors()
+	vectors, err := loadG1MSMVectors()
 	if err != nil {
-		t.Fatalf("loadPhase8G1MSMVectors: %v", err)
+		t.Fatalf("loadG1MSMVectors: %v", err)
 	}
 
 	deviceSet, err := bn254gpu.NewHeadlessDevice()
@@ -63,19 +63,19 @@ func TestBN254G1MSMKernelAgainstGnarkCrypto(t *testing.T) {
 	mustBeOnCurveOrInfinity(t, "msm_naive", got)
 }
 
-func loadPhase8G1MSMVectors() (phase8Vectors, error) {
+func loadG1MSMVectors() (g1MSMVectors, error) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
-		return phase8Vectors{}, os.ErrNotExist
+		return g1MSMVectors{}, os.ErrNotExist
 	}
-	path := filepath.Join(filepath.Dir(filename), "..", "..", "testdata", "vectors", "g1", "bn254_phase8_msm.json")
+	path := filepath.Join(filepath.Dir(filename), "..", "..", "testdata", "vectors", "g1", "bn254_g1_msm.json")
 	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
-		return phase8Vectors{}, err
+		return g1MSMVectors{}, err
 	}
-	var out phase8Vectors
+	var out g1MSMVectors
 	if err := json.Unmarshal(data, &out); err != nil {
-		return phase8Vectors{}, err
+		return g1MSMVectors{}, err
 	}
 	return out, nil
 }

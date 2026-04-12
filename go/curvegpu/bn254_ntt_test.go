@@ -12,7 +12,7 @@ import (
 	bn254gpu "github.com/ivokub/wnark-crypto/go/curvegpu/bn254"
 )
 
-type phase5Vectors struct {
+type frNTTVectors struct {
 	NTTCases []nttCase `json:"ntt_cases"`
 }
 
@@ -40,9 +40,9 @@ func TestBN254FrNTTAgainstGnarkCrypto(t *testing.T) {
 	}
 	defer kernel.Close()
 
-	vectors, err := loadPhase5Vectors()
+	vectors, err := loadFRNTTVectors()
 	if err != nil {
-		t.Fatalf("loadPhase5Vectors: %v", err)
+		t.Fatalf("loadFRNTTVectors: %v", err)
 	}
 
 	for _, tc := range vectors.NTTCases {
@@ -51,7 +51,7 @@ func TestBN254FrNTTAgainstGnarkCrypto(t *testing.T) {
 			input := mustBatch(tc.InputMontLE)
 			stageTwiddles := mustStageTwiddles(tc.StageTwiddlesLE)
 			inverseStageTwiddles := mustStageTwiddles(tc.InverseStageTwiddlesLE)
-			scale := mustU32x8Phase5(tc.InverseScaleLE)
+			scale := mustU32x8NTT(tc.InverseScaleLE)
 
 			forward, err := kernel.ForwardDIT(input, stageTwiddles)
 			if err != nil {
@@ -68,19 +68,19 @@ func TestBN254FrNTTAgainstGnarkCrypto(t *testing.T) {
 	}
 }
 
-func loadPhase5Vectors() (phase5Vectors, error) {
+func loadFRNTTVectors() (frNTTVectors, error) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
-		return phase5Vectors{}, os.ErrNotExist
+		return frNTTVectors{}, os.ErrNotExist
 	}
-	path := filepath.Join(filepath.Dir(filename), "..", "..", "testdata", "vectors", "fr", "bn254_phase5_ntt.json")
+	path := filepath.Join(filepath.Dir(filename), "..", "..", "testdata", "vectors", "fr", "bn254_fr_ntt.json")
 	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
-		return phase5Vectors{}, err
+		return frNTTVectors{}, err
 	}
-	var out phase5Vectors
+	var out frNTTVectors
 	if err := json.Unmarshal(data, &out); err != nil {
-		return phase5Vectors{}, err
+		return frNTTVectors{}, err
 	}
 	return out, nil
 }
@@ -96,12 +96,12 @@ func mustStageTwiddles(raw [][]string) [][]curvegpu.U32x8 {
 func mustBatch(raw []string) []curvegpu.U32x8 {
 	out := make([]curvegpu.U32x8, len(raw))
 	for i := range raw {
-		out[i] = mustU32x8Phase5(raw[i])
+		out[i] = mustU32x8NTT(raw[i])
 	}
 	return out
 }
 
-func mustU32x8Phase5(raw string) curvegpu.U32x8 {
+func mustU32x8NTT(raw string) curvegpu.U32x8 {
 	bytes, err := hex.DecodeString(raw)
 	if err != nil {
 		panic(err)
@@ -125,14 +125,14 @@ func mustEqualHexBatch(t *testing.T, name string, got []curvegpu.U32x8, want []s
 		t.Fatalf("%s length mismatch: got=%d want=%d", name, len(got), len(want))
 	}
 	for i := range got {
-		gotHex := limbsToHexPhase5(got[i])
+		gotHex := limbsToHexNTT(got[i])
 		if gotHex != want[i] {
 			t.Fatalf("%s mismatch at index %d: got=%s want=%s", name, i, gotHex, want[i])
 		}
 	}
 }
 
-func limbsToHexPhase5(in curvegpu.U32x8) string {
+func limbsToHexNTT(in curvegpu.U32x8) string {
 	var bytes [32]byte
 	for i, limb := range in {
 		base := i * 4
