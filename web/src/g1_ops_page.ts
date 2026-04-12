@@ -1,5 +1,7 @@
 export {};
 
+import { fetchShaderParts } from "./curvegpu/shaders.js";
+
 type AffinePoint = {
   x_bytes_le: string;
   y_bytes_le: string;
@@ -31,7 +33,7 @@ type G1OpsConfig = {
   curve: string;
   title: string;
   vectorPath: string;
-  shaderPath: string;
+  shaderParts: string[];
   labelPrefix: string;
   fpBytes: number;
   pointBytes: number;
@@ -64,7 +66,10 @@ const CONFIGS: Record<string, G1OpsConfig> = {
     curve: "bn254",
     title: "BN254 G1 Phase 6 Browser Smoke",
     vectorPath: "/testdata/vectors/g1/bn254_phase6_g1_ops.json",
-    shaderPath: "/shaders/curves/bn254/g1_arith.wgsl",
+    shaderParts: [
+      "/shaders/curves/bn254/fp_arith.wgsl#section=fp-core",
+      "/shaders/curves/bn254/g1_arith.wgsl",
+    ],
     labelPrefix: "bn254-g1",
     fpBytes: 32,
     pointBytes: 96,
@@ -74,7 +79,10 @@ const CONFIGS: Record<string, G1OpsConfig> = {
     curve: "bls12_381",
     title: "BLS12-381 G1 Phase 6 Browser Smoke",
     vectorPath: "/testdata/vectors/g1/bls12_381_phase6_g1_ops.json?v=1",
-    shaderPath: "/shaders/curves/bls12_381/g1_arith.wgsl?v=1",
+    shaderParts: [
+      "/shaders/curves/bls12_381/fp_arith.wgsl?v=1#section=fp-core",
+      "/shaders/curves/bls12_381/g1_arith.wgsl?v=1",
+    ],
     labelPrefix: "bls12-381-g1",
     fpBytes: 48,
     pointBytes: 144,
@@ -330,7 +338,7 @@ async function runSmoke(config: G1OpsConfig): Promise<void> {
     const device = await adapter.requestDevice();
     lines.push("2. Requesting device... OK");
 
-    const [shaderText, vectors] = await Promise.all([fetchText(config.shaderPath), fetchVectors(config)]);
+    const [shaderText, vectors] = await Promise.all([fetchShaderParts(config.shaderParts), fetchVectors(config)]);
     lines.push("3. Loading shader and vectors... OK");
     lines.push(`cases.g1 = ${vectors.point_cases.length}`);
 
@@ -391,4 +399,3 @@ async function runSmoke(config: G1OpsConfig): Promise<void> {
 runButton.addEventListener("click", () => {
   void runSmoke(getConfig());
 });
-

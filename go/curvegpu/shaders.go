@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+const shaderSectionPrefix = "#section="
+
 func repoRoot() (string, error) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
@@ -35,6 +37,57 @@ func ReadShader(relPath string) (string, error) {
 		return "", err
 	}
 	return string(data), nil
+}
+
+func ReadShaderParts(parts ...string) (string, error) {
+	if len(parts) == 0 {
+		return "", fmt.Errorf("no shader parts requested")
+	}
+	var b strings.Builder
+	for _, part := range parts {
+		text, err := ReadShaderPart(part)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(text)
+		if !strings.HasSuffix(text, "\n") {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String(), nil
+}
+
+func ReadShaderPart(spec string) (string, error) {
+	path, section, hasSection := strings.Cut(spec, shaderSectionPrefix)
+	text, err := ReadShader(path)
+	if err != nil {
+		return "", err
+	}
+	if !hasSection {
+		return text, nil
+	}
+	return extractShaderSection(text, section)
+}
+
+func extractShaderSection(text, section string) (string, error) {
+	begin := "// curvegpu:section " + section + " begin"
+	end := "// curvegpu:section " + section + " end"
+	start := strings.Index(text, begin)
+	if start < 0 {
+		return "", fmt.Errorf("shader section %q begin marker not found", section)
+	}
+	start += len(begin)
+	if start < len(text) && text[start] == '\r' {
+		start++
+	}
+	if start < len(text) && text[start] == '\n' {
+		start++
+	}
+	stop := strings.Index(text[start:], end)
+	if stop < 0 {
+		return "", fmt.Errorf("shader section %q end marker not found", section)
+	}
+	return text[start : start+stop], nil
 }
 
 func ListShaders() ([]string, error) {

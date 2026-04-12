@@ -1,5 +1,7 @@
 export {};
 
+import { fetchShaderParts } from "./curvegpu/shaders.js";
+
 import {
   bestPippengerWindow as sharedBestPippengerWindow,
   buildSparseSignedBucketMetadataWords,
@@ -53,8 +55,8 @@ type CurveBenchConfig = {
   fpBytes: number;
   pointBytes: number;
   zeroHex: string;
-  opsShaderPath: string;
-  pippengerShaderPath: string;
+  opsShaderParts: string[];
+  pippengerShaderParts: string[];
   phase7Path: string;
   fixtureJSONPath?: string;
   fixtureBinPath?: string;
@@ -109,8 +111,14 @@ const CURVE_CONFIGS: Record<CurveId, CurveBenchConfig> = {
     fpBytes: 32,
     pointBytes: 96,
     zeroHex: "0000000000000000000000000000000000000000000000000000000000000000",
-    opsShaderPath: "/shaders/curves/bn254/g1_arith.wgsl",
-    pippengerShaderPath: "/shaders/curves/bn254/g1_arith.wgsl",
+    opsShaderParts: [
+      "/shaders/curves/bn254/fp_arith.wgsl#section=fp-core",
+      "/shaders/curves/bn254/g1_arith.wgsl",
+    ],
+    pippengerShaderParts: [
+      "/shaders/curves/bn254/fp_arith.wgsl#section=fp-core",
+      "/shaders/curves/bn254/g1_arith.wgsl",
+    ],
     phase7Path: "/testdata/vectors/g1/bn254_phase7_scalar_mul.json",
     serverBinPath: "/api/bn254/g1/bases.bin",
     pippengerMode: "simple",
@@ -127,8 +135,14 @@ const CURVE_CONFIGS: Record<CurveId, CurveBenchConfig> = {
     pointBytes: 144,
     zeroHex:
       "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-    opsShaderPath: "/shaders/curves/bls12_381/g1_arith.wgsl?v=1",
-    pippengerShaderPath: "/shaders/curves/bls12_381/g1_msm.wgsl?v=1",
+    opsShaderParts: [
+      "/shaders/curves/bls12_381/fp_arith.wgsl?v=1#section=fp-core",
+      "/shaders/curves/bls12_381/g1_arith.wgsl?v=1",
+    ],
+    pippengerShaderParts: [
+      "/shaders/curves/bls12_381/fp_arith.wgsl?v=1#section=fp-core",
+      "/shaders/curves/bls12_381/g1_msm.wgsl?v=1",
+    ],
     phase7Path: "/testdata/vectors/g1/bls12_381_phase7_scalar_mul.json",
     fixtureJSONPath: "/testdata/fixtures/g1/bls12_381_bases_2pow19_jacobian.json?v=1",
     fixtureBinPath: "/testdata/fixtures/g1/bls12_381_bases_2pow19_jacobian.bin?v=1",
@@ -1024,8 +1038,8 @@ async function runBenchmark(): Promise<void> {
     appendAdapterDiagnostics,
     init: async ({ device, lines }) => {
       const [opsShaderText, pippengerShaderText, phase7] = await Promise.all([
-        fetchText(curveConfig.opsShaderPath),
-        fetchText(curveConfig.pippengerShaderPath),
+        fetchShaderParts(curveConfig.opsShaderParts),
+        fetchShaderParts(curveConfig.pippengerShaderParts),
         fetchJSON<Phase7Vectors>(curveConfig.phase7Path),
       ]);
       const opsKernel = createKernel(device, opsShaderText);

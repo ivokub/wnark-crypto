@@ -45,6 +45,7 @@ const FP_MODULUS16: array<u32, 16> = array<u32, 16>(
 @group(0) @binding(2) var<storage, read_write> output: array<u32>;
 @group(0) @binding(3) var<uniform> params: Params;
 
+// curvegpu:section fp-core begin
 fn fp_zero() -> Fp {
   var z: Fp;
   z.limbs[0] = 0u;
@@ -390,6 +391,7 @@ fn fp_mul(x: Fp, y: Fp) -> Fp {
   }
   return fp_pack16(z16);
 }
+// curvegpu:section fp-core end
 
 fn fp_dispatch(opcode: u32, a: Fp, b: Fp) -> Fp {
   if (opcode == FP_OP_COPY) {

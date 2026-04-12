@@ -64,7 +64,10 @@ type G1Kernel struct {
 }
 
 func ReadG1ArithShader() (string, error) {
-	return curvegpu.ReadShader("curves/bls12_381/g1_arith.wgsl")
+	return curvegpu.ReadShaderParts(
+		"curves/bls12_381/fp_arith.wgsl#section=fp-core",
+		"curves/bls12_381/g1_arith.wgsl",
+	)
 }
 
 func NewG1Kernel(device *wgpu.Device) (*G1Kernel, error) {

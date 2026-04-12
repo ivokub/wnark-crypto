@@ -1,5 +1,7 @@
 export {};
 
+import { fetchShaderParts } from "./curvegpu/shaders.js";
+
 import {
   bestPippengerWindow as sharedBestPippengerWindow,
   buildSparseSignedBucketMetadataWords,
@@ -53,8 +55,8 @@ type CurveConfig = {
   pointBytes: number;
   zeroHex: string;
   vectorsPath: string;
-  opsShaderPath: string;
-  msmShaderPath?: string;
+  opsShaderParts: string[];
+  msmShaderParts?: string[];
 };
 
 declare const GPUShaderStage: { COMPUTE: number };
@@ -88,8 +90,14 @@ const CURVE_CONFIGS: Record<CurveId, CurveConfig> = {
     pointBytes: 96,
     zeroHex: "0000000000000000000000000000000000000000000000000000000000000000",
     vectorsPath: "/testdata/vectors/g1/bn254_phase8_msm.json",
-    opsShaderPath: "/shaders/curves/bn254/g1_arith.wgsl",
-    msmShaderPath: "/shaders/curves/bn254/g1_arith.wgsl",
+    opsShaderParts: [
+      "/shaders/curves/bn254/fp_arith.wgsl#section=fp-core",
+      "/shaders/curves/bn254/g1_arith.wgsl",
+    ],
+    msmShaderParts: [
+      "/shaders/curves/bn254/fp_arith.wgsl#section=fp-core",
+      "/shaders/curves/bn254/g1_arith.wgsl",
+    ],
   },
   bls12_381: {
     id: "bls12_381",
@@ -102,8 +110,14 @@ const CURVE_CONFIGS: Record<CurveId, CurveConfig> = {
     zeroHex:
       "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
     vectorsPath: "/testdata/vectors/g1/bls12_381_phase8_msm.json?v=1",
-    opsShaderPath: "/shaders/curves/bls12_381/g1_arith.wgsl?v=1",
-    msmShaderPath: "/shaders/curves/bls12_381/g1_msm.wgsl?v=2",
+    opsShaderParts: [
+      "/shaders/curves/bls12_381/fp_arith.wgsl?v=1#section=fp-core",
+      "/shaders/curves/bls12_381/g1_arith.wgsl?v=1",
+    ],
+    msmShaderParts: [
+      "/shaders/curves/bls12_381/fp_arith.wgsl?v=1#section=fp-core",
+      "/shaders/curves/bls12_381/g1_msm.wgsl?v=2",
+    ],
   },
 };
 
@@ -973,15 +987,15 @@ async function runPippengerMSMSignedSparseBN254(
 
 async function runSmokeBLS(lines: string[], device: GPUDevice): Promise<void> {
   const [opsShaderText, msmShaderText, vectors] = await Promise.all([
-    fetchText(curveConfig.opsShaderPath),
-    fetchText(curveConfig.msmShaderPath ?? curveConfig.opsShaderPath),
+    fetchShaderParts(curveConfig.opsShaderParts),
+    fetchShaderParts(curveConfig.msmShaderParts ?? curveConfig.opsShaderParts),
     fetchVectors(),
   ]);
   lines.push("3. Loading shader and vectors... OK");
   lines.push(`terms_per_instance = ${vectors.terms_per_instance}`);
   lines.push(`cases.msm = ${vectors.msm_cases.length}`);
 
-  if (!curveConfig.msmShaderPath) {
+  if (!curveConfig.msmShaderParts) {
     throw new Error("missing optimized MSM shader path");
   }
 
@@ -1018,7 +1032,7 @@ async function runSmokeBLS(lines: string[], device: GPUDevice): Promise<void> {
 }
 
 async function runSmokeBN254(lines: string[], device: GPUDevice): Promise<void> {
-  const [shaderText, vectors] = await Promise.all([fetchText(curveConfig.opsShaderPath), fetchVectors()]);
+  const [shaderText, vectors] = await Promise.all([fetchShaderParts(curveConfig.opsShaderParts), fetchVectors()]);
   lines.push("3. Loading shader and vectors... OK");
   lines.push(`terms_per_instance = ${vectors.terms_per_instance}`);
   lines.push(`cases.msm = ${vectors.msm_cases.length}`);
