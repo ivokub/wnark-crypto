@@ -104,7 +104,7 @@ export function createFieldModule(
     return (await runBatch(opcode, [a], [b]))[0];
   }
 
-  const getOne = lazyAsync(async () => cloneBytes((await runBatch(OP_ONE, [zeroValue], [zeroValue]))[0]));
+  const getMontOne = lazyAsync(async () => cloneBytes((await runBatch(OP_ONE, [zeroValue], [zeroValue]))[0]));
 
   return {
     context,
@@ -121,8 +121,8 @@ export function createFieldModule(
     async copyBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]> {
       return runBatch(OP_COPY, values, values);
     },
-    async one(): Promise<CurveGPUElementBytes> {
-      return cloneBytes(await getOne());
+    async montOne(): Promise<CurveGPUElementBytes> {
+      return cloneBytes(await getMontOne());
     },
     async equal(a: CurveGPUElementBytes, b: CurveGPUElementBytes): Promise<boolean> {
       return isNonZero(await runBinary(OP_EQUAL, a, b));
@@ -166,22 +166,22 @@ export function createFieldModule(
     async squareBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]> {
       return runBatch(OP_SQUARE, values, zeros(values.length, byteSize));
     },
-    async normalize(value: CurveGPUElementBytes): Promise<CurveGPUElementBytes> {
+    async normalizeMont(value: CurveGPUElementBytes): Promise<CurveGPUElementBytes> {
       return runUnary(OP_NORMALIZE, value);
     },
-    async normalizeBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]> {
+    async normalizeMontBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]> {
       return runBatch(OP_NORMALIZE, values, zeros(values.length, byteSize));
     },
-    async toMont(value: CurveGPUElementBytes): Promise<CurveGPUElementBytes> {
+    async toMontgomery(value: CurveGPUElementBytes): Promise<CurveGPUElementBytes> {
       return runUnary(OP_TO_MONT, value);
     },
-    async toMontBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]> {
+    async toMontgomeryBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]> {
       return runBatch(OP_TO_MONT, values, zeros(values.length, byteSize));
     },
-    async fromMont(value: CurveGPUElementBytes): Promise<CurveGPUElementBytes> {
+    async fromMontgomery(value: CurveGPUElementBytes): Promise<CurveGPUElementBytes> {
       return runUnary(OP_FROM_MONT, value);
     },
-    async fromMontBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]> {
+    async fromMontgomeryBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]> {
       return runBatch(OP_FROM_MONT, values, zeros(values.length, byteSize));
     },
   };

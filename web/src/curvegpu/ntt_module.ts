@@ -121,12 +121,12 @@ export function createNTTModule(
       const forwardStageRegular = buildRegularStageElements(domain, false, modulus, elementBytes);
       const inverseStageRegular = buildRegularStageElements(domain, true, modulus, elementBytes);
       const forwardStageMont = await Promise.all(
-        forwardStageRegular.map(async (stage) => packElementBatch(await fr.toMontBatch(stage), elementBytes, `${label}.forwardStage`)),
+        forwardStageRegular.map(async (stage) => packElementBatch(await fr.toMontgomeryBatch(stage), elementBytes, `${label}.forwardStage`)),
       );
       const inverseStageMont = await Promise.all(
-        inverseStageRegular.map(async (stage) => packElementBatch(await fr.toMontBatch(stage), elementBytes, `${label}.inverseStage`)),
+        inverseStageRegular.map(async (stage) => packElementBatch(await fr.toMontgomeryBatch(stage), elementBytes, `${label}.inverseStage`)),
       );
-      const inverseScaleMont = await fr.toMont(bigIntToBytesLE(hexToBigInt(domain.cardinality_inv_hex), elementBytes));
+      const inverseScaleMont = await fr.toMontgomery(bigIntToBytesLE(hexToBigInt(domain.cardinality_inv_hex), elementBytes));
       return { forwardStageMont, inverseStageMont, inverseScaleMont };
     })();
     domainCache.set(size, promise);

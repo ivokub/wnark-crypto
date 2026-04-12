@@ -96,6 +96,10 @@ function unpackJacobianPoints(bytes: Uint8Array, count: number, coordinateBytes:
   return out;
 }
 
+function affineFromJacobian(point: CurveGPUJacobianPoint): CurveGPUAffinePoint {
+  return { x: cloneBytes(point.x), y: cloneBytes(point.y) };
+}
+
 function isAffineInfinity(point: CurveGPUAffinePoint): boolean {
   return point.x.every((byte) => byte === 0) && point.y.every((byte) => byte === 0);
 }
@@ -128,7 +132,7 @@ export function createG1Module(
     const shaderCode = await loadShaderParts(shaderParts);
     return createSimpleKernel(context.device, label, shaderCode, "g1_ops_main");
   });
-  const getOneMontgomery = lazyAsync(async () => fp.one());
+  const getOneMontgomery = lazyAsync(async () => fp.montOne());
 
   async function runJacobianBatch(
     opcode: G1OpCode,
@@ -275,11 +279,11 @@ export function createG1Module(
     async addMixedBatch(points: readonly CurveGPUJacobianPoint[], affine: readonly CurveGPUAffinePoint[]): Promise<CurveGPUJacobianPoint[]> {
       return runMixedBatch(OP_ADD_MIXED, points, affine);
     },
-    async jacobianToAffine(point: CurveGPUJacobianPoint): Promise<CurveGPUJacobianPoint> {
-      return runJacobianUnary(OP_JAC_TO_AFFINE, point);
+    async jacobianToAffine(point: CurveGPUJacobianPoint): Promise<CurveGPUAffinePoint> {
+      return affineFromJacobian(await runJacobianUnary(OP_JAC_TO_AFFINE, point));
     },
-    async jacobianToAffineBatch(points: readonly CurveGPUJacobianPoint[]): Promise<CurveGPUJacobianPoint[]> {
-      return runJacobianBatch(OP_JAC_TO_AFFINE, points, makeZeroJacobianBatch(points.length));
+    async jacobianToAffineBatch(points: readonly CurveGPUJacobianPoint[]): Promise<CurveGPUAffinePoint[]> {
+      return (await runJacobianBatch(OP_JAC_TO_AFFINE, points, makeZeroJacobianBatch(points.length))).map(affineFromJacobian);
     },
     async affineAdd(a: CurveGPUAffinePoint, b: CurveGPUAffinePoint): Promise<CurveGPUJacobianPoint> {
       const left = await runAffineInputBatch(OP_AFFINE_TO_JAC, [a]);

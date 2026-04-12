@@ -84,6 +84,13 @@ function jacobianToHex(point: CurveGPUJacobianPoint): JacobianPoint {
   };
 }
 
+function affineToHex(point: CurveGPUAffinePoint): AffinePoint {
+  return {
+    x_bytes_le: bytesToHex(point.x),
+    y_bytes_le: bytesToHex(point.y),
+  };
+}
+
 function expectPointBatch(name: string, got: readonly CurveGPUJacobianPoint[], want: readonly JacobianPoint[], lines: string[]): void {
   if (got.length !== want.length) {
     throw new Error(`${name}: length mismatch got=${got.length} want=${want.length}`);
@@ -95,6 +102,19 @@ function expectPointBatch(name: string, got: readonly CurveGPUJacobianPoint[], w
       gotHex.y_bytes_le !== want[i].y_bytes_le ||
       gotHex.z_bytes_le !== want[i].z_bytes_le
     ) {
+      throw new Error(`${name}: mismatch at index ${i}`);
+    }
+  }
+  lines.push(`${name}: OK`);
+}
+
+function expectAffineBatch(name: string, got: readonly CurveGPUAffinePoint[], want: readonly AffinePoint[], lines: string[]): void {
+  if (got.length !== want.length) {
+    throw new Error(`${name}: length mismatch got=${got.length} want=${want.length}`);
+  }
+  for (let i = 0; i < got.length; i += 1) {
+    const gotHex = affineToHex(got[i]);
+    if (gotHex.x_bytes_le !== want[i].x_bytes_le || gotHex.y_bytes_le !== want[i].y_bytes_le) {
       throw new Error(`${name}: mismatch at index ${i}`);
     }
   }
@@ -127,9 +147,12 @@ async function runSmoke(config: G1OpsConfig): Promise<void> {
     const negWant = vectors.point_cases.map((item) => item.neg_p_jacobian);
     const doubleWant = vectors.point_cases.map((item) => item.double_p_jacobian);
     const addWant = vectors.point_cases.map((item) => item.add_mixed_p_plus_q_jacobian);
-    const affineWant = vectors.point_cases.map((item) => item.p_affine_output);
+    const affineWant = vectors.point_cases.map((item) => ({
+      x_bytes_le: item.p_affine_output.x_bytes_le,
+      y_bytes_le: item.p_affine_output.y_bytes_le,
+    }));
     const affineAddWant = vectors.point_cases.map((item) => item.affine_add_p_plus_q);
-    const oneMont = await curve.fp.one();
+    const oneMont = await curve.fp.montOne();
     const jacInfinityWant = vectors.point_cases.map(() => ({
       x_bytes_le: bytesToHex(oneMont),
       y_bytes_le: bytesToHex(oneMont),
@@ -144,7 +167,7 @@ async function runSmoke(config: G1OpsConfig): Promise<void> {
     writeLog(lines);
     expectPointBatch("neg_jac", await g1.negJacobianBatch(pJacobian), negWant, lines);
     writeLog(lines);
-    expectPointBatch("jac_to_affine", await g1.jacobianToAffineBatch(pJacobian), affineWant, lines);
+    expectAffineBatch("jac_to_affine", await g1.jacobianToAffineBatch(pJacobian), affineWant, lines);
     writeLog(lines);
     expectPointBatch("double_jac", await g1.doubleJacobianBatch(pJacobian), doubleWant, lines);
     writeLog(lines);

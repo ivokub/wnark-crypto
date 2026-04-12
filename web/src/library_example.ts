@@ -74,10 +74,6 @@ function scalarLE(value: number): CurveGPUElementBytes {
   return out;
 }
 
-function affineFromJacobian(point: { x: Uint8Array; y: Uint8Array }): CurveGPUAffinePoint {
-  return { x: point.x, y: point.y };
-}
-
 function equalElements(a: readonly Uint8Array[], b: readonly Uint8Array[]): boolean {
   if (a.length !== b.length) {
     return false;
@@ -117,10 +113,10 @@ async function runExample(curveId: SupportedCurveID, log: (lines: string[]) => v
   }
   log(lines);
 
-  const one = await curve.fr.one();
+  const one = await curve.fr.montOne();
   const two = await curve.fr.add(one, one);
   const three = await curve.fr.add(two, one);
-  const threeRegular = await curve.fr.fromMont(three);
+  const threeRegular = await curve.fr.fromMontgomery(three);
   lines.push("2. Field arithmetic... OK");
   lines.push(`fr: 1 + 2 = 0x${shortHex(threeRegular)}`);
   log(lines);
@@ -133,11 +129,9 @@ async function runExample(curveId: SupportedCurveID, log: (lines: string[]) => v
   log(lines);
 
   const base = EXAMPLE_BASES[curveId];
-  const base2 = affineFromJacobian(await curve.g1.jacobianToAffine(await curve.g1.scalarMulAffine(base, scalarLE(2))));
-  const tripleByScalarMul = affineFromJacobian(await curve.g1.jacobianToAffine(await curve.g1.scalarMulAffine(base, scalarLE(3))));
-  const tripleByMSM = affineFromJacobian(
-    await curve.g1.jacobianToAffine(await curve.msm.pippengerAffine([base, base2], [scalarLE(1), scalarLE(1)])),
-  );
+  const base2 = await curve.g1.jacobianToAffine(await curve.g1.scalarMulAffine(base, scalarLE(2)));
+  const tripleByScalarMul = await curve.g1.jacobianToAffine(await curve.g1.scalarMulAffine(base, scalarLE(3)));
+  const tripleByMSM = await curve.g1.jacobianToAffine(await curve.msm.pippengerAffine([base, base2], [scalarLE(1), scalarLE(1)]));
   lines.push("4. G1 scalar mul + MSM... OK");
   lines.push(`g1_scalar_msm_equal = ${String(equalAffine(tripleByScalarMul, tripleByMSM))}`);
   lines.push(`g1_result.x = 0x${shortHex(tripleByScalarMul.x)}`);

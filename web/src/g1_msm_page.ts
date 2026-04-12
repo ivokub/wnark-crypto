@@ -102,16 +102,35 @@ async function naiveMSMAffine(
   curve: CurveModule,
   bases: readonly CurveGPUAffinePoint[],
   scalars: readonly CurveGPUElementBytes[],
-): Promise<CurveGPUJacobianPoint> {
+): Promise<CurveGPUAffinePoint> {
   const scaled = await curve.g1.scalarMulAffineBatch(bases, scalars);
   if (scaled.length === 0) {
-    return curve.g1.jacobianInfinity();
+    return curve.g1.affineInfinity();
   }
   let accJacobian = await curve.g1.affineToJacobian(toAffinePoint(scaled[0]));
   for (let i = 1; i < scaled.length; i += 1) {
     accJacobian = await curve.g1.addMixed(accJacobian, toAffinePoint(scaled[i]));
   }
   return curve.g1.jacobianToAffine(accJacobian);
+}
+
+function expectAffineBatch(name: string, got: readonly CurveGPUAffinePoint[], want: readonly JacobianPoint[]): void {
+  if (got.length !== want.length) {
+    throw new Error(`${name}: length mismatch got=${got.length} want=${want.length}`);
+  }
+  for (let i = 0; i < got.length; i += 1) {
+    const gotHex = {
+      x_bytes_le: bytesToHex(got[i].x),
+      y_bytes_le: bytesToHex(got[i].y),
+    };
+    if (gotHex.x_bytes_le !== want[i].x_bytes_le || gotHex.y_bytes_le !== want[i].y_bytes_le) {
+      throw new Error(
+        `${name}: mismatch at index ${i}` +
+          ` got=(${gotHex.x_bytes_le},${gotHex.y_bytes_le})` +
+          ` want=(${want[i].x_bytes_le},${want[i].y_bytes_le})`,
+      );
+    }
+  }
 }
 
 async function runSmoke(config: G1MSMConfig): Promise<void> {
@@ -134,7 +153,7 @@ async function runSmoke(config: G1MSMConfig): Promise<void> {
     lines.push("4. Initializing curve module... OK");
     writeLog(lines);
 
-    const naiveResults: CurveGPUJacobianPoint[] = [];
+    const naiveResults: CurveGPUAffinePoint[] = [];
     for (const msmCase of vectors.msm_cases) {
       naiveResults.push(
         await naiveMSMAffine(
@@ -144,7 +163,7 @@ async function runSmoke(config: G1MSMConfig): Promise<void> {
         ),
       );
     }
-    expectPointBatch("msm_naive_affine", naiveResults, vectors.msm_cases.map((item) => item.expected_affine));
+    expectAffineBatch("msm_naive_affine", naiveResults, vectors.msm_cases.map((item) => item.expected_affine));
     lines.push("msm_naive_affine: OK");
     writeLog(lines);
 

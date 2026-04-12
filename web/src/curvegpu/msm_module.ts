@@ -74,7 +74,7 @@ export function createMSMModule(
   const { curve, coordinateBytes, pointBytes, shaderParts, mode } = options;
   const label = `${curve}-g1-msm`;
 
-  const getOneMontgomery = lazyAsync(async () => fp.one());
+  const getOneMontgomery = lazyAsync(async () => fp.montOne());
   const getKernels = lazyAsync(async (): Promise<PippengerKernels> => {
     const shaderCode = await loadShaderParts(shaderParts);
     if (mode === "weighted") {

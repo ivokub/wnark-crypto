@@ -139,7 +139,7 @@ async function runBrowserSmoke(config: FpOpsConfig): Promise<string[]> {
   const aBytes = bytesList(aHex);
   const bBytes = bytesList(bHex);
   const zeroHexValue = zeroHex(fp.byteSize);
-  const oneMontHex = bytesToHex(await fp.one());
+  const oneMontHex = bytesToHex(await fp.montOne());
 
   expectHexBatch("copy", await fp.copyBatch(aBytes), aHex, lines);
   writeLog(lines);
@@ -164,28 +164,28 @@ async function runBrowserSmoke(config: FpOpsConfig): Promise<string[]> {
   writeLog(lines);
   expectHexBatch(
     "to_mont",
-    await fp.toMontBatch(bytesList(vectors.convert_cases.map((item) => item.regular_bytes_le))),
+    await fp.toMontgomeryBatch(bytesList(vectors.convert_cases.map((item) => item.regular_bytes_le))),
     vectors.convert_cases.map((item) => item.mont_bytes_le),
     lines,
   );
   writeLog(lines);
   expectHexBatch(
     "from_mont",
-    await fp.fromMontBatch(bytesList(vectors.convert_cases.map((item) => item.mont_bytes_le))),
+    await fp.fromMontgomeryBatch(bytesList(vectors.convert_cases.map((item) => item.mont_bytes_le))),
     vectors.convert_cases.map((item) => item.regular_bytes_le),
     lines,
   );
   writeLog(lines);
   expectHexBatch(
     "normalize",
-    await fp.normalizeBatch(bytesList(vectors.normalize_cases.map((item) => item.input_bytes_le))),
+    await fp.normalizeMontBatch(bytesList(vectors.normalize_cases.map((item) => item.input_bytes_le))),
     vectors.normalize_cases.map((item) => item.expected_bytes_le),
     lines,
   );
   writeLog(lines);
 
   const oneCase = mustFindConvertCase(vectors.convert_cases, "one");
-  const oneHexExpected = bytesToHex(await fp.one());
+  const oneHexExpected = bytesToHex(await fp.montOne());
   if (oneHexExpected !== oneCase.mont_bytes_le) {
     throw new Error(`one: mismatch got=${oneHexExpected} want=${oneCase.mont_bytes_le}`);
   }

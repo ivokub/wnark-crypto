@@ -86,7 +86,7 @@ async function runBenchmark(): Promise<void> {
     for (let logSize = minLog; logSize <= maxLog; logSize += 1) {
       const size = 1 << logSize;
       const regularValues = makeRegularBatch(size, 0x9e3779b9 ^ size);
-      const inputMont = await curve.fr.toMontBatch(regularValues);
+      const inputMont = await curve.fr.toMontgomeryBatch(regularValues);
       const forwardBenchmark = await benchmarkTotalDuration(iters, async () => {
         await curve.ntt.forward(inputMont);
       });

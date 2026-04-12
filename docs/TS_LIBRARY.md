@@ -11,7 +11,7 @@ The intended usage model is:
 
 ## Byte conventions
 
-- `fr` and `fp` methods operate on little-endian Montgomery-form byte strings unless you explicitly call `toMont` or `fromMont`
+- `fr` and `fp` methods operate on little-endian Montgomery-form byte strings unless you explicitly call `toMontgomery` or `fromMontgomery`
 - G1 affine and Jacobian coordinates use the same field-byte representation as the selected curve's fixtures and shader interfaces
 - scalar-multiplication and MSM scalars are 32-byte little-endian scalar-field elements in regular form
 
@@ -33,9 +33,9 @@ function scalarLE(value: number): Uint8Array {
 const context = await createCurveGPUContext();
 const curve = createBN254(context);
 
-const one = await curve.fr.one();
+const one = await curve.fr.montOne();
 const two = await curve.fr.add(one, one);
-const twoRegular = await curve.fr.fromMont(two);
+const twoRegular = await curve.fr.fromMontgomery(two);
 
 const base: CurveGPUAffinePoint = {
   x: /* affine x bytes */,

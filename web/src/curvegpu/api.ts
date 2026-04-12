@@ -9,7 +9,8 @@ export type SupportedCurveID = "bn254" | "bls12_381";
  * Canonical byte representation for field and scalar values.
  *
  * For `fr` and `fp` module operations, values are little-endian byte strings
- * in Montgomery form unless explicitly converted with `toMont` / `fromMont`.
+ * in Montgomery form unless explicitly converted with
+ * `toMontgomery` / `fromMontgomery`.
  *
  * For G1 scalar multiplication and MSM, scalars are little-endian 32-byte
  * scalar-field elements in regular form.
@@ -97,8 +98,8 @@ export interface CurveGPUContext {
 /**
  * Field arithmetic bound to a specific curve field.
  *
- * All methods except `toMont` and `fromMont` operate on Montgomery-form
- * little-endian byte strings.
+ * All methods except `toMontgomery` and `fromMontgomery` operate on
+ * Montgomery-form little-endian byte strings.
  *
  * Batch variants execute the same operation element-wise over equal-length
  * slices.
@@ -115,7 +116,7 @@ export interface FieldModule {
   copy(value: CurveGPUElementBytes): Promise<CurveGPUElementBytes>;
   copyBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]>;
   /** Return the multiplicative identity in Montgomery form. */
-  one(): Promise<CurveGPUElementBytes>;
+  montOne(): Promise<CurveGPUElementBytes>;
   /** Check modular equality. */
   equal(a: CurveGPUElementBytes, b: CurveGPUElementBytes): Promise<boolean>;
   equalBatch(a: readonly CurveGPUElementBytes[], b: readonly CurveGPUElementBytes[]): Promise<boolean[]>;
@@ -138,14 +139,14 @@ export interface FieldModule {
   square(value: CurveGPUElementBytes): Promise<CurveGPUElementBytes>;
   squareBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]>;
   /** Reduce a value into canonical Montgomery form. */
-  normalize(value: CurveGPUElementBytes): Promise<CurveGPUElementBytes>;
-  normalizeBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]>;
+  normalizeMont(value: CurveGPUElementBytes): Promise<CurveGPUElementBytes>;
+  normalizeMontBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]>;
   /** Convert a regular little-endian field element into Montgomery form. */
-  toMont(value: CurveGPUElementBytes): Promise<CurveGPUElementBytes>;
-  toMontBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]>;
+  toMontgomery(value: CurveGPUElementBytes): Promise<CurveGPUElementBytes>;
+  toMontgomeryBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]>;
   /** Convert a Montgomery-form element back into regular little-endian bytes. */
-  fromMont(value: CurveGPUElementBytes): Promise<CurveGPUElementBytes>;
-  fromMontBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]>;
+  fromMontgomery(value: CurveGPUElementBytes): Promise<CurveGPUElementBytes>;
+  fromMontgomeryBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]>;
 }
 
 /**
@@ -188,8 +189,8 @@ export interface G1Module {
    * The returned object keeps the `z` field for compatibility with existing
    * fixtures; consumers that need a strict affine point should use `x` and `y`.
    */
-  jacobianToAffine(point: CurveGPUJacobianPoint): Promise<CurveGPUJacobianPoint>;
-  jacobianToAffineBatch(points: readonly CurveGPUJacobianPoint[]): Promise<CurveGPUJacobianPoint[]>;
+  jacobianToAffine(point: CurveGPUJacobianPoint): Promise<CurveGPUAffinePoint>;
+  jacobianToAffineBatch(points: readonly CurveGPUJacobianPoint[]): Promise<CurveGPUAffinePoint[]>;
   /** Add two affine points and return the result in Jacobian form. */
   affineAdd(a: CurveGPUAffinePoint, b: CurveGPUAffinePoint): Promise<CurveGPUJacobianPoint>;
   affineAddBatch(a: readonly CurveGPUAffinePoint[], b: readonly CurveGPUAffinePoint[]): Promise<CurveGPUJacobianPoint[]>;
