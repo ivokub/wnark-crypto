@@ -15,15 +15,6 @@ import (
 	"github.com/ivokub/wnark-crypto/internal/benchutil"
 )
 
-type benchResult struct {
-	name   string
-	init   time.Duration
-	cpu    time.Duration
-	cold   bn254.FrNTTProfile
-	warm   bn254.FrNTTProfile
-	verify bool
-}
-
 func main() {
 	var (
 		minLog = flag.Int("min-log", 10, "minimum input size log2")
@@ -58,28 +49,28 @@ func main() {
 			fmt.Printf(
 				"%d,%s,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%t\n",
 				size,
-				result.name,
-				benchutil.DurationMS(result.init),
-				benchutil.DurationMS(result.cpu),
-				benchutil.DurationMS(result.cold.BitReverse.Total),
-				benchutil.DurationMS(result.cold.Stages.Upload),
-				benchutil.DurationMS(result.cold.Stages.Kernel),
-				benchutil.DurationMS(result.cold.Stages.Readback),
-				benchutil.DurationMS(result.cold.Stages.Total),
-				benchutil.DurationMS(result.cold.Scale.Total),
-				benchutil.DurationMS(result.cold.Total),
-				benchutil.DurationMS(result.init+result.cold.Total),
-				benchutil.DurationMS(result.warm.BitReverse.Total),
-				benchutil.DurationMS(result.warm.Stages.Total),
-				benchutil.DurationMS(result.warm.Scale.Total),
-				benchutil.DurationMS(result.warm.Total),
-				result.verify,
+				result.Name,
+				benchutil.DurationMS(result.Init),
+				benchutil.DurationMS(result.CPU),
+				benchutil.DurationMS(result.Cold.BitReverse.Total),
+				benchutil.DurationMS(result.Cold.Stages.Upload),
+				benchutil.DurationMS(result.Cold.Stages.Kernel),
+				benchutil.DurationMS(result.Cold.Stages.Readback),
+				benchutil.DurationMS(result.Cold.Stages.Total),
+				benchutil.DurationMS(result.Cold.Scale.Total),
+				benchutil.DurationMS(result.Cold.Total),
+				benchutil.DurationMS(result.Init+result.Cold.Total),
+				benchutil.DurationMS(result.Warm.BitReverse.Total),
+				benchutil.DurationMS(result.Warm.Stages.Total),
+				benchutil.DurationMS(result.Warm.Scale.Total),
+				benchutil.DurationMS(result.Warm.Total),
+				result.Verify,
 			)
 		}
 	}
 }
 
-func runSize(size, iters int) ([]benchResult, error) {
+func runSize(size, iters int) ([]benchutil.NTTBenchResult[bn254.FrNTTProfile], error) {
 	domain := gnarkfft.NewDomain(uint64(size))
 	stageTwiddles, inverseStageTwiddles, scale, err := buildTwiddles(domain, size)
 	if err != nil {
@@ -119,46 +110,39 @@ func runBenchmarks(
 	stageTwiddles, inverseStageTwiddles [][]curvegpu.U32x8,
 	scale curvegpu.U32x8,
 	iters int,
-) ([]benchResult, error) {
-	results := make([]benchResult, 0, 2)
-
-	cpuForwardMs := benchutil.TimeCPU(iters, func() {
-		_ = cpuForward(domain, input)
-	})
-	coldForward, warmForward, forwardOut, err := benchutil.AverageProfiled(iters, func() ([]curvegpu.U32x8, bn254.FrNTTProfile, error) {
-		return forwardKernel.kernel.ForwardDITFullPathProfiled(inputGPU, stageTwiddles)
+) ([]benchutil.NTTBenchResult[bn254.FrNTTProfile], error) {
+	return benchutil.RunNTTBenchmarks(iters, []benchutil.NTTBenchCase[bn254.FrNTTProfile]{
+		{
+			Name: "forward_ntt",
+			Init: forwardInit,
+			CPU: func() {
+				_ = cpuForward(domain, input)
+			},
+			GPU: func() ([]curvegpu.U32x8, bn254.FrNTTProfile, error) {
+				out, profile, err := forwardKernel.kernel.ForwardDITFullPathProfiled(inputGPU, stageTwiddles)
+				if err != nil {
+					return nil, bn254.FrNTTProfile{}, fmt.Errorf("bench forward_ntt: %w", err)
+				}
+				return out, profile, nil
+			},
+			Expected: vectorToGPU(forwardExpected),
+		},
+		{
+			Name: "inverse_ntt",
+			Init: inverseInit,
+			CPU: func() {
+				_ = cpuInverse(domain, forwardExpected)
+			},
+			GPU: func() ([]curvegpu.U32x8, bn254.FrNTTProfile, error) {
+				out, profile, err := inverseKernel.kernel.InverseDITFullPathProfiled(forwardExpectedGPU, inverseStageTwiddles, scale)
+				if err != nil {
+					return nil, bn254.FrNTTProfile{}, fmt.Errorf("bench inverse_ntt: %w", err)
+				}
+				return out, profile, nil
+			},
+			Expected: vectorToGPU(inverseExpected),
+		},
 	}, zeroFrNTTProfile, addFrNTTProfile, divFrNTTProfile)
-	if err != nil {
-		return nil, fmt.Errorf("bench forward_ntt: %w", err)
-	}
-	results = append(results, benchResult{
-		name:   "forward_ntt",
-		init:   forwardInit,
-		cpu:    cpuForwardMs,
-		cold:   coldForward,
-		warm:   warmForward,
-		verify: equalGPUBatches(forwardOut, vectorToGPU(forwardExpected)),
-	})
-
-	cpuInverseMs := benchutil.TimeCPU(iters, func() {
-		_ = cpuInverse(domain, forwardExpected)
-	})
-	coldInverse, warmInverse, inverseOut, err := benchutil.AverageProfiled(iters, func() ([]curvegpu.U32x8, bn254.FrNTTProfile, error) {
-		return inverseKernel.kernel.InverseDITFullPathProfiled(forwardExpectedGPU, inverseStageTwiddles, scale)
-	}, zeroFrNTTProfile, addFrNTTProfile, divFrNTTProfile)
-	if err != nil {
-		return nil, fmt.Errorf("bench inverse_ntt: %w", err)
-	}
-	results = append(results, benchResult{
-		name:   "inverse_ntt",
-		init:   inverseInit,
-		cpu:    cpuInverseMs,
-		cold:   coldInverse,
-		warm:   warmInverse,
-		verify: equalGPUBatches(inverseOut, vectorToGPU(inverseExpected)),
-	})
-
-	return results, nil
 }
 
 type kernelSet struct {
@@ -240,18 +224,6 @@ func vectorToGPU(in gnarkfr.Vector) []curvegpu.U32x8 {
 		out[i] = curvegpu.SplitWords4([4]uint64(in[i]))
 	}
 	return out
-}
-
-func equalGPUBatches(a, b []curvegpu.U32x8) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func zeroFrNTTProfile() bn254.FrNTTProfile {
