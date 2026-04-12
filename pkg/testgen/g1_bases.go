@@ -1,6 +1,7 @@
 package testgen
 
 import (
+	"encoding/json"
 	"math/rand"
 
 	gnarkbls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
@@ -17,6 +18,12 @@ const (
 	BLS12381FpBytes = 48
 	BLS12381PointBytes = 144
 )
+
+type BaseFixtureMetadata struct {
+	Count      int    `json:"count"`
+	PointBytes int    `json:"point_bytes"`
+	Format     string `json:"format"`
+}
 
 func BuildRandomBLS12381G1Bases(count int, seed int64) ([]byte, error) {
 	_, _, genAff, _ := gnarkbls12381.Generators()
@@ -43,6 +50,41 @@ func BuildRandomBLS12381G1Bases(count int, seed int64) ([]byte, error) {
 		writeElementLE6(out[base+2*BLS12381FpBytes:base+3*BLS12381FpBytes], oneMontZ)
 	}
 	return out, nil
+}
+
+func BuildSequentialBLS12381G1Bases(count int) ([]byte, error) {
+	_, _, genAff, _ := gnarkbls12381.Generators()
+	oneMontZ := montOneBLS12381()
+	scalars := make([]gnarkbls12381fr.Element, count)
+	for i := range scalars {
+		scalars[i].SetUint64(uint64(i + 1))
+	}
+	points := gnarkbls12381.BatchScalarMultiplicationG1(&genAff, scalars)
+
+	out := make([]byte, count*BLS12381PointBytes)
+	for i := range points {
+		base := i * BLS12381PointBytes
+		writeElementLE6(out[base:base+BLS12381FpBytes], points[i].X)
+		writeElementLE6(out[base+BLS12381FpBytes:base+2*BLS12381FpBytes], points[i].Y)
+		writeElementLE6(out[base+2*BLS12381FpBytes:base+3*BLS12381FpBytes], oneMontZ)
+	}
+	return out, nil
+}
+
+func BuildBLS12381G1BaseFixtureMetadata(count int) BaseFixtureMetadata {
+	return BaseFixtureMetadata{
+		Count:      count,
+		PointBytes: BLS12381PointBytes,
+		Format:     "jacobian_x_y_z_le",
+	}
+}
+
+func MarshalMetadataJSON(meta BaseFixtureMetadata) ([]byte, error) {
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
 }
 
 func BuildRandomBN254G1Bases(count int, seed int64) ([]byte, error) {

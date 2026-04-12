@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/ivokub/wnark-crypto/pkg/testgen"
@@ -13,7 +12,6 @@ import (
 
 type target struct {
 	name string
-	args []string
 	run  func(string) error
 }
 
@@ -57,7 +55,28 @@ var targets = []target{
 	{name: "bls12-381-g1-msm-vectors", run: func(root string) error {
 		return writeJSON(filepath.Join(root, "testdata/vectors/g1/bls12_381_phase8_msm.json"), testgen.BuildBLS12381G1MSMVectors())
 	}},
-	{name: "bls12-381-g1-bases-fixture", args: []string{"go", "run", "./cmd/bls12-381-g1-bases-fixture-gen"}},
+	{name: "bls12-381-g1-bases-fixture", run: func(root string) error {
+		const count = 1 << 19
+		outPath := filepath.Join(root, "testdata/fixtures/g1/bls12_381_bases_2pow19_jacobian.bin")
+		metaPath := filepath.Join(root, "testdata/fixtures/g1/bls12_381_bases_2pow19_jacobian.json")
+		data, err := testgen.BuildSequentialBLS12381G1Bases(count)
+		if err != nil {
+			return err
+		}
+		if err := writeBinary(outPath, data); err != nil {
+			return err
+		}
+		metaJSON, err := testgen.MarshalMetadataJSON(testgen.BuildBLS12381G1BaseFixtureMetadata(count))
+		if err != nil {
+			return err
+		}
+		if err := writeBinary(metaPath, metaJSON); err != nil {
+			return err
+		}
+		fmt.Printf("wrote %s (%d points)\n", outPath, count)
+		fmt.Printf("wrote %s\n", metaPath)
+		return nil
+	}},
 }
 
 func main() {
@@ -97,18 +116,7 @@ func main() {
 
 	for _, t := range selected {
 		fmt.Printf("running %s\n", t.name)
-		if t.run != nil {
-			if err := t.run(repoRoot); err != nil {
-				panic(fmt.Errorf("%s failed: %w", t.name, err))
-			}
-			continue
-		}
-		cmd := exec.Command(t.args[0], t.args[1:]...)
-		cmd.Dir = repoRoot
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Env = os.Environ()
-		if err := cmd.Run(); err != nil {
+		if err := t.run(repoRoot); err != nil {
 			panic(fmt.Errorf("%s failed: %w", t.name, err))
 		}
 	}
@@ -128,4 +136,11 @@ func writeJSON(path string, value any) error {
 	}
 	fmt.Printf("wrote %s\n", path)
 	return nil
+}
+
+func writeBinary(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
 }
