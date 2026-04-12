@@ -29,6 +29,57 @@ type FieldShape struct {
 	ByteSize  int
 }
 
+var generatedShapes = map[CurveID]map[FieldID]FieldShape{
+	CurveBN254: {
+		FieldScalar: {
+			Curve:     CurveBN254,
+			Field:     FieldScalar,
+			HostWords: 4,
+			GPULimbs:  8,
+			ByteSize:  32,
+		},
+		FieldBase: {
+			Curve:     CurveBN254,
+			Field:     FieldBase,
+			HostWords: 4,
+			GPULimbs:  8,
+			ByteSize:  32,
+		},
+	},
+	CurveBLS12381: {
+		FieldScalar: {
+			Curve:     CurveBLS12381,
+			Field:     FieldScalar,
+			HostWords: 4,
+			GPULimbs:  8,
+			ByteSize:  32,
+		},
+		FieldBase: {
+			Curve:     CurveBLS12381,
+			Field:     FieldBase,
+			HostWords: 6,
+			GPULimbs:  12,
+			ByteSize:  48,
+		},
+	},
+	CurveBLS12377: {
+		FieldScalar: {
+			Curve:     CurveBLS12377,
+			Field:     FieldScalar,
+			HostWords: 4,
+			GPULimbs:  8,
+			ByteSize:  32,
+		},
+		FieldBase: {
+			Curve:     CurveBLS12377,
+			Field:     FieldBase,
+			HostWords: 6,
+			GPULimbs:  12,
+			ByteSize:  48,
+		},
+	},
+}
+
 func ShapeFor(curve CurveID, field FieldID) (FieldShape, error) {
 	fields, ok := generatedShapes[curve]
 	if !ok {

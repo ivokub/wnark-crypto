@@ -23,7 +23,7 @@ This remains a primitive-layer project. It is not yet a Groth16 prover or pairin
 ### Shared infrastructure
 
 - Shared 4-word and 6-word host/GPU field layouts are in place.
-- Curve manifests and codegen-backed layout scaffolding are started for multi-curve support.
+- Shared curve layout metadata is in place for BN254, BLS12-381, and BLS12-377 shape support.
 - Shared browser MSM layers now exist for:
   - metadata construction
   - GPU runtime helpers
