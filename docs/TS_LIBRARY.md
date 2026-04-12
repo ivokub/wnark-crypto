@@ -69,3 +69,8 @@ Smoke tests and benchmarks stay under the unified browser harness page:
 - `web/tests/browser/curvegpu.html`
 
 Those pages are harnesses for validation and performance work. They are not the intended production entrypoint for consumers of the library.
+
+For MSM benchmarks, fixed G1 base fixtures live under `testdata/fixtures/g1`. The checked-in BLS12-381 fixture is used automatically, and larger local fixtures can be generated with:
+
+- `make fixture-bn254-g1 COUNT=<points>`
+- `make fixture-bls12_381-g1 COUNT=<points>`

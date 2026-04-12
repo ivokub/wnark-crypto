@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	BN254FpBytes    = 32
-	BN254PointBytes = 96
-	BLS12381FpBytes = 48
+	BN254FpBytes       = 32
+	BN254PointBytes    = 96
+	BLS12381FpBytes    = 48
 	BLS12381PointBytes = 144
 )
 
@@ -71,10 +71,37 @@ func BuildSequentialBLS12381G1Bases(count int) ([]byte, error) {
 	return out, nil
 }
 
+func BuildSequentialBN254G1Bases(count int) ([]byte, error) {
+	_, _, genAff, _ := gnarkbn254.Generators()
+	oneMontZ := montOneBN254()
+	scalars := make([]gnarkbn254fr.Element, count)
+	for i := range scalars {
+		scalars[i].SetUint64(uint64(i + 1))
+	}
+	points := gnarkbn254.BatchScalarMultiplicationG1(&genAff, scalars)
+
+	out := make([]byte, count*BN254PointBytes)
+	for i := range points {
+		base := i * BN254PointBytes
+		writeElementLE4(out[base:base+BN254FpBytes], points[i].X)
+		writeElementLE4(out[base+BN254FpBytes:base+2*BN254FpBytes], points[i].Y)
+		writeElementLE4(out[base+2*BN254FpBytes:base+3*BN254FpBytes], oneMontZ)
+	}
+	return out, nil
+}
+
 func BuildBLS12381G1BaseFixtureMetadata(count int) BaseFixtureMetadata {
 	return BaseFixtureMetadata{
 		Count:      count,
 		PointBytes: BLS12381PointBytes,
+		Format:     "jacobian_x_y_z_le",
+	}
+}
+
+func BuildBN254G1BaseFixtureMetadata(count int) BaseFixtureMetadata {
+	return BaseFixtureMetadata{
+		Count:      count,
+		PointBytes: BN254PointBytes,
 		Format:     "jacobian_x_y_z_le",
 	}
 }

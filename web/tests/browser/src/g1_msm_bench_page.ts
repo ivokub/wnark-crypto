@@ -38,7 +38,6 @@ type CurveBenchConfig = {
   scalarVectorsPath: string;
   fixtureJSONPath?: string;
   fixtureBinPath?: string;
-  serverBinPath?: string;
 };
 
 const CURVE_CONFIGS: Record<SupportedCurveID, CurveBenchConfig> = {
@@ -49,7 +48,8 @@ const CURVE_CONFIGS: Record<SupportedCurveID, CurveBenchConfig> = {
     coordinateBytes: 32,
     pointBytes: 96,
     scalarVectorsPath: "/testdata/vectors/g1/bn254_g1_scalar_mul.json",
-    serverBinPath: "/api/bn254/g1/bases.bin",
+    fixtureJSONPath: "/testdata/fixtures/g1/bn254_bases_jacobian.json?v=1",
+    fixtureBinPath: "/testdata/fixtures/g1/bn254_bases_jacobian.bin?v=1",
   },
   bls12_381: {
     curve: "bls12_381",
@@ -58,9 +58,8 @@ const CURVE_CONFIGS: Record<SupportedCurveID, CurveBenchConfig> = {
     coordinateBytes: 48,
     pointBytes: 144,
     scalarVectorsPath: "/testdata/vectors/g1/bls12_381_g1_scalar_mul.json",
-    fixtureJSONPath: "/testdata/fixtures/g1/bls12_381_bases_2pow19_jacobian.json?v=1",
-    fixtureBinPath: "/testdata/fixtures/g1/bls12_381_bases_2pow19_jacobian.bin?v=1",
-    serverBinPath: "/api/bls12-381/g1/bases.bin",
+    fixtureJSONPath: "/testdata/fixtures/g1/bls12_381_bases_jacobian.json?v=1",
+    fixtureBinPath: "/testdata/fixtures/g1/bls12_381_bases_jacobian.bin?v=1",
   },
 };
 
@@ -126,6 +125,10 @@ function makeMSMScalars(count: number): CurveGPUElementBytes[] {
   return makeRandomScalarBatch(count).hexes.map((hex) => hexToBytes(hex) as CurveGPUElementBytes);
 }
 
+function fixtureGenerationHint(curve: SupportedCurveID, size: number): string {
+  return `make fixture-${curve}-g1 COUNT=${size}`;
+}
+
 async function buildGeneratedBases(
   curve: CurveModule,
   coordinateBytes: number,
@@ -164,8 +167,8 @@ async function runBenchmark(): Promise<void> {
       pointBytes: config.pointBytes,
       fixtureJSONPath: config.fixtureJSONPath,
       fixtureBinPath: config.fixtureBinPath,
-      serverBinPath: config.serverBinPath,
       generatedLoadBases: async (size) => buildGeneratedBases(curve, config.coordinateBytes, config.pointBytes, generator, size),
+      generateHint: (size) => fixtureGenerationHint(config.curve, size <= 0 ? (1 << 19) : size),
     });
     const baseSourceInit = await baseSourceProvider.init();
     const initMs = performance.now() - initStart;

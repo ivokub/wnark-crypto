@@ -51,11 +51,10 @@ This remains a primitive-layer project. It is not yet a Groth16 prover or pairin
 - A consumer-oriented browser example now exists at `web/examples/library_example.html`.
 - Browser MSM benchmark base selection now follows one shared priority order:
   - fixture if available
-  - otherwise benchmark server if available
   - otherwise generated bases
 - A shared `pkg/testgen` package now exists for reusable benchmark/test data generation.
 - `go generate ./testdata` now regenerates the tracked curve testdata through a single repo entrypoint: `cmd/curvegpu-testdata-gen`.
-- `cmd/curvegpu-testdata-gen` now calls `pkg/testgen` directly for field ops, vector ops, G1 ops, scalar-mul vectors, MSM vectors, BN254 NTT data, and the BLS12-381 base fixture.
+- `cmd/curvegpu-testdata-gen` now calls `pkg/testgen` directly for field ops, vector ops, G1 ops, scalar-mul vectors, MSM vectors, BN254 NTT data, and G1 base fixtures.
 - The old per-dataset `cmd/*-vector-gen` and `cmd/*-ntt-domain-gen` wrappers have been removed.
 
 ### BN254
@@ -92,7 +91,6 @@ This remains a primitive-layer project. It is not yet a Groth16 prover or pairin
 
 - Local Heliax `webgpu-groth16` MSM wrappers were benchmarked natively and in browser.
 - This gave an apples-to-apples BLS12-381 browser comparison against our framework.
-- A Go benchmark server now exists and serves deterministic BN254 and BLS12-381 base sets for browser MSM runs.
 
 ## Current Benchmark Picture
 
@@ -140,9 +138,9 @@ The goal is for benchmarks and smokes to remain harnesses, while the maintained 
 
 Most browser runtime duplication is gone, but there is still room to simplify the remaining curve-config seams so the implementation differs mostly by declarative curve metadata.
 
-### 3. Expand the Go-backed benchmark data server and fixture model
+### 3. Expand the local fixture-generation model
 
-The benchmark server is in place and already serves BN254 and BLS12-381 base sets, but the overall data-source model still needs refinement. The static `2^19` BLS12-381 fixture remains useful as a proving-key-style benchmark, but it has limits:
+The checked-in BLS12-381 fixture remains useful as a proving-key-style benchmark, but the overall local fixture model still needs refinement:
 
 - fixed maximum size
 - large static artifact
@@ -150,12 +148,12 @@ The benchmark server is in place and already serves BN254 and BLS12-381 base set
 
 Next benchmark infrastructure task:
 
-- keep growing the server-backed path as the primary large-run source
-- continue generating valid random or deterministic base points in Go via `gnark-crypto`
-- support larger prefix slices on demand for browser benchmarks
-- keep the existing static fixture path as a fallback
+- keep using valid curve points for correctness-preserving benchmarks
+- use checked-in fixtures where they exist
+- let users generate larger local fixtures with `go generate ./testdata` or `make fixture-...`
+- keep generated in-browser bases only as a convenience fallback where no fixture is present at all
 
-This should better model the practical workflow of loading proving-key-like base sets without forcing us to check in larger and larger blobs.
+This should better model the practical workflow of loading proving-key-like base sets without requiring an auxiliary server.
 
 ### 4. Consolidate the remaining generation model around `pkg/testgen`
 
@@ -166,7 +164,6 @@ The user-facing generator surface is now where it should be:
 
 Remaining work here is narrower:
 
-- reuse more of `pkg/testgen` between fixture generation and the benchmark server
 - move toward a more manifest-driven generation model
 - adopt more of the `gnark-crypto/internal/generator` style for constants and curve-specific bindings
 

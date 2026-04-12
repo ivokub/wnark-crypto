@@ -21,20 +21,10 @@ export type FixtureMetadata = {
   format: string;
 };
 
-export type ByteBaseSource = "fixture" | "server";
-
-export type PreferredByteBaseSource = ByteBaseSource | "generated";
-
-export type ByteBaseSourceContext = {
-  baseSource: ByteBaseSource;
-  baseSeed: number;
-  baseFixture: Uint8Array | null;
-  fixtureMeta: FixtureMetadata | null;
-};
+export type PreferredByteBaseSource = "fixture" | "generated";
 
 export type PreferredByteBaseSourceContext = {
-  baseSource: PreferredByteBaseSource | "auto";
-  baseSeed: number;
+  baseSource: PreferredByteBaseSource;
   baseFixture: Uint8Array | null;
   fixtureMeta: FixtureMetadata | null;
 };
@@ -47,98 +37,6 @@ function slicePointByteFixture(fixture: Uint8Array, pointBytes: number, count: n
   return fixture.slice(0, byteLength);
 }
 
-export function createGeneratedBaseSource<TBases>(options: {
-  loadBases: (size: number) => Promise<TBases>;
-}): BaseSourceProvider<TBases, null> {
-  return {
-    init: async () => ({ context: null }),
-    loadBases: async ({ size }) => {
-      const prepStart = performance.now();
-      const bases = await options.loadBases(size);
-      return { bases, prepMs: performance.now() - prepStart };
-    },
-  };
-}
-
-export function createFixtureOrServerByteBaseSource(options: {
-  locationSearch: string;
-  pointBytes: number;
-  fixtureJSONPath: string;
-  fixtureBinPath: string;
-  serverBinPath: string;
-  defaultSource?: ByteBaseSource;
-  defaultSeed?: number;
-}): BaseSourceProvider<Uint8Array, ByteBaseSourceContext> {
-  const params = new URLSearchParams(options.locationSearch);
-  const selectedSource = ((): ByteBaseSource => {
-    const value = params.get("base-source") ?? params.get("baseSource") ?? options.defaultSource ?? "fixture";
-    return value === "server" ? "server" : "fixture";
-  })();
-  const selectedSeed = ((): number => {
-    const raw = params.get("seed");
-    if (!raw) {
-      return options.defaultSeed ?? 1;
-    }
-    const parsed = Number.parseInt(raw, 10);
-    return Number.isInteger(parsed) ? parsed : (options.defaultSeed ?? 1);
-  })();
-
-  return {
-    init: async () => {
-      let baseFixture: Uint8Array | null = null;
-      let fixtureMeta: FixtureMetadata | null = null;
-      let fixtureLoadMs = 0;
-      if (selectedSource === "fixture") {
-        [fixtureMeta, baseFixture] = await Promise.all([
-          fetchJSON<FixtureMetadata>(options.fixtureJSONPath),
-          (async () => {
-            const start = performance.now();
-            const bytes = await fetchBytes(options.fixtureBinPath);
-            fixtureLoadMs = performance.now() - start;
-            return bytes;
-          })(),
-        ]);
-        if (fixtureMeta.point_bytes !== options.pointBytes) {
-          throw new Error(`unexpected fixture point size: ${fixtureMeta.point_bytes}`);
-        }
-        if (baseFixture.byteLength !== fixtureMeta.count * fixtureMeta.point_bytes) {
-          throw new Error(
-            `fixture length mismatch: got ${baseFixture.byteLength}, want ${fixtureMeta.count * fixtureMeta.point_bytes}`,
-          );
-        }
-      }
-      return {
-        context: {
-          baseSource: selectedSource,
-          baseSeed: selectedSeed,
-          baseFixture,
-          fixtureMeta,
-        },
-        postMetricLines:
-          selectedSource === "fixture"
-            ? [`fixture_load_ms = ${fixtureLoadMs.toFixed(3)}`]
-            : [`base_source = server`, `base_seed = ${selectedSeed}`],
-      };
-    },
-    loadBases: async ({ context, size }) => {
-      const prepStart = performance.now();
-      let bases: Uint8Array;
-      if (context.baseSource === "fixture") {
-        if (!context.baseFixture || !context.fixtureMeta) {
-          throw new Error("fixture source selected but fixture was not loaded");
-        }
-        bases = slicePointByteFixture(context.baseFixture, options.pointBytes, size);
-      } else {
-        bases = await fetchBytes(`${options.serverBinPath}?count=${size}&seed=${context.baseSeed}`);
-        if (bases.byteLength !== size * options.pointBytes) {
-          throw new Error(`server base length mismatch: got ${bases.byteLength}, want ${size * options.pointBytes}`);
-        }
-      }
-      return { bases, prepMs: performance.now() - prepStart };
-    },
-  };
-}
-
 function isFetchFailure(error: unknown): boolean {
   return error instanceof Error;
 }
@@ -148,24 +46,13 @@ export function createPreferredByteBaseSource(options: {
   pointBytes: number;
   fixtureJSONPath?: string;
   fixtureBinPath?: string;
-  serverBinPath?: string;
-  defaultSeed?: number;
   generatedLoadBases?: (size: number) => Promise<Uint8Array>;
+  generateHint?: (size: number) => string;
 }): BaseSourceProvider<Uint8Array, PreferredByteBaseSourceContext> {
   const params = new URLSearchParams(options.locationSearch);
   const explicitSourceRaw = params.get("base-source") ?? params.get("baseSource");
   const explicitSource: PreferredByteBaseSource | null =
-    explicitSourceRaw === "fixture" || explicitSourceRaw === "server" || explicitSourceRaw === "generated"
-      ? explicitSourceRaw
-      : null;
-  const selectedSeed = ((): number => {
-    const raw = params.get("seed");
-    if (!raw) {
-      return options.defaultSeed ?? 1;
-    }
-    const parsed = Number.parseInt(raw, 10);
-    return Number.isInteger(parsed) ? parsed : (options.defaultSeed ?? 1);
-  })();
+    explicitSourceRaw === "fixture" || explicitSourceRaw === "generated" ? explicitSourceRaw : null;
 
   async function tryLoadFixture(): Promise<{ fixtureMeta: FixtureMetadata; baseFixture: Uint8Array; fixtureLoadMs: number } | null> {
     if (!options.fixtureJSONPath || !options.fixtureBinPath) {
@@ -188,14 +75,30 @@ export function createPreferredByteBaseSource(options: {
     return { fixtureMeta, baseFixture, fixtureLoadMs };
   }
 
+  function missingFixtureMessage(size: number): string {
+    const base = "no local G1 base fixture is available";
+    if (!options.generateHint) {
+      return base;
+    }
+    const hintSize = size > 0 ? size : 1 << 19;
+    return `${base}; generate one with \`${options.generateHint(hintSize)}\``;
+  }
+
+  function smallFixtureMessage(pointCount: number, size: number): string {
+    const base = `fixture has ${pointCount} points, need ${size}`;
+    if (!options.generateHint) {
+      return base;
+    }
+    return `${base}; generate a larger one with \`${options.generateHint(size)}\``;
+  }
+
   return {
     init: async () => {
       let fixtureMeta: FixtureMetadata | null = null;
       let baseFixture: Uint8Array | null = null;
       let fixtureLoadMs: number | null = null;
 
-      const tryFixtureFirst = explicitSource === null || explicitSource === "fixture";
-      if (tryFixtureFirst) {
+      if (explicitSource !== "generated") {
         try {
           const loaded = await tryLoadFixture();
           if (loaded) {
@@ -210,26 +113,36 @@ export function createPreferredByteBaseSource(options: {
         }
       }
 
-      const postMetricLines: string[] = [];
-      if (fixtureLoadMs !== null) {
-        postMetricLines.push("base_source = fixture");
-        postMetricLines.push(`fixture_load_ms = ${fixtureLoadMs.toFixed(3)}`);
-      } else if (explicitSource !== null) {
-        postMetricLines.push(`base_source = ${explicitSource}`);
-        if (explicitSource === "server") {
-          postMetricLines.push(`base_seed = ${selectedSeed}`);
+      let baseSource: PreferredByteBaseSource;
+      if (explicitSource === "fixture") {
+        if (!baseFixture || !fixtureMeta) {
+          throw new Error(missingFixtureMessage(0));
         }
+        baseSource = "fixture";
+      } else if (explicitSource === "generated") {
+        if (!options.generatedLoadBases) {
+          throw new Error("generated base source is not configured");
+        }
+        baseSource = "generated";
+      } else if (baseFixture && fixtureMeta) {
+        baseSource = "fixture";
+      } else if (options.generatedLoadBases) {
+        baseSource = "generated";
       } else {
-        postMetricLines.push("base_source = auto");
-        if (options.serverBinPath) {
-          postMetricLines.push(`base_seed = ${selectedSeed}`);
-        }
+        throw new Error(missingFixtureMessage(0));
+      }
+
+      const postMetricLines: string[] = [`base_source = ${baseSource}`];
+      if (fixtureLoadMs !== null) {
+        postMetricLines.push(`fixture_load_ms = ${fixtureLoadMs.toFixed(3)}`);
+      }
+      if (fixtureMeta) {
+        postMetricLines.push(`fixture_points = ${fixtureMeta.count}`);
       }
 
       return {
         context: {
-          baseSource: explicitSource ?? "auto",
-          baseSeed: selectedSeed,
+          baseSource,
           baseFixture,
           fixtureMeta,
         },
@@ -239,56 +152,23 @@ export function createPreferredByteBaseSource(options: {
     loadBases: async ({ context, size }) => {
       const prepStart = performance.now();
 
-      const useFixture =
-        (context.baseSource === "fixture" || context.baseSource === "auto") &&
-        context.baseFixture &&
-        context.baseFixture.byteLength >= size * options.pointBytes;
-      if (useFixture) {
+      if (context.baseSource === "fixture") {
+        if (!context.baseFixture || !context.fixtureMeta) {
+          throw new Error(missingFixtureMessage(size));
+        }
+        if (context.fixtureMeta.count < size) {
+          throw new Error(smallFixtureMessage(context.fixtureMeta.count, size));
+        }
         return {
-          bases: slicePointByteFixture(context.baseFixture as Uint8Array, options.pointBytes, size),
+          bases: slicePointByteFixture(context.baseFixture, options.pointBytes, size),
           prepMs: performance.now() - prepStart,
         };
       }
 
-      const tryServer = async (): Promise<Uint8Array> => {
-        if (!options.serverBinPath) {
-          throw new Error("server base source is not configured");
-        }
-        const bases = await fetchBytes(`${options.serverBinPath}?count=${size}&seed=${context.baseSeed}`);
-        if (bases.byteLength !== size * options.pointBytes) {
-          throw new Error(`server base length mismatch: got ${bases.byteLength}, want ${size * options.pointBytes}`);
-        }
-        return bases;
-      };
-
-      if (context.baseSource === "server") {
-        return { bases: await tryServer(), prepMs: performance.now() - prepStart };
+      if (!options.generatedLoadBases) {
+        throw new Error("generated base source is not configured");
       }
-      if (context.baseSource === "generated") {
-        if (!options.generatedLoadBases) {
-          throw new Error("generated base source is not configured");
-        }
-        return { bases: await options.generatedLoadBases(size), prepMs: performance.now() - prepStart };
-      }
-
-      if (context.baseSource === "auto" && options.serverBinPath) {
-        try {
-          return { bases: await tryServer(), prepMs: performance.now() - prepStart };
-        } catch (error) {
-          if (!isFetchFailure(error)) {
-            throw error;
-          }
-        }
-      }
-
-      if (options.generatedLoadBases) {
-        return { bases: await options.generatedLoadBases(size), prepMs: performance.now() - prepStart };
-      }
-
-      if (context.baseFixture) {
-        throw new Error(`fixture has ${Math.floor(context.baseFixture.byteLength / options.pointBytes)} points, need ${size}`);
-      }
-      throw new Error("no available base source");
+      return { bases: await options.generatedLoadBases(size), prepMs: performance.now() - prepStart };
     },
   };
 }
