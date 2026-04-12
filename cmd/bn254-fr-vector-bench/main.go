@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"math/bits"
 	mrand "math/rand"
-	"strings"
 	"time"
 
 	gnarkfr "github.com/consensys/gnark-crypto/ecc/bn254/fr"
 
 	"github.com/ivokub/wnark-crypto/go/curvegpu"
 	"github.com/ivokub/wnark-crypto/go/curvegpu/bn254"
+	"github.com/ivokub/wnark-crypto/internal/benchutil"
 )
 
 type benchResult struct {
@@ -64,7 +64,7 @@ func main() {
 		vectorKernel.Close()
 		dev.Close()
 		if err != nil {
-			if isResourceError(err) {
+			if benchutil.IsResourceError(err) {
 				fmt.Printf("# stop at size=2^%d: %v\n", logSize, err)
 				break
 			}
@@ -75,17 +75,17 @@ func main() {
 				"%d,%s,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%t\n",
 				size,
 				result.name,
-				durationMS(initElapsed),
-				durationMS(result.cpu),
-				durationMS(result.cold.Upload),
-				durationMS(result.cold.Kernel),
-				durationMS(result.cold.Readback),
-				durationMS(result.cold.Total),
-				durationMS(initElapsed + result.cold.Total),
-				durationMS(result.warm.Upload),
-				durationMS(result.warm.Kernel),
-				durationMS(result.warm.Readback),
-				durationMS(result.warm.Total),
+				benchutil.DurationMS(initElapsed),
+				benchutil.DurationMS(result.cpu),
+				benchutil.DurationMS(result.cold.Upload),
+				benchutil.DurationMS(result.cold.Kernel),
+				benchutil.DurationMS(result.cold.Readback),
+				benchutil.DurationMS(result.cold.Total),
+				benchutil.DurationMS(initElapsed+result.cold.Total),
+				benchutil.DurationMS(result.warm.Upload),
+				benchutil.DurationMS(result.warm.Kernel),
+				benchutil.DurationMS(result.warm.Readback),
+				benchutil.DurationMS(result.warm.Total),
 				result.verify,
 			)
 		}
@@ -108,13 +108,13 @@ func runBenchmarks(
 
 	results := make([]benchResult, 0, 4)
 
-	cpuAdd := timeCPU(iters, func() {
+	cpuAdd := benchutil.TimeCPU(iters, func() {
 		out := make(gnarkfr.Vector, len(left))
 		out.Add(left, right)
 	})
-	coldAdd, warmAdd, gpuAddOut, err := timeGPUProfiled(iters, func() ([]curvegpu.U32x8, bn254.FrVectorProfile, error) {
+	coldAdd, warmAdd, gpuAddOut, err := benchutil.AverageProfiled(iters, func() ([]curvegpu.U32x8, bn254.FrVectorProfile, error) {
 		return vectorKernel.RunProfiled(bn254.FrVectorOpAdd, leftGPU, rightGPU, 0)
-	})
+	}, zeroFrVectorProfile, addFrVectorProfile, divFrVectorProfile)
 	if err != nil {
 		return nil, fmt.Errorf("bench add: %w", err)
 	}
@@ -126,13 +126,13 @@ func runBenchmarks(
 		verify: equalGPUBatches(gpuAddOut, vectorToGPU(addExpected)),
 	})
 
-	cpuSub := timeCPU(iters, func() {
+	cpuSub := benchutil.TimeCPU(iters, func() {
 		out := make(gnarkfr.Vector, len(left))
 		out.Sub(left, right)
 	})
-	coldSub, warmSub, gpuSubOut, err := timeGPUProfiled(iters, func() ([]curvegpu.U32x8, bn254.FrVectorProfile, error) {
+	coldSub, warmSub, gpuSubOut, err := benchutil.AverageProfiled(iters, func() ([]curvegpu.U32x8, bn254.FrVectorProfile, error) {
 		return vectorKernel.RunProfiled(bn254.FrVectorOpSub, leftGPU, rightGPU, 0)
-	})
+	}, zeroFrVectorProfile, addFrVectorProfile, divFrVectorProfile)
 	if err != nil {
 		return nil, fmt.Errorf("bench sub: %w", err)
 	}
@@ -144,13 +144,13 @@ func runBenchmarks(
 		verify: equalGPUBatches(gpuSubOut, vectorToGPU(subExpected)),
 	})
 
-	cpuMul := timeCPU(iters, func() {
+	cpuMul := benchutil.TimeCPU(iters, func() {
 		out := make(gnarkfr.Vector, len(left))
 		out.Mul(left, right)
 	})
-	coldMul, warmMul, gpuMulOut, err := timeGPUProfiled(iters, func() ([]curvegpu.U32x8, bn254.FrVectorProfile, error) {
+	coldMul, warmMul, gpuMulOut, err := benchutil.AverageProfiled(iters, func() ([]curvegpu.U32x8, bn254.FrVectorProfile, error) {
 		return vectorKernel.RunProfiled(bn254.FrVectorOpMulFactors, leftGPU, rightGPU, 0)
-	})
+	}, zeroFrVectorProfile, addFrVectorProfile, divFrVectorProfile)
 	if err != nil {
 		return nil, fmt.Errorf("bench mul: %w", err)
 	}
@@ -162,16 +162,16 @@ func runBenchmarks(
 		verify: equalGPUBatches(gpuMulOut, vectorToGPU(mulExpected)),
 	})
 
-	cpuBitReverse := timeCPU(iters, func() {
+	cpuBitReverse := benchutil.TimeCPU(iters, func() {
 		_ = bitReverse(left)
 	})
-	logCount, err := bitReverseLogCount(len(leftGPU))
+	logCount, err := benchutil.BitReverseLogCount(len(leftGPU))
 	if err != nil {
 		return nil, err
 	}
-	coldBitReverse, warmBitReverse, gpuBitReverseOut, err := timeGPUProfiled(iters, func() ([]curvegpu.U32x8, bn254.FrVectorProfile, error) {
+	coldBitReverse, warmBitReverse, gpuBitReverseOut, err := benchutil.AverageProfiled(iters, func() ([]curvegpu.U32x8, bn254.FrVectorProfile, error) {
 		return vectorKernel.RunProfiled(bn254.FrVectorOpBitReverseCopy, leftGPU, nil, logCount)
-	})
+	}, zeroFrVectorProfile, addFrVectorProfile, divFrVectorProfile)
 	if err != nil {
 		return nil, fmt.Errorf("bench bit_reverse: %w", err)
 	}
@@ -227,63 +227,21 @@ func equalGPUBatches(a, b []curvegpu.U32x8) bool {
 	return true
 }
 
-func timeCPU(iters int, fn func()) time.Duration {
-	fn()
-	start := time.Now()
-	for i := 0; i < iters; i++ {
-		fn()
-	}
-	return time.Since(start) / time.Duration(iters)
+func zeroFrVectorProfile() bn254.FrVectorProfile {
+	return bn254.FrVectorProfile{}
 }
 
-func timeGPUProfiled(iters int, fn func() ([]curvegpu.U32x8, bn254.FrVectorProfile, error)) (bn254.FrVectorProfile, bn254.FrVectorProfile, []curvegpu.U32x8, error) {
-	last, cold, err := fn()
-	if err != nil {
-		return bn254.FrVectorProfile{}, bn254.FrVectorProfile{}, nil, err
-	}
-	if iters == 1 {
-		return cold, cold, last, nil
-	}
-	var warm bn254.FrVectorProfile
-	for i := 0; i < iters; i++ {
-		var profile bn254.FrVectorProfile
-		last, profile, err = fn()
-		if err != nil {
-			return bn254.FrVectorProfile{}, bn254.FrVectorProfile{}, nil, err
-		}
-		warm.Upload += profile.Upload
-		warm.Kernel += profile.Kernel
-		warm.Readback += profile.Readback
-		warm.Total += profile.Total
-	}
-	divisor := time.Duration(iters)
-	warm.Upload /= divisor
-	warm.Kernel /= divisor
-	warm.Readback /= divisor
-	warm.Total /= divisor
-	return cold, warm, last, nil
+func addFrVectorProfile(dst *bn254.FrVectorProfile, src bn254.FrVectorProfile) {
+	dst.Upload += src.Upload
+	dst.Kernel += src.Kernel
+	dst.Readback += src.Readback
+	dst.Total += src.Total
 }
 
-func durationMS(d time.Duration) float64 {
-	return float64(d) / float64(time.Millisecond)
-}
-
-func isResourceError(err error) bool {
-	if err == nil {
-		return false
-	}
-	text := strings.ToLower(err.Error())
-	return strings.Contains(text, "buffer") ||
-		strings.Contains(text, "resource") ||
-		strings.Contains(text, "memory")
-}
-
-func bitReverseLogCount(count int) (uint32, error) {
-	if count <= 0 {
-		return 0, fmt.Errorf("bit reverse requires non-zero input")
-	}
-	if count&(count-1) != 0 {
-		return 0, fmt.Errorf("bit reverse requires power-of-two length, got %d", count)
-	}
-	return uint32(bits.Len(uint(count)) - 1), nil
+func divFrVectorProfile(dst *bn254.FrVectorProfile, divisor int) {
+	d := time.Duration(divisor)
+	dst.Upload /= d
+	dst.Kernel /= d
+	dst.Readback /= d
+	dst.Total /= d
 }

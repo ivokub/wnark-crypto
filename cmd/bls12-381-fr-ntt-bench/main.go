@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	mrand "math/rand"
-	"strings"
 	"time"
 
 	gnarkfr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/ivokub/wnark-crypto/go/curvegpu"
 	bls12381 "github.com/ivokub/wnark-crypto/go/curvegpu/bls12_381"
+	"github.com/ivokub/wnark-crypto/internal/benchutil"
 )
 
 type benchResult struct {
@@ -48,7 +48,7 @@ func main() {
 		size := 1 << logSize
 		results, err := runSize(size, *iters)
 		if err != nil {
-			if isResourceError(err) {
+			if benchutil.IsResourceError(err) {
 				fmt.Printf("# stop at size=2^%d: %v\n", logSize, err)
 				break
 			}
@@ -59,20 +59,20 @@ func main() {
 				"%d,%s,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%t\n",
 				size,
 				result.name,
-				durationMS(result.init),
-				durationMS(result.cpu),
-				durationMS(result.cold.BitReverse.Total),
-				durationMS(result.cold.Stages.Upload),
-				durationMS(result.cold.Stages.Kernel),
-				durationMS(result.cold.Stages.Readback),
-				durationMS(result.cold.Stages.Total),
-				durationMS(result.cold.Scale.Total),
-				durationMS(result.cold.Total),
-				durationMS(result.init+result.cold.Total),
-				durationMS(result.warm.BitReverse.Total),
-				durationMS(result.warm.Stages.Total),
-				durationMS(result.warm.Scale.Total),
-				durationMS(result.warm.Total),
+				benchutil.DurationMS(result.init),
+				benchutil.DurationMS(result.cpu),
+				benchutil.DurationMS(result.cold.BitReverse.Total),
+				benchutil.DurationMS(result.cold.Stages.Upload),
+				benchutil.DurationMS(result.cold.Stages.Kernel),
+				benchutil.DurationMS(result.cold.Stages.Readback),
+				benchutil.DurationMS(result.cold.Stages.Total),
+				benchutil.DurationMS(result.cold.Scale.Total),
+				benchutil.DurationMS(result.cold.Total),
+				benchutil.DurationMS(result.init+result.cold.Total),
+				benchutil.DurationMS(result.warm.BitReverse.Total),
+				benchutil.DurationMS(result.warm.Stages.Total),
+				benchutil.DurationMS(result.warm.Scale.Total),
+				benchutil.DurationMS(result.warm.Total),
 				result.verify,
 			)
 		}
@@ -122,19 +122,19 @@ func runBenchmarks(
 ) ([]benchResult, error) {
 	results := make([]benchResult, 0, 2)
 
-	cpuForwardMs := timeCPU(iters, func() { _ = cpuForward(domain, input) })
-	coldForward, warmForward, forwardOut, err := timeNTTProfiled(iters, func() ([]curvegpu.U32x8, bls12381.FrNTTProfile, error) {
+	cpuForwardMs := benchutil.TimeCPU(iters, func() { _ = cpuForward(domain, input) })
+	coldForward, warmForward, forwardOut, err := benchutil.AverageProfiled(iters, func() ([]curvegpu.U32x8, bls12381.FrNTTProfile, error) {
 		return forwardKernel.kernel.ForwardDITFullPathProfiled(inputGPU, stageTwiddles)
-	})
+	}, zeroFrNTTProfile, addFrNTTProfile, divFrNTTProfile)
 	if err != nil {
 		return nil, fmt.Errorf("bench forward_ntt: %w", err)
 	}
 	results = append(results, benchResult{"forward_ntt", forwardInit, cpuForwardMs, coldForward, warmForward, equalGPUBatches(forwardOut, vectorToGPU(forwardExpected))})
 
-	cpuInverseMs := timeCPU(iters, func() { _ = cpuInverse(domain, forwardExpected) })
-	coldInverse, warmInverse, inverseOut, err := timeNTTProfiled(iters, func() ([]curvegpu.U32x8, bls12381.FrNTTProfile, error) {
+	cpuInverseMs := benchutil.TimeCPU(iters, func() { _ = cpuInverse(domain, forwardExpected) })
+	coldInverse, warmInverse, inverseOut, err := benchutil.AverageProfiled(iters, func() ([]curvegpu.U32x8, bls12381.FrNTTProfile, error) {
 		return inverseKernel.kernel.InverseDITFullPathProfiled(forwardExpectedGPU, inverseStageTwiddles, scale)
-	})
+	}, zeroFrNTTProfile, addFrNTTProfile, divFrNTTProfile)
 	if err != nil {
 		return nil, fmt.Errorf("bench inverse_ntt: %w", err)
 	}
@@ -236,72 +236,39 @@ func equalGPUBatches(a, b []curvegpu.U32x8) bool {
 	return true
 }
 
-func timeCPU(iters int, fn func()) time.Duration {
-	fn()
-	start := time.Now()
-	for i := 0; i < iters; i++ {
-		fn()
-	}
-	return time.Since(start) / time.Duration(iters)
+func zeroFrNTTProfile() bls12381.FrNTTProfile {
+	return bls12381.FrNTTProfile{}
 }
 
-func timeNTTProfiled(iters int, fn func() ([]curvegpu.U32x8, bls12381.FrNTTProfile, error)) (bls12381.FrNTTProfile, bls12381.FrNTTProfile, []curvegpu.U32x8, error) {
-	last, cold, err := fn()
-	if err != nil {
-		return bls12381.FrNTTProfile{}, bls12381.FrNTTProfile{}, nil, err
-	}
-	if iters == 1 {
-		return cold, cold, last, nil
-	}
-	var warm bls12381.FrNTTProfile
-	for i := 0; i < iters; i++ {
-		var profile bls12381.FrNTTProfile
-		last, profile, err = fn()
-		if err != nil {
-			return bls12381.FrNTTProfile{}, bls12381.FrNTTProfile{}, nil, err
-		}
-		warm.BitReverse.Upload += profile.BitReverse.Upload
-		warm.BitReverse.Kernel += profile.BitReverse.Kernel
-		warm.BitReverse.Readback += profile.BitReverse.Readback
-		warm.BitReverse.Total += profile.BitReverse.Total
-		warm.Stages.Upload += profile.Stages.Upload
-		warm.Stages.Kernel += profile.Stages.Kernel
-		warm.Stages.Readback += profile.Stages.Readback
-		warm.Stages.Total += profile.Stages.Total
-		warm.Scale.Upload += profile.Scale.Upload
-		warm.Scale.Kernel += profile.Scale.Kernel
-		warm.Scale.Readback += profile.Scale.Readback
-		warm.Scale.Total += profile.Scale.Total
-		warm.Total += profile.Total
-	}
-	divisor := time.Duration(iters)
-	warm.BitReverse.Upload /= divisor
-	warm.BitReverse.Kernel /= divisor
-	warm.BitReverse.Readback /= divisor
-	warm.BitReverse.Total /= divisor
-	warm.Stages.Upload /= divisor
-	warm.Stages.Kernel /= divisor
-	warm.Stages.Readback /= divisor
-	warm.Stages.Total /= divisor
-	warm.Scale.Upload /= divisor
-	warm.Scale.Kernel /= divisor
-	warm.Scale.Readback /= divisor
-	warm.Scale.Total /= divisor
-	warm.Total /= divisor
-	return cold, warm, last, nil
+func addFrNTTProfile(dst *bls12381.FrNTTProfile, src bls12381.FrNTTProfile) {
+	dst.BitReverse.Upload += src.BitReverse.Upload
+	dst.BitReverse.Kernel += src.BitReverse.Kernel
+	dst.BitReverse.Readback += src.BitReverse.Readback
+	dst.BitReverse.Total += src.BitReverse.Total
+	dst.Stages.Upload += src.Stages.Upload
+	dst.Stages.Kernel += src.Stages.Kernel
+	dst.Stages.Readback += src.Stages.Readback
+	dst.Stages.Total += src.Stages.Total
+	dst.Scale.Upload += src.Scale.Upload
+	dst.Scale.Kernel += src.Scale.Kernel
+	dst.Scale.Readback += src.Scale.Readback
+	dst.Scale.Total += src.Scale.Total
+	dst.Total += src.Total
 }
 
-func durationMS(d time.Duration) float64 {
-	return float64(d) / float64(time.Millisecond)
+func divFrNTTProfile(dst *bls12381.FrNTTProfile, divisor int) {
+	d := time.Duration(divisor)
+	dst.BitReverse.Upload /= d
+	dst.BitReverse.Kernel /= d
+	dst.BitReverse.Readback /= d
+	dst.BitReverse.Total /= d
+	dst.Stages.Upload /= d
+	dst.Stages.Kernel /= d
+	dst.Stages.Readback /= d
+	dst.Stages.Total /= d
+	dst.Scale.Upload /= d
+	dst.Scale.Kernel /= d
+	dst.Scale.Readback /= d
+	dst.Scale.Total /= d
+	dst.Total /= d
 }
-
-func isResourceError(err error) bool {
-	if err == nil {
-		return false
-	}
-	text := strings.ToLower(err.Error())
-	return strings.Contains(text, "buffer") ||
-		strings.Contains(text, "resource") ||
-		strings.Contains(text, "memory")
-}
-
