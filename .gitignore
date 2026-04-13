@@ -1,3 +1,5 @@
 .gocache/
 web/dist/
-heliax-wasm/target/
+external/heliax-wasm/target/
+external/heliax-wasm/web/heliax_wasm_pkg/
+external/wgpu-macos-aarch64-release/
