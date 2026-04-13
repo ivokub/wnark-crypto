@@ -2,6 +2,11 @@ import type { CurveModule, CurveGPUContext, SupportedCurveID } from "./api.js";
 import { createFieldModule } from "./field_module.js";
 import { createG1Module } from "./g1_module.js";
 import { createMSMModule } from "./msm_module.js";
+import {
+  simpleSparsePippengerStrategy,
+  type PippengerStrategy,
+  weightedSparsePippengerStrategy,
+} from "./msm_pippenger.js";
 import { createNTTModule } from "./ntt_module.js";
 import { shapeFor } from "./types.js";
 
@@ -21,10 +26,19 @@ export interface CurveDefinition {
   readonly fpArithShaderPath: string;
   readonly g1ArithShaderParts: readonly string[];
   readonly g1MSMShaderParts: readonly string[];
-  readonly pippengerMode: "simple" | "weighted";
+  readonly msmStrategy: PippengerStrategy;
   readonly coordinateBytes: number;
   readonly pointBytes: number;
   readonly zeroHex: string;
+}
+
+function fieldShaderParts(fpArithShaderPath: string, curveShaderPath: string): readonly string[] {
+  return [
+    `${fpArithShaderPath}#section=fp-types`,
+    `${fpArithShaderPath}#section=fp-consts`,
+    `${fpArithShaderPath}#section=fp-core`,
+    curveShaderPath,
+  ];
 }
 
 const CURVE_DEFINITIONS: Record<SupportedCurveID, CurveDefinition> = {
@@ -36,19 +50,9 @@ const CURVE_DEFINITIONS: Record<SupportedCurveID, CurveDefinition> = {
     frNTTDomainPath: "/testdata/vectors/fr/bn254_ntt_domains.json?v=2",
     frModulusHex: "0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
     fpArithShaderPath: "/shaders/curves/bn254/fp_arith.wgsl?v=3",
-    g1ArithShaderParts: [
-      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-types",
-      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-consts",
-      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-core",
-      "/shaders/curves/bn254/g1_arith.wgsl?v=1",
-    ],
-    g1MSMShaderParts: [
-      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-types",
-      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-consts",
-      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-core",
-      "/shaders/curves/bn254/g1_arith.wgsl?v=1",
-    ],
-    pippengerMode: "simple",
+    g1ArithShaderParts: fieldShaderParts("/shaders/curves/bn254/fp_arith.wgsl?v=3", "/shaders/curves/bn254/g1_arith.wgsl?v=1"),
+    g1MSMShaderParts: fieldShaderParts("/shaders/curves/bn254/fp_arith.wgsl?v=3", "/shaders/curves/bn254/g1_arith.wgsl?v=1"),
+    msmStrategy: simpleSparsePippengerStrategy,
     coordinateBytes: 32,
     pointBytes: 96,
     zeroHex: "0000000000000000000000000000000000000000000000000000000000000000",
@@ -61,19 +65,9 @@ const CURVE_DEFINITIONS: Record<SupportedCurveID, CurveDefinition> = {
     frNTTDomainPath: "/testdata/vectors/fr/bls12_381_ntt_domains.json?v=2",
     frModulusHex: "0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001",
     fpArithShaderPath: "/shaders/curves/bls12_381/fp_arith.wgsl?v=4",
-    g1ArithShaderParts: [
-      "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-types",
-      "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-consts",
-      "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-core",
-      "/shaders/curves/bls12_381/g1_arith.wgsl?v=2",
-    ],
-    g1MSMShaderParts: [
-      "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-types",
-      "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-consts",
-      "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-core",
-      "/shaders/curves/bls12_381/g1_msm.wgsl?v=3",
-    ],
-    pippengerMode: "weighted",
+    g1ArithShaderParts: fieldShaderParts("/shaders/curves/bls12_381/fp_arith.wgsl?v=4", "/shaders/curves/bls12_381/g1_arith.wgsl?v=2"),
+    g1MSMShaderParts: fieldShaderParts("/shaders/curves/bls12_381/fp_arith.wgsl?v=4", "/shaders/curves/bls12_381/g1_msm.wgsl?v=3"),
+    msmStrategy: weightedSparsePippengerStrategy,
     coordinateBytes: 48,
     pointBytes: 144,
     zeroHex:
@@ -151,7 +145,7 @@ export function createCurveModule(context: CurveGPUContext, curve: SupportedCurv
         coordinateBytes: definition.coordinateBytes,
         pointBytes: definition.pointBytes,
         shaderParts: definition.g1MSMShaderParts,
-        mode: definition.pippengerMode,
+        strategy: definition.msmStrategy,
       },
       fp,
     ),

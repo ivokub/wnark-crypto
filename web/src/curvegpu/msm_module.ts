@@ -10,9 +10,8 @@ import type {
 } from "./api.js";
 import { splitBytesLEToU32 } from "./convert.js";
 import { bestPippengerWindow } from "./msm_shared.js";
-import { createMSMKernelSet } from "./msm_gpu_runtime.js";
 import { runSparseSignedPippengerMSM } from "./msm_pippenger.js";
-import type { PippengerKernels } from "./msm_pippenger.js";
+import type { PippengerRuntime, PippengerStrategy } from "./msm_pippenger.js";
 import { cloneBytes, ensureByteLength, lazyAsync, loadShaderParts } from "./runtime_common.js";
 
 function clonePoint(point: CurveGPUJacobianPoint): CurveGPUJacobianPoint {
@@ -67,35 +66,17 @@ export function createMSMModule(
     coordinateBytes: number;
     pointBytes: number;
     shaderParts: readonly string[];
-    mode: "simple" | "weighted";
+    strategy: PippengerStrategy;
   },
   fp: FieldModule,
 ): MSMModule {
-  const { curve, coordinateBytes, pointBytes, shaderParts, mode } = options;
+  const { curve, coordinateBytes, pointBytes, shaderParts, strategy } = options;
   const label = `${curve}-g1-msm`;
 
   const getOneMontgomery = lazyAsync(async () => fp.montOne());
-  const getKernels = lazyAsync(async (): Promise<PippengerKernels> => {
+  const getRuntime = lazyAsync(async (): Promise<PippengerRuntime> => {
     const shaderCode = await loadShaderParts(shaderParts);
-    if (mode === "weighted") {
-      return {
-        mode: "weighted",
-        ...createMSMKernelSet(context.device, shaderCode, label, {
-          bucket: "g1_msm_bucket_sparse_main",
-          weightBuckets: "g1_msm_weight_buckets_main",
-          subsumPhase1: "g1_msm_subsum_phase1_main",
-          combine: "g1_msm_combine_main",
-        }),
-      };
-    }
-    return {
-      mode: "simple",
-      ...createMSMKernelSet(context.device, shaderCode, label, {
-        bucket: "g1_msm_bucket_sparse_main",
-        windowSparse: "g1_msm_window_sparse_main",
-        combine: "g1_msm_combine_main",
-      }),
-    };
+    return strategy.createRuntime(context.device, shaderCode, label);
   });
 
   async function runBatch(
@@ -119,11 +100,11 @@ export function createMSMModule(
     }
 
     const oneMontZ = await getOneMontgomery();
-    const kernels = await getKernels();
+    const runtime = await getRuntime();
     const window = options.window ?? bestPippengerWindow(termsPerInstance);
     const output = await runSparseSignedPippengerMSM({
       device: context.device,
-      kernels,
+      runtime,
       basesBytes: packAffineBases(bases, coordinateBytes, pointBytes, oneMontZ),
       pointBytes,
       uniformBytes: 32,

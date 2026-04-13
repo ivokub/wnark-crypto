@@ -2,6 +2,7 @@ import { buildSparseSignedBucketMetadataWords } from "./msm_shared.js";
 import {
   createBindGroupForBuffers,
   createEmptyPointStorageBuffer,
+  createMSMKernelSet,
   createParamsBuffer,
   createStorageBufferFromBytes,
   createU32StorageBuffer,
@@ -10,26 +11,179 @@ import {
   submitKernel,
 } from "./msm_gpu_runtime.js";
 
-type PippengerSimpleKernels = {
-  bucket: Kernel;
-  windowSparse: Kernel;
-  combine: Kernel;
+type SparseSignedBucketMetadata = ReturnType<typeof buildSparseSignedBucketMetadataWords>;
+
+type WindowReductionOptions = {
+  device: GPUDevice;
+  pointBytes: number;
+  uniformBytes: number;
+  zeroInput: GPUBuffer;
+  bucketOutput: GPUBuffer;
+  bucketCountOut: number;
+  bucketValuesInput: GPUBuffer;
+  windowStartsInput: GPUBuffer;
+  windowCountsInput: GPUBuffer;
+  metadata: SparseSignedBucketMetadata;
+  count: number;
+  labelPrefix: string;
 };
 
-type PippengerWeightedKernels = {
-  bucket: Kernel;
-  weightBuckets: Kernel;
-  subsumPhase1: Kernel;
-  combine: Kernel;
+type WindowReductionResult = {
+  windowOutput: GPUBuffer;
+  cleanupBuffers: GPUBuffer[];
 };
 
-export type PippengerKernels =
-  | ({ mode: "simple" } & PippengerSimpleKernels)
-  | ({ mode: "weighted" } & PippengerWeightedKernels);
+export type PippengerRuntime = {
+  bucket: Kernel;
+  combine: Kernel;
+  reduceWindows(options: WindowReductionOptions): Promise<WindowReductionResult>;
+};
+
+export interface PippengerStrategy {
+  readonly id: string;
+  createRuntime(device: GPUDevice, shaderCode: string, labelPrefix: string): PippengerRuntime;
+}
+
+function createSimplePippengerRuntime(device: GPUDevice, shaderCode: string, labelPrefix: string): PippengerRuntime {
+  const kernels = createMSMKernelSet(device, shaderCode, labelPrefix, {
+    bucket: "g1_msm_bucket_sparse_main",
+    windowSparse: "g1_msm_window_sparse_main",
+    combine: "g1_msm_combine_main",
+  });
+  return {
+    bucket: kernels.bucket,
+    combine: kernels.combine,
+    async reduceWindows(options: WindowReductionOptions): Promise<WindowReductionResult> {
+      const {
+        device,
+        pointBytes,
+        uniformBytes,
+        zeroInput,
+        bucketOutput,
+        bucketValuesInput,
+        windowStartsInput,
+        windowCountsInput,
+        metadata,
+        count,
+        labelPrefix,
+      } = options;
+      const windowOutput = createEmptyPointStorageBuffer(device, `${labelPrefix}-window-out`, count * metadata.numWindows, pointBytes);
+      const windowParams = createParamsBuffer(device, `${labelPrefix}-window-params`, uniformBytes, {
+        count: count * metadata.numWindows,
+        bucketCount: metadata.bucketCount,
+      });
+      const windowBindGroup = createBindGroupForBuffers(
+        device,
+        kernels.windowSparse,
+        `${labelPrefix}-window-bg`,
+        bucketOutput,
+        zeroInput,
+        windowOutput,
+        windowParams,
+        bucketValuesInput,
+        windowStartsInput,
+        windowCountsInput,
+      );
+      await submitKernel(
+        device,
+        kernels.windowSparse,
+        windowBindGroup,
+        count * metadata.numWindows * 64,
+        `${labelPrefix}-window`,
+      );
+      return {
+        windowOutput,
+        cleanupBuffers: [windowParams],
+      };
+    },
+  };
+}
+
+function createWeightedPippengerRuntime(device: GPUDevice, shaderCode: string, labelPrefix: string): PippengerRuntime {
+  const kernels = createMSMKernelSet(device, shaderCode, labelPrefix, {
+    bucket: "g1_msm_bucket_sparse_main",
+    weightBuckets: "g1_msm_weight_buckets_main",
+    subsumPhase1: "g1_msm_subsum_phase1_main",
+    combine: "g1_msm_combine_main",
+  });
+  return {
+    bucket: kernels.bucket,
+    combine: kernels.combine,
+    async reduceWindows(options: WindowReductionOptions): Promise<WindowReductionResult> {
+      const {
+        device,
+        pointBytes,
+        uniformBytes,
+        zeroInput,
+        bucketOutput,
+        bucketCountOut,
+        bucketValuesInput,
+        windowStartsInput,
+        windowCountsInput,
+        metadata,
+        count,
+        labelPrefix,
+      } = options;
+      const weightedBucketOutput = createEmptyPointStorageBuffer(device, `${labelPrefix}-weighted-out`, bucketCountOut, pointBytes);
+      const weightParams = createParamsBuffer(device, `${labelPrefix}-weight-params`, uniformBytes, {
+        count: bucketCountOut,
+      });
+      const weightBindGroup = createBindGroupForBuffers(
+        device,
+        kernels.weightBuckets,
+        `${labelPrefix}-weight-bg`,
+        bucketOutput,
+        zeroInput,
+        weightedBucketOutput,
+        weightParams,
+        bucketValuesInput,
+      );
+      await submitKernel(device, kernels.weightBuckets, weightBindGroup, bucketCountOut, `${labelPrefix}-weight`);
+
+      const windowOutput = createEmptyPointStorageBuffer(device, `${labelPrefix}-window-out`, count * metadata.numWindows, pointBytes);
+      const windowParams = createParamsBuffer(device, `${labelPrefix}-window-params`, uniformBytes, {
+        count: count * metadata.numWindows,
+      });
+      const windowBindGroup = createBindGroupForBuffers(
+        device,
+        kernels.subsumPhase1,
+        `${labelPrefix}-window-bg`,
+        weightedBucketOutput,
+        zeroInput,
+        windowOutput,
+        windowParams,
+        bucketValuesInput,
+        windowStartsInput,
+        windowCountsInput,
+      );
+      await submitKernel(
+        device,
+        kernels.subsumPhase1,
+        windowBindGroup,
+        count * metadata.numWindows * 64,
+        `${labelPrefix}-window`,
+      );
+      return {
+        windowOutput,
+        cleanupBuffers: [weightedBucketOutput, weightParams, windowParams],
+      };
+    },
+  };
+}
+
+export const simpleSparsePippengerStrategy: PippengerStrategy = {
+  id: "simple-sparse",
+  createRuntime: createSimplePippengerRuntime,
+};
+
+export const weightedSparsePippengerStrategy: PippengerStrategy = {
+  id: "weighted-sparse",
+  createRuntime: createWeightedPippengerRuntime,
+};
 
 export async function runSparseSignedPippengerMSM(options: {
   device: GPUDevice;
-  kernels: PippengerKernels;
+  runtime: PippengerRuntime;
   basesBytes: Uint8Array;
   pointBytes: number;
   uniformBytes: number;
@@ -43,7 +197,7 @@ export async function runSparseSignedPippengerMSM(options: {
 }): Promise<Uint8Array> {
   const {
     device,
-    kernels,
+    runtime,
     basesBytes,
     pointBytes,
     uniformBytes,
@@ -79,7 +233,7 @@ export async function runSparseSignedPippengerMSM(options: {
   });
   const bucketBindGroup = createBindGroupForBuffers(
     device,
-    kernels.bucket,
+    runtime.bucket,
     `${labelPrefix}-bucket-bg`,
     basesInput,
     zeroInput,
@@ -89,59 +243,26 @@ export async function runSparseSignedPippengerMSM(options: {
     bucketPointersInput,
     bucketSizesInput,
   );
-  await submitKernel(device, kernels.bucket, bucketBindGroup, bucketCountOut, `${labelPrefix}-bucket`);
+  await submitKernel(device, runtime.bucket, bucketBindGroup, bucketCountOut, `${labelPrefix}-bucket`);
 
   const bucketValuesInput = createU32StorageBuffer(device, `${labelPrefix}-bucket-values`, metadata.bucketValues);
   const windowStartsInput = createU32StorageBuffer(device, `${labelPrefix}-window-starts`, metadata.windowStarts);
   const windowCountsInput = createU32StorageBuffer(device, `${labelPrefix}-window-counts`, metadata.windowCounts);
 
-  let windowInput = bucketOutput;
-  let weightedBucketOutput: GPUBuffer | null = null;
-  let weightParams: GPUBuffer | null = null;
-  if (kernels.mode === "weighted") {
-    weightedBucketOutput = createEmptyPointStorageBuffer(device, `${labelPrefix}-weighted-out`, bucketCountOut, pointBytes);
-    weightParams = createParamsBuffer(device, `${labelPrefix}-weight-params`, uniformBytes, {
-      count: bucketCountOut,
-    });
-    const weightBindGroup = createBindGroupForBuffers(
-      device,
-      kernels.weightBuckets,
-      `${labelPrefix}-weight-bg`,
-      bucketOutput,
-      zeroInput,
-      weightedBucketOutput,
-      weightParams,
-      bucketValuesInput,
-    );
-    await submitKernel(device, kernels.weightBuckets, weightBindGroup, bucketCountOut, `${labelPrefix}-weight`);
-    windowInput = weightedBucketOutput;
-  }
-
-  const windowOutput = createEmptyPointStorageBuffer(device, `${labelPrefix}-window-out`, count * metadata.numWindows, pointBytes);
-  const windowParams = createParamsBuffer(device, `${labelPrefix}-window-params`, uniformBytes, {
-    count: count * metadata.numWindows,
-    bucketCount: kernels.mode === "simple" ? metadata.bucketCount : 0,
-  });
-  const windowKernel = kernels.mode === "simple" ? kernels.windowSparse : kernels.subsumPhase1;
-  const windowBindGroup = createBindGroupForBuffers(
+  const { windowOutput, cleanupBuffers: windowReductionCleanup } = await runtime.reduceWindows({
     device,
-    windowKernel,
-    `${labelPrefix}-window-bg`,
-    windowInput,
+    pointBytes,
+    uniformBytes,
     zeroInput,
-    windowOutput,
-    windowParams,
+    bucketOutput,
+    bucketCountOut,
     bucketValuesInput,
     windowStartsInput,
     windowCountsInput,
-  );
-  await submitKernel(
-    device,
-    windowKernel,
-    windowBindGroup,
-    count * metadata.numWindows * 64,
-    `${labelPrefix}-window`,
-  );
+    metadata,
+    count,
+    labelPrefix,
+  });
 
   const finalOutput = createEmptyPointStorageBuffer(device, `${labelPrefix}-final-out`, count, pointBytes);
   const finalParams = createParamsBuffer(device, `${labelPrefix}-final-params`, uniformBytes, {
@@ -153,14 +274,14 @@ export async function runSparseSignedPippengerMSM(options: {
   });
   const finalBindGroup = createBindGroupForBuffers(
     device,
-    kernels.combine,
+    runtime.combine,
     `${labelPrefix}-final-bg`,
     windowOutput,
     zeroInput,
     finalOutput,
     finalParams,
   );
-  await submitKernel(device, kernels.combine, finalBindGroup, count, `${labelPrefix}-final`);
+  await submitKernel(device, runtime.combine, finalBindGroup, count, `${labelPrefix}-final`);
 
   const result = await readbackBuffer(device, finalOutput, Math.max(1, count) * pointBytes);
 
@@ -173,12 +294,10 @@ export async function runSparseSignedPippengerMSM(options: {
   windowStartsInput.destroy();
   windowCountsInput.destroy();
   bucketOutput.destroy();
-  weightedBucketOutput?.destroy();
+  windowReductionCleanup.forEach((buffer) => buffer.destroy());
   windowOutput.destroy();
   finalOutput.destroy();
   bucketParams.destroy();
-  weightParams?.destroy();
-  windowParams.destroy();
   finalParams.destroy();
 
   return result;
