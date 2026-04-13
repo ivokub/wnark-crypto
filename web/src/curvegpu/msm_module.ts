@@ -3,6 +3,7 @@ import type {
   CurveGPUContext,
   CurveGPUElementBytes,
   CurveGPUJacobianPoint,
+  CurveGPUPackedPointLayout,
   FieldModule,
   MSMModule,
   SupportedCurveID,
@@ -56,6 +57,26 @@ function packScalarWords(scalars: readonly Uint8Array[]): Uint32Array {
     ensureByteLength(scalar, 32, `scalars[${index}]`);
     out.set(splitBytesLEToU32(scalar), index * 8);
   });
+  return out;
+}
+
+function ensurePackedScalars(scalarsPacked: Uint8Array, count: number, label: string): void {
+  const expected = count * 32;
+  if (scalarsPacked.byteLength !== expected) {
+    throw new Error(`${label}: expected ${expected} scalar bytes, got ${scalarsPacked.byteLength}`);
+  }
+}
+
+function packScalarWordsPacked(scalarsPacked: Uint8Array): Uint32Array {
+  if (scalarsPacked.byteLength % 32 !== 0) {
+    throw new Error(`packed scalars: expected a multiple of 32 bytes, got ${scalarsPacked.byteLength}`);
+  }
+  const count = scalarsPacked.byteLength / 32;
+  const out = new Uint32Array(count * 8);
+  const view = new DataView(scalarsPacked.buffer, scalarsPacked.byteOffset, scalarsPacked.byteLength);
+  for (let i = 0; i < out.length; i += 1) {
+    out[i] = view.getUint32(i * 4, true);
+  }
   return out;
 }
 
@@ -139,6 +160,44 @@ export function createMSMModule(
       options: CurveGPUMSMOptions,
     ): Promise<CurveGPUJacobianPoint[]> {
       return runBatch(bases, scalars, options);
+    },
+    async pippengerPackedJacobianBases(
+      basesPacked: Uint8Array,
+      scalarsPacked: Uint8Array,
+      options: CurveGPUMSMOptions & { layout?: CurveGPUPackedPointLayout },
+    ): Promise<Uint8Array> {
+      const count = options.count ?? 1;
+      const termsPerInstance = options.termsPerInstance ?? 0;
+      if (!Number.isInteger(count) || count <= 0) {
+        throw new Error(`${label}: count must be a positive integer`);
+      }
+      if (!Number.isInteger(termsPerInstance) || termsPerInstance <= 0) {
+        throw new Error(`${label}: termsPerInstance must be a positive integer`);
+      }
+      if ((options.layout ?? "jacobian_x_y_z_le") !== "jacobian_x_y_z_le") {
+        throw new Error(`${label}: unsupported packed point layout ${options.layout}`);
+      }
+      const expectedPointBytes = count * termsPerInstance * pointBytes;
+      if (basesPacked.byteLength !== expectedPointBytes) {
+        throw new Error(`${label}: expected ${expectedPointBytes} base bytes, got ${basesPacked.byteLength}`);
+      }
+      ensurePackedScalars(scalarsPacked, count * termsPerInstance, `${label}.scalarsPacked`);
+      const runtime = await getRuntime();
+      const window = options.window ?? bestPippengerWindow(termsPerInstance);
+      return runSparseSignedPippengerMSM({
+        device: context.device,
+        runtime,
+        basesBytes: basesPacked,
+        pointBytes,
+        uniformBytes: 32,
+        zeroPointBytes: new Uint8Array(pointBytes),
+        scalarWords: packScalarWordsPacked(scalarsPacked),
+        count,
+        termsPerInstance,
+        window,
+        maxChunkSize: options.maxChunkSize,
+        labelPrefix: label,
+      });
     },
   };
 }

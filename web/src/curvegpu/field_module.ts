@@ -48,6 +48,13 @@ function isNonZero(bytes: Uint8Array): boolean {
   return bytes.some((byte) => byte !== 0);
 }
 
+function ensurePackedElements(bytes: Uint8Array, byteSize: number, label: string): number {
+  if (bytes.byteLength % byteSize !== 0) {
+    throw new Error(`${label}: expected a multiple of ${byteSize} bytes, got ${bytes.byteLength}`);
+  }
+  return bytes.byteLength / byteSize;
+}
+
 export function createFieldModule(
   context: CurveGPUContext,
   curve: SupportedCurveID,
@@ -67,6 +74,25 @@ export function createFieldModule(
     const shaderCode = await loadShaderText(shaderPath);
     return createSimpleKernel(context.device, label, shaderCode, entryPoint);
   });
+
+  async function runPacked(opcode: FieldOpCode, inputA: Uint8Array, inputB?: Uint8Array): Promise<Uint8Array> {
+    const count = ensurePackedElements(inputA, byteSize, `${label}.packedA`);
+    const b = inputB ?? new Uint8Array(inputA.byteLength);
+    if (b.byteLength !== inputA.byteLength) {
+      throw new Error(`${label}.packedB: expected ${inputA.byteLength} bytes, got ${b.byteLength}`);
+    }
+    const kernel = await getKernel();
+    return runSimpleKernel({
+      device: context.device,
+      kernel,
+      label: `${label}-packed-op-${opcode}`,
+      inputA,
+      inputB: b,
+      outputBytes: count * byteSize,
+      uniformWords: Uint32Array.from([count, opcode, 0, 0, 0, 0, 0, 0]),
+      workgroups: Math.ceil(count / 64),
+    });
+  }
 
   async function runBatch(opcode: FieldOpCode, inputA: readonly CurveGPUElementBytes[], inputB: readonly CurveGPUElementBytes[]): Promise<Uint8Array[]> {
     const count = Math.max(inputA.length, inputB.length);
@@ -178,11 +204,17 @@ export function createFieldModule(
     async toMontgomeryBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]> {
       return runBatch(OP_TO_MONT, values, zeros(values.length, byteSize));
     },
+    async toMontgomeryPacked(values: Uint8Array): Promise<Uint8Array> {
+      return runPacked(OP_TO_MONT, values);
+    },
     async fromMontgomery(value: CurveGPUElementBytes): Promise<CurveGPUElementBytes> {
       return runUnary(OP_FROM_MONT, value);
     },
     async fromMontgomeryBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]> {
       return runBatch(OP_FROM_MONT, values, zeros(values.length, byteSize));
+    },
+    async fromMontgomeryPacked(values: Uint8Array): Promise<Uint8Array> {
+      return runPacked(OP_FROM_MONT, values);
     },
   };
 }

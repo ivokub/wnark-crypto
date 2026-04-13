@@ -6,6 +6,7 @@ export type {
   CurveGPURequestedLimits,
   CurveGPUElementBytes,
   CurveGPUJacobianPoint,
+  CurveGPUPackedPointLayout,
   CurveGPUMSMOptions,
   CurveModule,
   FieldModule,

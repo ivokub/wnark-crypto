@@ -61,6 +61,118 @@ export async function loadShaderParts(parts: readonly string[]): Promise<string>
   return fetchShaderParts(parts);
 }
 
+export function createSimpleStorageBuffer(
+  device: GPUDevice,
+  label: string,
+  size: number,
+  usage: GPUBufferUsageFlags = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+): GPUBuffer {
+  return device.createBuffer({
+    label,
+    size: Math.max(4, size),
+    usage,
+  });
+}
+
+export function createSimpleStorageBufferFromBytes(
+  device: GPUDevice,
+  label: string,
+  bytes: Uint8Array,
+  usage: GPUBufferUsageFlags = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+): GPUBuffer {
+  const buffer = createSimpleStorageBuffer(device, label, bytes.byteLength, usage);
+  if (bytes.byteLength > 0) {
+    device.queue.writeBuffer(buffer, 0, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  }
+  return buffer;
+}
+
+export function createSimpleUniformBuffer(
+  device: GPUDevice,
+  label: string,
+  uniformWords: Uint32Array,
+): GPUBuffer {
+  const buffer = createSimpleStorageBuffer(
+    device,
+    label,
+    uniformWords.byteLength,
+    GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  );
+  device.queue.writeBuffer(buffer, 0, uniformWords.buffer, uniformWords.byteOffset, uniformWords.byteLength);
+  return buffer;
+}
+
+export function createSimpleBindGroup(
+  device: GPUDevice,
+  kernel: SimpleKernel,
+  label: string,
+  inputA: GPUBuffer,
+  inputB: GPUBuffer,
+  output: GPUBuffer,
+  uniform: GPUBuffer,
+): GPUBindGroup {
+  return device.createBindGroup({
+    label,
+    layout: kernel.bindGroupLayout,
+    entries: [
+      { binding: 0, resource: { buffer: inputA } },
+      { binding: 1, resource: { buffer: inputB } },
+      { binding: 2, resource: { buffer: output } },
+      { binding: 3, resource: { buffer: uniform } },
+    ],
+  });
+}
+
+export async function submitSimpleKernel(
+  device: GPUDevice,
+  kernel: SimpleKernel,
+  bindGroup: GPUBindGroup,
+  workgroups: number,
+  label: string,
+): Promise<void> {
+  const encoder = device.createCommandEncoder({ label: `${label}-encoder` });
+  const pass = encoder.beginComputePass({ label: `${label}-pass` });
+  pass.setPipeline(kernel.pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.dispatchWorkgroups(workgroups, 1, 1);
+  pass.end();
+  device.queue.submit([encoder.finish()]);
+  await device.queue.onSubmittedWorkDone();
+}
+
+export async function readbackSimpleBuffer(
+  device: GPUDevice,
+  buffer: GPUBuffer,
+  outputBytes: number,
+  label: string,
+): Promise<Uint8Array> {
+  let mapped = false;
+  const readbackBuffer = createSimpleStorageBuffer(
+    device,
+    `${label}-readback`,
+    outputBytes,
+    GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+  );
+  try {
+    const encoder = device.createCommandEncoder({ label: `${label}-readback-encoder` });
+    encoder.copyBufferToBuffer(buffer, 0, readbackBuffer, 0, Math.max(4, outputBytes));
+    device.queue.submit([encoder.finish()]);
+    await device.queue.onSubmittedWorkDone();
+    await readbackBuffer.mapAsync(GPUMapMode.READ);
+    mapped = true;
+    const range = readbackBuffer.getMappedRange();
+    const out = new Uint8Array(range.slice(0, outputBytes));
+    readbackBuffer.unmap();
+    mapped = false;
+    return out;
+  } finally {
+    if (mapped) {
+      readbackBuffer.unmap();
+    }
+    readbackBuffer.destroy();
+  }
+}
+
 export function createSimpleKernel(
   device: GPUDevice,
   label: string,
@@ -107,83 +219,34 @@ export async function runSimpleKernel(options: {
   workgroups: number;
 }): Promise<Uint8Array> {
   const { device, kernel, label, inputA, inputB, outputBytes, uniformWords, workgroups } = options;
-  let mapped = false;
-  const inputABuffer = createStorageBuffer(
+  const inputABuffer = createSimpleStorageBufferFromBytes(
     device,
     `${label}-input-a`,
-    Math.max(4, inputA.byteLength),
+    inputA,
     GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   );
-  const inputBBuffer = createStorageBuffer(
+  const inputBBuffer = createSimpleStorageBufferFromBytes(
     device,
     `${label}-input-b`,
-    Math.max(4, inputB.byteLength),
+    inputB,
     GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   );
-  const outputBuffer = createStorageBuffer(
+  const outputBuffer = createSimpleStorageBuffer(
     device,
     `${label}-output`,
-    Math.max(4, outputBytes),
+    outputBytes,
     GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
   );
-  const readbackBuffer = createStorageBuffer(
-    device,
-    `${label}-readback`,
-    Math.max(4, outputBytes),
-    GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-  );
-  const uniformBuffer = createStorageBuffer(
-    device,
-    `${label}-params`,
-    Math.max(4, uniformWords.byteLength),
-    GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  );
+  const uniformBuffer = createSimpleUniformBuffer(device, `${label}-params`, uniformWords);
 
   try {
-    if (inputA.byteLength > 0) {
-      device.queue.writeBuffer(inputABuffer, 0, inputA.buffer.slice(inputA.byteOffset, inputA.byteOffset + inputA.byteLength));
-    }
-    if (inputB.byteLength > 0) {
-      device.queue.writeBuffer(inputBBuffer, 0, inputB.buffer.slice(inputB.byteOffset, inputB.byteOffset + inputB.byteLength));
-    }
-    device.queue.writeBuffer(uniformBuffer, 0, uniformWords.buffer, uniformWords.byteOffset, uniformWords.byteLength);
-
-    const bindGroup = device.createBindGroup({
-      label: `${label}-bg`,
-      layout: kernel.bindGroupLayout,
-      entries: [
-        { binding: 0, resource: { buffer: inputABuffer } },
-        { binding: 1, resource: { buffer: inputBBuffer } },
-        { binding: 2, resource: { buffer: outputBuffer } },
-        { binding: 3, resource: { buffer: uniformBuffer } },
-      ],
-    });
-
-    const encoder = device.createCommandEncoder({ label: `${label}-encoder` });
-    const pass = encoder.beginComputePass({ label: `${label}-pass` });
-    pass.setPipeline(kernel.pipeline);
-    pass.setBindGroup(0, bindGroup);
-    pass.dispatchWorkgroups(workgroups, 1, 1);
-    pass.end();
-    encoder.copyBufferToBuffer(outputBuffer, 0, readbackBuffer, 0, Math.max(4, outputBytes));
-    device.queue.submit([encoder.finish()]);
-
-    await device.queue.onSubmittedWorkDone();
-    await readbackBuffer.mapAsync(GPUMapMode.READ);
-    mapped = true;
-    const range = readbackBuffer.getMappedRange();
-    const out = new Uint8Array(range.slice(0, outputBytes));
-    readbackBuffer.unmap();
-    mapped = false;
-    return out;
+    const bindGroup = createSimpleBindGroup(device, kernel, `${label}-bg`, inputABuffer, inputBBuffer, outputBuffer, uniformBuffer);
+    await submitSimpleKernel(device, kernel, bindGroup, workgroups, label);
+    return await readbackSimpleBuffer(device, outputBuffer, outputBytes, label);
   } finally {
-    if (mapped) {
-      readbackBuffer.unmap();
-    }
     inputABuffer.destroy();
     inputBBuffer.destroy();
     outputBuffer.destroy();
-    readbackBuffer.destroy();
     uniformBuffer.destroy();
   }
 }

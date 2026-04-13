@@ -131,6 +131,7 @@ export function createCurveModule(context: CurveGPUContext, curve: SupportedCurv
       context,
       {
         curve: definition.id,
+        arithmeticShaderPath: definition.frArithShaderPath,
         vectorShaderPath: definition.frVectorShaderPath,
         nttShaderPath: definition.frNTTShaderPath,
         domainPath: definition.frNTTDomainPath ?? "",

@@ -48,6 +48,11 @@ export type CurveGPUMSMOptions = {
 };
 
 /**
+ * Supported packed point encodings for bulk APIs.
+ */
+export type CurveGPUPackedPointLayout = "jacobian_x_y_z_le";
+
+/**
  * Subset of device limits that matter for the current curve workloads.
  */
 export type CurveGPURequestedLimits = {
@@ -144,9 +149,19 @@ export interface FieldModule {
   /** Convert a regular little-endian field element into Montgomery form. */
   toMontgomery(value: CurveGPUElementBytes): Promise<CurveGPUElementBytes>;
   toMontgomeryBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]>;
+  /**
+   * Convert a packed sequence of regular little-endian field elements into
+   * Montgomery form.
+   */
+  toMontgomeryPacked(values: Uint8Array): Promise<Uint8Array>;
   /** Convert a Montgomery-form element back into regular little-endian bytes. */
   fromMontgomery(value: CurveGPUElementBytes): Promise<CurveGPUElementBytes>;
   fromMontgomeryBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]>;
+  /**
+   * Convert a packed sequence of Montgomery-form field elements back into
+   * regular little-endian bytes.
+   */
+  fromMontgomeryPacked(values: Uint8Array): Promise<Uint8Array>;
 }
 
 /**
@@ -212,6 +227,14 @@ export interface NTTModule {
   forward(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]>;
   /** Run the inverse NTT over a power-of-two batch of Montgomery-form values. */
   inverse(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]>;
+  /** Run the forward NTT over packed regular little-endian field elements. */
+  forwardPackedRegular(values: Uint8Array): Promise<Uint8Array>;
+  /** Run the inverse NTT over packed regular little-endian field elements. */
+  inversePackedRegular(values: Uint8Array): Promise<Uint8Array>;
+  /** Run the forward NTT over packed Montgomery-form field elements. */
+  forwardPackedMont(values: Uint8Array): Promise<Uint8Array>;
+  /** Run the inverse NTT over packed Montgomery-form field elements. */
+  inversePackedMont(values: Uint8Array): Promise<Uint8Array>;
 }
 
 /**
@@ -235,6 +258,22 @@ export interface MSMModule {
     scalars: readonly CurveGPUElementBytes[],
     options: CurveGPUMSMOptions,
   ): Promise<CurveGPUJacobianPoint[]>;
+  /**
+   * Run affine-base Pippenger MSM from packed bytes.
+   *
+   * `basesPacked` is currently expected in `jacobian_x_y_z_le` layout with one
+   * packed point per term. For ordinary affine points, `z` should be the
+   * Montgomery-form one element and infinity points should remain zero-filled.
+   *
+   * `scalarsPacked` is a packed sequence of regular-form 32-byte scalars.
+   *
+   * The result is returned in the same packed `jacobian_x_y_z_le` layout.
+   */
+  pippengerPackedJacobianBases(
+    basesPacked: Uint8Array,
+    scalarsPacked: Uint8Array,
+    options: CurveGPUMSMOptions & { layout?: CurveGPUPackedPointLayout },
+  ): Promise<Uint8Array>;
 }
 
 /**
