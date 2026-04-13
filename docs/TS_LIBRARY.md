@@ -1,6 +1,6 @@
 # CurveGPU Browser Library
 
-`web/src/index.ts` is the public TypeScript entrypoint for the browser-side CurveGPU library. The compiled browser module is emitted to `web/dist/index.js`.
+`web/src/index.ts` is the public TypeScript entrypoint for the browser-side CurveGPU library. The package root is [web/README.md](/Users/ivo/Work/consensys/repo/webgpu/wnark-crypto/web/README.md), and the compiled package entrypoint is emitted to `web/dist/index.js` with declarations in `web/dist/index.d.ts`.
 
 The intended usage model is:
 
