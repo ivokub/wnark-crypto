@@ -1,6 +1,8 @@
 import type { CurveModule, CurveGPUContext, SupportedCurveID } from "./api.js";
 import { createFieldModule } from "./field_module.js";
 import { createG1Module } from "./g1_module.js";
+import { createG2Module } from "./g2_module.js";
+import { createG2MSMModule } from "./g2_msm_module.js";
 import { createMSMModule } from "./msm_module.js";
 import {
   simpleSparsePippengerStrategy,
@@ -26,9 +28,12 @@ export interface CurveDefinition {
   readonly fpArithShaderPath: string;
   readonly g1ArithShaderParts: readonly string[];
   readonly g1MSMShaderParts: readonly string[];
+  readonly g2ArithShaderParts: readonly string[];
   readonly msmStrategy: PippengerStrategy;
   readonly coordinateBytes: number;
   readonly pointBytes: number;
+  readonly g2CoordinateBytes: number;
+  readonly g2PointBytes: number;
   readonly zeroHex: string;
 }
 
@@ -52,9 +57,12 @@ const CURVE_DEFINITIONS: Record<SupportedCurveID, CurveDefinition> = {
     fpArithShaderPath: "/shaders/curves/bn254/fp_arith.wgsl?v=3",
     g1ArithShaderParts: fieldShaderParts("/shaders/curves/bn254/fp_arith.wgsl?v=3", "/shaders/curves/bn254/g1_arith.wgsl?v=1"),
     g1MSMShaderParts: fieldShaderParts("/shaders/curves/bn254/fp_arith.wgsl?v=3", "/shaders/curves/bn254/g1_arith.wgsl?v=1"),
+    g2ArithShaderParts: fieldShaderParts("/shaders/curves/bn254/fp_arith.wgsl?v=3", "/shaders/curves/bn254/g2_arith.wgsl?v=1"),
     msmStrategy: simpleSparsePippengerStrategy,
     coordinateBytes: 32,
     pointBytes: 96,
+    g2CoordinateBytes: 64,
+    g2PointBytes: 192,
     zeroHex: "0000000000000000000000000000000000000000000000000000000000000000",
   },
   bls12_381: {
@@ -67,9 +75,12 @@ const CURVE_DEFINITIONS: Record<SupportedCurveID, CurveDefinition> = {
     fpArithShaderPath: "/shaders/curves/bls12_381/fp_arith.wgsl?v=4",
     g1ArithShaderParts: fieldShaderParts("/shaders/curves/bls12_381/fp_arith.wgsl?v=4", "/shaders/curves/bls12_381/g1_arith.wgsl?v=2"),
     g1MSMShaderParts: fieldShaderParts("/shaders/curves/bls12_381/fp_arith.wgsl?v=4", "/shaders/curves/bls12_381/g1_msm.wgsl?v=3"),
+    g2ArithShaderParts: fieldShaderParts("/shaders/curves/bls12_381/fp_arith.wgsl?v=4", "/shaders/curves/bls12_381/g2_arith.wgsl?v=1"),
     msmStrategy: weightedSparsePippengerStrategy,
     coordinateBytes: 48,
     pointBytes: 144,
+    g2CoordinateBytes: 96,
+    g2PointBytes: 288,
     zeroHex:
       "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
   },
@@ -111,6 +122,17 @@ export function createCurveModule(context: CurveGPUContext, curve: SupportedCurv
     label: `${curve}-fp`,
     shape: fpShape,
   });
+  const g2 = createG2Module(
+    context,
+    {
+      curve: definition.id,
+      componentBytes: fpShape.byteSize,
+      coordinateBytes: definition.g2CoordinateBytes,
+      pointBytes: definition.g2PointBytes,
+      shaderParts: definition.g2ArithShaderParts,
+    },
+    fp,
+  );
   return {
     id: curve,
     context,
@@ -127,6 +149,7 @@ export function createCurveModule(context: CurveGPUContext, curve: SupportedCurv
       },
       fp,
     ),
+    g2,
     ntt: createNTTModule(
       context,
       {
@@ -149,6 +172,13 @@ export function createCurveModule(context: CurveGPUContext, curve: SupportedCurv
         strategy: definition.msmStrategy,
       },
       fp,
+    ),
+    g2msm: createG2MSMModule(
+      context,
+      {
+        curve: definition.id,
+      },
+      g2,
     ),
   };
 }

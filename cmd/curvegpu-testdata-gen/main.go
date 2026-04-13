@@ -30,11 +30,17 @@ func buildTargets(fixtureCount int) []target {
 		{name: "bn254-g1-vectors", defaultEnabled: true, run: func(root string) error {
 			return writeJSON(filepath.Join(root, "testdata/vectors/g1/bn254_g1_ops.json"), testgen.BuildBN254G1OpsVectors())
 		}},
+		{name: "bn254-g2-vectors", defaultEnabled: true, run: func(root string) error {
+			return writeJSON(filepath.Join(root, "testdata/vectors/g2/bn254_g2_ops.json"), testgen.BuildBN254G2OpsVectors())
+		}},
 		{name: "bn254-g1-scalar-vectors", defaultEnabled: true, run: func(root string) error {
 			return writeJSON(filepath.Join(root, "testdata/vectors/g1/bn254_g1_scalar_mul.json"), testgen.BuildBN254G1ScalarVectors())
 		}},
 		{name: "bn254-g1-msm-vectors", defaultEnabled: true, run: func(root string) error {
 			return writeJSON(filepath.Join(root, "testdata/vectors/g1/bn254_g1_msm.json"), testgen.BuildBN254G1MSMVectors())
+		}},
+		{name: "bn254-g2-msm-vectors", defaultEnabled: true, run: func(root string) error {
+			return writeJSON(filepath.Join(root, "testdata/vectors/g2/bn254_g2_msm.json"), testgen.BuildBN254G2MSMVectors())
 		}},
 		{name: "bn254-fr-ntt-domains", defaultEnabled: true, run: func(root string) error {
 			return writeJSON(filepath.Join(root, "testdata/vectors/fr/bn254_ntt_domains.json"), testgen.BuildBN254NTTDomainFile(3, 20))
@@ -60,11 +66,17 @@ func buildTargets(fixtureCount int) []target {
 		{name: "bls12-381-g1-vectors", defaultEnabled: true, run: func(root string) error {
 			return writeJSON(filepath.Join(root, "testdata/vectors/g1/bls12_381_g1_ops.json"), testgen.BuildBLS12381G1OpsVectors())
 		}},
+		{name: "bls12-381-g2-vectors", defaultEnabled: true, run: func(root string) error {
+			return writeJSON(filepath.Join(root, "testdata/vectors/g2/bls12_381_g2_ops.json"), testgen.BuildBLS12381G2OpsVectors())
+		}},
 		{name: "bls12-381-g1-scalar-vectors", defaultEnabled: true, run: func(root string) error {
 			return writeJSON(filepath.Join(root, "testdata/vectors/g1/bls12_381_g1_scalar_mul.json"), testgen.BuildBLS12381G1ScalarVectors())
 		}},
 		{name: "bls12-381-g1-msm-vectors", defaultEnabled: true, run: func(root string) error {
 			return writeJSON(filepath.Join(root, "testdata/vectors/g1/bls12_381_g1_msm.json"), testgen.BuildBLS12381G1MSMVectors())
+		}},
+		{name: "bls12-381-g2-msm-vectors", defaultEnabled: true, run: func(root string) error {
+			return writeJSON(filepath.Join(root, "testdata/vectors/g2/bls12_381_g2_msm.json"), testgen.BuildBLS12381G2MSMVectors())
 		}},
 		{name: "bn254-g1-bases-fixture", defaultEnabled: true, run: func(root string) error {
 			outPath := filepath.Join(root, "testdata/fixtures/g1/bn254_bases_jacobian.bin")

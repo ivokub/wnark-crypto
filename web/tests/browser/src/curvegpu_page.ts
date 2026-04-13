@@ -63,6 +63,15 @@ const SUITES: SuiteConfig[] = [
   },
   {
     curve: "bn254",
+    id: "g2_ops",
+    label: "G2 ops smoke",
+    kind: "smoke",
+    title: "BN254 G2 Ops Browser Smoke",
+    description: "Runs the BN254 G2 point-operation smoke suite.",
+    script: "/web/dist/tests/browser/src/g2_ops_page.js",
+  },
+  {
+    curve: "bn254",
     id: "g1_scalar_mul",
     label: "G1 scalar mul smoke",
     kind: "smoke",
@@ -78,6 +87,15 @@ const SUITES: SuiteConfig[] = [
     title: "BN254 G1 MSM Browser Smoke",
     description: "Runs the BN254 G1 MSM smoke suite.",
     script: "/web/dist/tests/browser/src/g1_msm_page.js",
+  },
+  {
+    curve: "bn254",
+    id: "g2_msm",
+    label: "G2 MSM smoke",
+    kind: "smoke",
+    title: "BN254 G2 MSM Browser Smoke",
+    description: "Runs the BN254 G2 MSM smoke suite.",
+    script: "/web/dist/tests/browser/src/g2_msm_page.js",
   },
   {
     curve: "bn254",
@@ -153,6 +171,15 @@ const SUITES: SuiteConfig[] = [
   },
   {
     curve: "bls12_381",
+    id: "g2_ops",
+    label: "G2 ops smoke",
+    kind: "smoke",
+    title: "BLS12-381 G2 Ops Browser Smoke",
+    description: "Runs the BLS12-381 G2 point-operation smoke suite.",
+    script: "/web/dist/tests/browser/src/g2_ops_page.js",
+  },
+  {
+    curve: "bls12_381",
     id: "g1_scalar_mul",
     label: "G1 scalar mul smoke",
     kind: "smoke",
@@ -201,6 +228,15 @@ const SUITES: SuiteConfig[] = [
     title: "BLS12-381 G1 MSM Browser Smoke",
     description: "Runs the BLS12-381 G1 MSM smoke suite.",
     script: "/web/dist/tests/browser/src/g1_msm_page.js",
+  },
+  {
+    curve: "bls12_381",
+    id: "g2_msm",
+    label: "G2 MSM smoke",
+    kind: "smoke",
+    title: "BLS12-381 G2 MSM Browser Smoke",
+    description: "Runs the BLS12-381 G2 MSM smoke suite.",
+    script: "/web/dist/tests/browser/src/g2_msm_page.js",
   },
   {
     curve: "bls12_381",

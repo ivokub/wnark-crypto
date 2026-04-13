@@ -38,6 +38,34 @@ export interface CurveGPUJacobianPoint {
 }
 
 /**
+ * Quadratic-extension field element represented as two base-field coordinates.
+ *
+ * Values are little-endian byte strings in the same base-field representation
+ * used by the selected curve's `fp` module.
+ */
+export interface CurveGPUFp2Element {
+  c0: Uint8Array;
+  c1: Uint8Array;
+}
+
+/**
+ * Affine G2 point represented over the quadratic extension field.
+ */
+export interface CurveGPUG2AffinePoint {
+  x: CurveGPUFp2Element;
+  y: CurveGPUFp2Element;
+}
+
+/**
+ * Jacobian G2 point represented over the quadratic extension field.
+ */
+export interface CurveGPUG2JacobianPoint {
+  x: CurveGPUFp2Element;
+  y: CurveGPUFp2Element;
+  z: CurveGPUFp2Element;
+}
+
+/**
  * Options for affine MSM execution.
  */
 export type CurveGPUMSMOptions = {
@@ -215,6 +243,40 @@ export interface G1Module {
 }
 
 /**
+ * G2 point operations for a specific curve.
+ *
+ * Coordinates are represented over the quadratic extension field as `{c0,c1}`
+ * byte-string pairs.
+ */
+export interface G2Module {
+  readonly context: CurveGPUContext;
+  readonly curve: SupportedCurveID;
+  readonly componentBytes: number;
+  readonly coordinateBytes: number;
+  readonly pointBytes: number;
+  affineInfinity(): CurveGPUG2AffinePoint;
+  jacobianZero(): CurveGPUG2JacobianPoint;
+  copy(point: CurveGPUG2JacobianPoint): Promise<CurveGPUG2JacobianPoint>;
+  copyBatch(points: readonly CurveGPUG2JacobianPoint[]): Promise<CurveGPUG2JacobianPoint[]>;
+  jacobianInfinity(): Promise<CurveGPUG2JacobianPoint>;
+  jacobianInfinityBatch(count: number): Promise<CurveGPUG2JacobianPoint[]>;
+  affineToJacobian(point: CurveGPUG2AffinePoint): Promise<CurveGPUG2JacobianPoint>;
+  affineToJacobianBatch(points: readonly CurveGPUG2AffinePoint[]): Promise<CurveGPUG2JacobianPoint[]>;
+  negJacobian(point: CurveGPUG2JacobianPoint): Promise<CurveGPUG2JacobianPoint>;
+  negJacobianBatch(points: readonly CurveGPUG2JacobianPoint[]): Promise<CurveGPUG2JacobianPoint[]>;
+  doubleJacobian(point: CurveGPUG2JacobianPoint): Promise<CurveGPUG2JacobianPoint>;
+  doubleJacobianBatch(points: readonly CurveGPUG2JacobianPoint[]): Promise<CurveGPUG2JacobianPoint[]>;
+  addMixed(point: CurveGPUG2JacobianPoint, affine: CurveGPUG2AffinePoint): Promise<CurveGPUG2JacobianPoint>;
+  addMixedBatch(points: readonly CurveGPUG2JacobianPoint[], affine: readonly CurveGPUG2AffinePoint[]): Promise<CurveGPUG2JacobianPoint[]>;
+  jacobianToAffine(point: CurveGPUG2JacobianPoint): Promise<CurveGPUG2AffinePoint>;
+  jacobianToAffineBatch(points: readonly CurveGPUG2JacobianPoint[]): Promise<CurveGPUG2AffinePoint[]>;
+  affineAdd(a: CurveGPUG2AffinePoint, b: CurveGPUG2AffinePoint): Promise<CurveGPUG2JacobianPoint>;
+  affineAddBatch(a: readonly CurveGPUG2AffinePoint[], b: readonly CurveGPUG2AffinePoint[]): Promise<CurveGPUG2JacobianPoint[]>;
+  scalarMulAffine(base: CurveGPUG2AffinePoint, scalar: CurveGPUElementBytes): Promise<CurveGPUG2JacobianPoint>;
+  scalarMulAffineBatch(bases: readonly CurveGPUG2AffinePoint[], scalars: readonly CurveGPUElementBytes[]): Promise<CurveGPUG2JacobianPoint[]>;
+}
+
+/**
  * Scalar-field NTT module for a specific curve.
  */
 export interface NTTModule {
@@ -276,6 +338,28 @@ export interface MSMModule {
   ): Promise<Uint8Array>;
 }
 
+export interface G2MSMModule {
+  readonly context: CurveGPUContext;
+  readonly curve: SupportedCurveID;
+  readonly group: "g2";
+  bestWindow(termCount: number): number;
+  pippengerAffine(
+    bases: readonly CurveGPUG2AffinePoint[],
+    scalars: readonly CurveGPUElementBytes[],
+    options?: CurveGPUMSMOptions,
+  ): Promise<CurveGPUG2JacobianPoint>;
+  pippengerAffineBatch(
+    bases: readonly CurveGPUG2AffinePoint[],
+    scalars: readonly CurveGPUElementBytes[],
+    options: CurveGPUMSMOptions,
+  ): Promise<CurveGPUG2JacobianPoint[]>;
+  pippengerPackedJacobianBases(
+    basesPacked: Uint8Array,
+    scalarsPacked: Uint8Array,
+    options: CurveGPUMSMOptions & { layout?: CurveGPUPackedPointLayout },
+  ): Promise<Uint8Array>;
+}
+
 /**
  * High-level curve module returned by the library.
  *
@@ -288,6 +372,8 @@ export interface CurveModule {
   readonly fr: FieldModule;
   readonly fp: FieldModule;
   readonly g1: G1Module;
+  readonly g2: G2Module;
   readonly ntt: NTTModule;
   readonly msm: MSMModule;
+  readonly g2msm: G2MSMModule;
 }

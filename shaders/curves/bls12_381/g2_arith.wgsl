@@ -1,0 +1,351 @@
+struct Fp2 {
+  c0: Fp,
+  c1: Fp,
+}
+
+struct G2Point {
+  x: Fp2,
+  y: Fp2,
+  z: Fp2,
+}
+
+struct Params {
+  lane0: vec4<u32>,
+  lane1: vec4<u32>,
+}
+
+const G2_OP_COPY: u32 = 0u;
+const G2_OP_JAC_INFINITY: u32 = 1u;
+const G2_OP_AFFINE_TO_JAC: u32 = 2u;
+const G2_OP_NEG_JAC: u32 = 3u;
+const G2_OP_DOUBLE_JAC: u32 = 4u;
+const G2_OP_ADD_MIXED: u32 = 5u;
+const G2_OP_JAC_TO_AFFINE: u32 = 6u;
+const G2_OP_AFFINE_ADD: u32 = 7u;
+
+@group(0) @binding(0) var<storage, read> input_a: array<u32>;
+@group(0) @binding(1) var<storage, read> input_b: array<u32>;
+@group(0) @binding(2) var<storage, read_write> output: array<u32>;
+@group(0) @binding(3) var<uniform> params: Params;
+@group(0) @binding(4) var<storage, read> input_meta0: array<u32>;
+@group(0) @binding(5) var<storage, read> input_meta1: array<u32>;
+@group(0) @binding(6) var<storage, read> input_meta2: array<u32>;
+
+fn params_count() -> u32 {
+  return params.lane0.x;
+}
+
+fn params_opcode() -> u32 {
+  return params.lane0.y;
+}
+
+fn fp2_zero() -> Fp2 {
+  var z: Fp2;
+  z.c0 = fp_zero();
+  z.c1 = fp_zero();
+  return z;
+}
+
+fn fp2_one() -> Fp2 {
+  var z: Fp2;
+  z.c0 = fp_one();
+  z.c1 = fp_zero();
+  return z;
+}
+
+fn fp2_is_zero(x: Fp2) -> bool {
+  return fp_is_zero(x.c0) && fp_is_zero(x.c1);
+}
+
+fn fp2_equal(x: Fp2, y: Fp2) -> bool {
+  return fp_equal(x.c0, y.c0) && fp_equal(x.c1, y.c1);
+}
+
+fn fp2_add(x: Fp2, y: Fp2) -> Fp2 {
+  var z: Fp2;
+  z.c0 = fp_add(x.c0, y.c0);
+  z.c1 = fp_add(x.c1, y.c1);
+  return z;
+}
+
+fn fp2_sub(x: Fp2, y: Fp2) -> Fp2 {
+  var z: Fp2;
+  z.c0 = fp_sub(x.c0, y.c0);
+  z.c1 = fp_sub(x.c1, y.c1);
+  return z;
+}
+
+fn fp2_neg(x: Fp2) -> Fp2 {
+  var z: Fp2;
+  z.c0 = fp_neg(x.c0);
+  z.c1 = fp_neg(x.c1);
+  return z;
+}
+
+fn fp2_double(x: Fp2) -> Fp2 {
+  var z: Fp2;
+  z.c0 = fp_double(x.c0);
+  z.c1 = fp_double(x.c1);
+  return z;
+}
+
+fn fp2_mul(x: Fp2, y: Fp2) -> Fp2 {
+  let a = fp_mul(x.c0, y.c0);
+  let b = fp_mul(x.c1, y.c1);
+  let ab = fp_mul(fp_add(x.c0, x.c1), fp_add(y.c0, y.c1));
+  var z: Fp2;
+  z.c1 = fp_sub(fp_sub(ab, a), b);
+  z.c0 = fp_sub(a, b);
+  return z;
+}
+
+fn fp2_square(x: Fp2) -> Fp2 {
+  let a = fp_mul(fp_add(x.c0, x.c1), fp_sub(x.c0, x.c1));
+  let b = fp_double(fp_mul(x.c0, x.c1));
+  var z: Fp2;
+  z.c0 = a;
+  z.c1 = b;
+  return z;
+}
+
+fn fp2_inverse(x: Fp2) -> Fp2 {
+  let t0 = fp_square(x.c0);
+  let t1 = fp_square(x.c1);
+  let inv = fp_inverse(fp_add(t0, t1));
+  var z: Fp2;
+  z.c0 = fp_mul(x.c0, inv);
+  z.c1 = fp_neg(fp_mul(x.c1, inv));
+  return z;
+}
+
+fn fp2_mul_by_b_twist(x: Fp2) -> Fp2 {
+  var z: Fp2;
+  z.c0 = fp_sub(x.c0, x.c1);
+  z.c1 = fp_add(x.c0, x.c1);
+  z = fp2_double(fp2_double(z));
+  return z;
+}
+
+fn g2_jac_infinity() -> G2Point {
+  var p: G2Point;
+  p.x = fp2_one();
+  p.y = fp2_one();
+  p.z = fp2_zero();
+  return p;
+}
+
+fn g2_affine_is_infinity(a: G2Point) -> bool {
+  return fp2_is_zero(a.z);
+}
+
+fn g2_jac_is_infinity(p: G2Point) -> bool {
+  return fp2_is_zero(p.z);
+}
+
+fn g2_affine_to_jac(a: G2Point) -> G2Point {
+  if (g2_affine_is_infinity(a)) {
+    return g2_jac_infinity();
+  }
+  var p: G2Point;
+  p.x = a.x;
+  p.y = a.y;
+  p.z = fp2_one();
+  return p;
+}
+
+fn g2_jac_to_affine(p: G2Point) -> G2Point {
+  if (g2_jac_is_infinity(p)) {
+    var inf: G2Point;
+    inf.x = fp2_zero();
+    inf.y = fp2_zero();
+    inf.z = fp2_zero();
+    return inf;
+  }
+  let a = fp2_inverse(p.z);
+  let b = fp2_square(a);
+  var out: G2Point;
+  out.x = fp2_mul(p.x, b);
+  out.y = fp2_mul(fp2_mul(p.y, b), a);
+  out.z = fp2_one();
+  return out;
+}
+
+fn g2_neg_affine(q: G2Point) -> G2Point {
+  if (g2_affine_is_infinity(q)) {
+    return q;
+  }
+  var p = q;
+  p.y = fp2_neg(q.y);
+  return p;
+}
+
+fn g2_neg_jac(q: G2Point) -> G2Point {
+  var p = q;
+  p.y = fp2_neg(q.y);
+  return p;
+}
+
+fn g2_double_mixed(a: G2Point) -> G2Point {
+  if (g2_affine_is_infinity(a)) {
+    return g2_jac_infinity();
+  }
+  var xx = fp2_square(a.x);
+  let yy = fp2_square(a.y);
+  var yyyy = fp2_square(yy);
+  var s = fp2_add(a.x, yy);
+  s = fp2_square(s);
+  s = fp2_sub(s, xx);
+  s = fp2_sub(s, yyyy);
+  s = fp2_double(s);
+  var m = fp2_double(xx);
+  m = fp2_add(m, xx);
+  let t = fp2_sub(fp2_sub(fp2_square(m), s), s);
+
+  var p: G2Point;
+  p.x = t;
+  p.y = fp2_mul(fp2_sub(s, t), m);
+  yyyy = fp2_double(fp2_double(fp2_double(yyyy)));
+  p.y = fp2_sub(p.y, yyyy);
+  p.z = fp2_double(a.y);
+  return p;
+}
+
+fn g2_double_jac(q: G2Point) -> G2Point {
+  var a = fp2_square(q.x);
+  let b = fp2_square(q.y);
+  let c = fp2_square(b);
+  var d = fp2_add(q.x, b);
+  d = fp2_square(d);
+  d = fp2_sub(d, a);
+  d = fp2_sub(d, c);
+  d = fp2_double(d);
+  var e = fp2_double(a);
+  e = fp2_add(e, a);
+  let f = fp2_square(e);
+  let t = fp2_double(d);
+
+  var p: G2Point;
+  p.z = fp2_double(fp2_mul(q.y, q.z));
+  p.x = fp2_sub(f, t);
+  p.y = fp2_mul(fp2_sub(d, p.x), e);
+  let c8 = fp2_double(fp2_double(fp2_double(c)));
+  p.y = fp2_sub(p.y, c8);
+  return p;
+}
+
+fn g2_add_mixed(p: G2Point, a: G2Point) -> G2Point {
+  if (g2_affine_is_infinity(a)) {
+    return p;
+  }
+  if (g2_jac_is_infinity(p)) {
+    return g2_affine_to_jac(a);
+  }
+
+  let z1z1 = fp2_square(p.z);
+  let u2 = fp2_mul(a.x, z1z1);
+  let s2 = fp2_mul(fp2_mul(a.y, p.z), z1z1);
+
+  if (fp2_equal(u2, p.x) && fp2_equal(s2, p.y)) {
+    return g2_double_mixed(a);
+  }
+
+  let h = fp2_sub(u2, p.x);
+  let hh = fp2_square(h);
+  let i = fp2_double(fp2_double(hh));
+  let j = fp2_mul(h, i);
+  let r = fp2_double(fp2_sub(s2, p.y));
+  let v = fp2_mul(p.x, i);
+
+  var out: G2Point;
+  out.x = fp2_sub(fp2_sub(fp2_sub(fp2_square(r), j), v), v);
+  out.y = fp2_sub(fp2_mul(fp2_sub(v, out.x), r), fp2_double(fp2_mul(j, p.y)));
+  out.z = fp2_square(fp2_add(p.z, h));
+  out.z = fp2_sub(out.z, z1z1);
+  out.z = fp2_sub(out.z, hh);
+  return out;
+}
+
+fn g2_dispatch(opcode: u32, a: G2Point, b: G2Point) -> G2Point {
+  if (opcode == G2_OP_COPY) {
+    return a;
+  }
+  if (opcode == G2_OP_JAC_INFINITY) {
+    return g2_jac_infinity();
+  }
+  if (opcode == G2_OP_AFFINE_TO_JAC) {
+    return g2_affine_to_jac(a);
+  }
+  if (opcode == G2_OP_NEG_JAC) {
+    return g2_neg_jac(a);
+  }
+  if (opcode == G2_OP_DOUBLE_JAC) {
+    return g2_double_jac(a);
+  }
+  if (opcode == G2_OP_ADD_MIXED) {
+    return g2_add_mixed(a, b);
+  }
+  if (opcode == G2_OP_JAC_TO_AFFINE) {
+    return g2_jac_to_affine(a);
+  }
+  if (opcode == G2_OP_AFFINE_ADD) {
+    return g2_jac_to_affine(g2_add_mixed(g2_affine_to_jac(a), b));
+  }
+  return g2_jac_infinity();
+}
+
+fn fp_load_from(buffer_kind: u32, base: u32) -> Fp {
+  var z: Fp;
+  if (buffer_kind == 0u) {
+    for (var i = 0u; i < 12u; i = i + 1u) {
+      z.limbs[i] = input_a[base + i];
+    }
+    return z;
+  }
+  for (var i = 0u; i < 12u; i = i + 1u) {
+    z.limbs[i] = input_b[base + i];
+  }
+  return z;
+}
+
+fn fp2_load_from(buffer_kind: u32, base: u32) -> Fp2 {
+  var z: Fp2;
+  z.c0 = fp_load_from(buffer_kind, base);
+  z.c1 = fp_load_from(buffer_kind, base + 12u);
+  return z;
+}
+
+fn g2_load_from(buffer_kind: u32, index: u32) -> G2Point {
+  let base = index * 72u;
+  var p: G2Point;
+  p.x = fp2_load_from(buffer_kind, base + 0u);
+  p.y = fp2_load_from(buffer_kind, base + 24u);
+  p.z = fp2_load_from(buffer_kind, base + 48u);
+  return p;
+}
+
+fn fp_store(base: u32, value: Fp) {
+  for (var i = 0u; i < 12u; i = i + 1u) {
+    output[base + i] = value.limbs[i];
+  }
+}
+
+fn fp2_store(base: u32, value: Fp2) {
+  fp_store(base, value.c0);
+  fp_store(base + 12u, value.c1);
+}
+
+fn g2_store(index: u32, value: G2Point) {
+  let base = index * 72u;
+  fp2_store(base + 0u, value.x);
+  fp2_store(base + 24u, value.y);
+  fp2_store(base + 48u, value.z);
+}
+
+@compute @workgroup_size(64)
+fn g2_ops_main(@builtin(global_invocation_id) id: vec3<u32>) {
+  let i = id.x;
+  if (i >= params_count()) {
+    return;
+  }
+  g2_store(i, g2_dispatch(params_opcode(), g2_load_from(0u, i), g2_load_from(1u, i)));
+}
