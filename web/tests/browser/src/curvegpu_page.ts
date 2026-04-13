@@ -99,6 +99,15 @@ const SUITES: SuiteConfig[] = [
   },
   {
     curve: "bn254",
+    id: "g2_msm_bench",
+    label: "G2 MSM benchmark",
+    kind: "bench",
+    title: "BN254 G2 MSM Browser Benchmark",
+    description: "Benchmarks BN254 G2 MSM in browser WebGPU.",
+    script: "/web/dist/tests/browser/src/g2_msm_bench_page.js",
+  },
+  {
+    curve: "bn254",
     id: "fr_vector_bench",
     label: "fr vector benchmark",
     kind: "bench",
@@ -237,6 +246,15 @@ const SUITES: SuiteConfig[] = [
     title: "BLS12-381 G2 MSM Browser Smoke",
     description: "Runs the BLS12-381 G2 MSM smoke suite.",
     script: "/web/dist/tests/browser/src/g2_msm_page.js",
+  },
+  {
+    curve: "bls12_381",
+    id: "g2_msm_bench",
+    label: "G2 MSM benchmark",
+    kind: "bench",
+    title: "BLS12-381 G2 MSM Browser Benchmark",
+    description: "Benchmarks BLS12-381 G2 MSM in browser WebGPU.",
+    script: "/web/dist/tests/browser/src/g2_msm_bench_page.js",
   },
   {
     curve: "bls12_381",

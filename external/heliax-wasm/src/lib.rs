@@ -1,4 +1,4 @@
-use blstrs::{Bls12, G1Affine, G1Projective, Scalar};
+use blstrs::{Bls12, G1Affine, G1Projective, G2Affine, G2Projective, Scalar};
 use group::{Curve, Group};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -44,6 +44,19 @@ fn scalar_for_index(i: usize) -> Scalar {
 
 fn build_dataset(n: usize) -> (Vec<G1Affine>, Vec<Scalar>) {
     let generator = G1Projective::generator();
+    let mut current = generator;
+    let mut bases = Vec::with_capacity(n);
+    let mut scalars = Vec::with_capacity(n);
+    for i in 0..n {
+        bases.push(current.to_affine());
+        scalars.push(scalar_for_index(i));
+        current += generator;
+    }
+    (bases, scalars)
+}
+
+fn build_dataset_g2(n: usize) -> (Vec<G2Affine>, Vec<Scalar>) {
+    let generator = G2Projective::generator();
     let mut current = generator;
     let mut bases = Vec::with_capacity(n);
     let mut scalars = Vec::with_capacity(n);
@@ -105,6 +118,70 @@ pub async fn benchmark_msm(
 }
 
 #[wasm_bindgen]
+pub async fn benchmark_msm_g2(
+    min_log2: u32,
+    max_log2: u32,
+    iterations: u32,
+) -> Result<JsValue, JsValue> {
+    install_panic_hook();
+    let t_init = now_ms()?;
+    log("heliax: GpuContext::new() start");
+    let gpu = GpuContext::<Bls12>::new()
+        .await
+        .map_err(|e| JsValue::from_str(&format!("gpu init failed: {e:#}")))?;
+    log("heliax: GpuContext::new() done");
+    let init_ms = now_ms()? - t_init;
+
+    let empty_g1_bases: Vec<G1Affine> = Vec::new();
+    let empty_scalars: Vec<Scalar> = Vec::new();
+
+    let mut rows = Vec::new();
+    for log2 in min_log2..=max_log2 {
+        let size = 1usize << log2;
+
+        let t_prep = now_ms()?;
+        let (bases, scalars) = build_dataset_g2(size);
+        let prep_ms = now_ms()? - t_prep;
+        log(&format!("heliax: g2 dataset built n={size}"));
+
+        let mut total_ms_acc = 0.0;
+        for _ in 0..iterations.max(1) {
+            let t_total = now_ms()?;
+            log(&format!("heliax: gpu_msm_g2(batch) start n={size}"));
+            let _result = prover::gpu_msm_batch::<Bls12>(
+                &gpu,
+                &empty_g1_bases,
+                &empty_scalars,
+                &empty_g1_bases,
+                &empty_scalars,
+                &empty_g1_bases,
+                &empty_scalars,
+                &empty_g1_bases,
+                &empty_scalars,
+                &bases,
+                &scalars,
+            )
+            .await
+            .map_err(|e| JsValue::from_str(&format!("gpu_msm_g2(batch) failed: {e:#}")))?;
+            log(&format!("heliax: gpu_msm_g2(batch) done n={size}"));
+            total_ms_acc += now_ms()? - t_total;
+        }
+
+        let total_ms = total_ms_acc / iterations.max(1) as f64;
+        rows.push(BenchRow {
+            size,
+            init_ms,
+            prep_ms,
+            total_ms,
+            total_with_init_ms: total_ms + init_ms,
+        });
+    }
+
+    serde_wasm_bindgen::to_value(&BenchReport { init_ms, rows })
+        .map_err(|e| JsValue::from_str(&format!("serialize report failed: {e}")))
+}
+
+#[wasm_bindgen]
 pub async fn probe_init() -> Result<JsValue, JsValue> {
     install_panic_hook();
     log("heliax: probe_init start");
@@ -131,5 +208,37 @@ pub async fn probe_msm_once(size: u32) -> Result<JsValue, JsValue> {
         .await
         .map_err(|e| JsValue::from_str(&format!("gpu_msm_g1 failed: {e:#}")))?;
     log(&format!("heliax: probe_msm_once msm done n={size}"));
+    Ok(JsValue::from_f64(now_ms()? - t))
+}
+
+#[wasm_bindgen]
+pub async fn probe_msm_g2_once(size: u32) -> Result<JsValue, JsValue> {
+    install_panic_hook();
+    log("heliax: probe_msm_g2_once init start");
+    let gpu = GpuContext::<Bls12>::new()
+        .await
+        .map_err(|e| JsValue::from_str(&format!("gpu init failed: {e:#}")))?;
+    log("heliax: probe_msm_g2_once init done");
+    let (bases, scalars) = build_dataset_g2(size as usize);
+    let empty_g1_bases: Vec<G1Affine> = Vec::new();
+    let empty_scalars: Vec<Scalar> = Vec::new();
+    log(&format!("heliax: probe_msm_g2_once dataset n={size}"));
+    let t = now_ms()?;
+    let _result = prover::gpu_msm_batch::<Bls12>(
+        &gpu,
+        &empty_g1_bases,
+        &empty_scalars,
+        &empty_g1_bases,
+        &empty_scalars,
+        &empty_g1_bases,
+        &empty_scalars,
+        &empty_g1_bases,
+        &empty_scalars,
+        &bases,
+        &scalars,
+    )
+    .await
+    .map_err(|e| JsValue::from_str(&format!("gpu_msm_g2(batch) failed: {e:#}")))?;
+    log(&format!("heliax: probe_msm_g2_once msm done n={size}"));
     Ok(JsValue::from_f64(now_ms()? - t))
 }
