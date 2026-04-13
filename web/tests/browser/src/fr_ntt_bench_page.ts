@@ -144,7 +144,3 @@ writeLog([
   "",
   `Press Run to benchmark ${curveDisplayName(config.curve)} fr NTT in browser WebGPU.`,
 ]);
-
-if (new URLSearchParams(window.location.search).get("autorun") === "1") {
-  void runBenchmark();
-}
