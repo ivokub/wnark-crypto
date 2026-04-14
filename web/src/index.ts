@@ -21,6 +21,13 @@ export type {
   SupportedCurveID,
 } from "./curvegpu/api.js";
 
+export {
+  CurveGPUError,
+  CurveGPUNotSupportedError,
+  CurveGPUDeviceLostError,
+  CurveGPUShaderError,
+} from "./curvegpu/errors.js";
+
 export { createCurveGPUContext } from "./curvegpu/context.js";
 
 export {

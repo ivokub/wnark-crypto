@@ -1,7 +1,9 @@
+import { CurveGPUShaderError } from "./errors.js";
+
 export async function fetchShaderText(path: string): Promise<string> {
   const response = await fetch(path.split("#", 1)[0]);
   if (!response.ok) {
-    throw new Error(`failed to load shader ${path}: ${response.status} ${response.statusText}`);
+    throw new CurveGPUShaderError(`failed to load shader ${path}: ${response.status} ${response.statusText}`);
   }
   return response.text();
 }
@@ -14,14 +16,14 @@ export async function fetchShaderPart(spec: string): Promise<string> {
   }
   const prefix = "section=";
   if (!fragment.startsWith(prefix)) {
-    throw new Error(`unsupported shader fragment spec: ${spec}`);
+    throw new CurveGPUShaderError(`unsupported shader fragment spec: ${spec}`);
   }
   const section = fragment.slice(prefix.length);
   const begin = `// curvegpu:section ${section} begin`;
   const end = `// curvegpu:section ${section} end`;
   const start = text.indexOf(begin);
   if (start < 0) {
-    throw new Error(`shader section ${section} begin marker not found in ${path}`);
+    throw new CurveGPUShaderError(`shader section ${section} begin marker not found in ${path}`);
   }
   let bodyStart = start + begin.length;
   if (text[bodyStart] === "\r") {
@@ -32,7 +34,7 @@ export async function fetchShaderPart(spec: string): Promise<string> {
   }
   const stop = text.indexOf(end, bodyStart);
   if (stop < 0) {
-    throw new Error(`shader section ${section} end marker not found in ${path}`);
+    throw new CurveGPUShaderError(`shader section ${section} end marker not found in ${path}`);
   }
   return text.slice(bodyStart, stop);
 }

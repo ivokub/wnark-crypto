@@ -5,6 +5,7 @@ import type {
   CurveGPUContextOptions,
   CurveGPURequestedLimits,
 } from "./api.js";
+import { CurveGPUNotSupportedError } from "./errors.js";
 
 type AdapterWithLimits = GPUAdapter & {
   isFallbackAdapter?: boolean;
@@ -50,14 +51,23 @@ function buildDiagnostics(adapter: AdapterWithLimits, adapterInfo: GPUAdapterInf
  */
 export async function createCurveGPUContext(options: CurveGPUContextOptions = {}): Promise<CurveGPUContext> {
   if (!navigator.gpu) {
-    throw new Error("WebGPU is not available in this browser");
+    throw new CurveGPUNotSupportedError(
+      "WebGPU is not supported in this browser. " +
+      "WebGPU requires Chrome 113+, Edge 113+, or Safari 18+. " +
+      "Firefox requires the dom.webgpu.enabled flag.",
+    );
   }
 
   const adapter = (await navigator.gpu.requestAdapter({
     powerPreference: options.powerPreference,
   })) as AdapterWithLimits | null;
   if (!adapter) {
-    throw new Error("requestAdapter returned null");
+    throw new CurveGPUNotSupportedError(
+      "requestAdapter returned null. " +
+      "This can happen when no suitable GPU is available, " +
+      "when the browser is running in a context without GPU access, " +
+      "or when hardware acceleration is disabled in browser settings.",
+    );
   }
 
   const adapterInfo = await getAdapterInfo(adapter);
@@ -69,6 +79,14 @@ export async function createCurveGPUContext(options: CurveGPUContextOptions = {}
   const debug = options.debug ?? false;
   const maxWorkgroupSize = (device.limits as { maxComputeWorkgroupSizeX?: number }).maxComputeWorkgroupSizeX ?? 256;
   let closed = false;
+
+  const deviceLost: Promise<GPUDeviceLostInfo> = device.lost.then((info) => {
+    if (debug) {
+      console.debug(`[curvegpu] device lost: reason=${info.reason} message=${info.message}`);
+    }
+    return info;
+  });
+
   return {
     adapter,
     device,
@@ -77,6 +95,7 @@ export async function createCurveGPUContext(options: CurveGPUContextOptions = {}
     requestedLimits,
     debug,
     maxWorkgroupSize,
+    deviceLost,
     close(): void {
       if (closed) {
         return;

@@ -1,5 +1,7 @@
 import type { FieldShape } from "./types.js";
 
+export type { CurveGPUError, CurveGPUNotSupportedError, CurveGPUDeviceLostError, CurveGPUShaderError } from "./errors.js";
+
 /**
  * Curves currently exposed by the browser library surface.
  */
@@ -125,6 +127,14 @@ export interface CurveGPUContext {
   readonly debug: boolean;
   /** Maximum compute workgroup size supported by the device. */
   readonly maxWorkgroupSize: number;
+  /**
+   * Resolves when the GPU device is lost.
+   *
+   * Consumers can attach a handler to this promise to react to unexpected
+   * device loss (driver crash, GPU reset, tab backgrounded on mobile, etc.).
+   * The resolved value is the browser's `GPUDeviceLostInfo` object.
+   */
+  readonly deviceLost: Promise<GPUDeviceLostInfo>;
   /**
    * Release any library-owned resources associated with the context.
    *
