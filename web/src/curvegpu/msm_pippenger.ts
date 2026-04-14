@@ -9,11 +9,15 @@ import {
   readbackBuffer,
   submitKernel,
 } from "./msm_gpu_runtime.js";
+import type { BufferPool } from "./buffer_pool.js";
+
+declare const GPUBufferUsage: { STORAGE: number; COPY_SRC: number; COPY_DST: number };
 
 type SparseSignedBucketMetadata = ReturnType<typeof buildSparseSignedBucketMetadataWords>;
 
 export type WindowReductionOptions = {
   device: GPUDevice;
+  pool?: BufferPool;
   pointBytes: number;
   uniformBytes: number;
   zeroInput: GPUBuffer;
@@ -51,6 +55,7 @@ export function buildJacPippengerRuntime(
     async reduceWindows(options: WindowReductionOptions): Promise<WindowReductionResult> {
       const {
         device,
+        pool,
         pointBytes,
         uniformBytes,
         zeroInput,
@@ -68,7 +73,13 @@ export function buildJacPippengerRuntime(
       const weightBindGroup = createBindGroupForBuffers(device, kernels.weightJac, `${labelPrefix}-weight-bg`,
         bucketOutput, zeroInput, weightedBucketOutput, weightParams, bucketValuesInput);
       await submitKernel(device, kernels.weightJac, weightBindGroup, bucketCountOut, `${labelPrefix}-weight`, workgroupSize, debug);
-      const windowOutput = createEmptyPointStorageBuffer(device, `${labelPrefix}-window-out`, count * metadata.numWindows, pointBytes);
+
+      const windowSize = Math.max(1, count * metadata.numWindows) * pointBytes;
+      const windowUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
+      const windowOutput = pool
+        ? pool.acquire(windowSize, windowUsage, `${labelPrefix}-window-out`)
+        : createEmptyPointStorageBuffer(device, `${labelPrefix}-window-out`, count * metadata.numWindows, pointBytes);
+
       const windowParams = createParamsBuffer(device, `${labelPrefix}-window-params`, uniformBytes, { count: count * metadata.numWindows });
       const windowBindGroup = createBindGroupForBuffers(device, kernels.subsumJac, `${labelPrefix}-window-bg`,
         weightedBucketOutput, zeroInput, windowOutput, windowParams, bucketValuesInput, windowStartsInput, windowCountsInput);
@@ -81,6 +92,7 @@ export function buildJacPippengerRuntime(
 
 export async function runSparseSignedPippengerMSM(options: {
   device: GPUDevice;
+  pool?: BufferPool;
   runtime: PippengerRuntime;
   basesBytes: Uint8Array;
   pointBytes: number;
@@ -96,6 +108,7 @@ export async function runSparseSignedPippengerMSM(options: {
 }): Promise<Uint8Array> {
   const {
     device,
+    pool,
     runtime,
     basesBytes,
     pointBytes,
@@ -132,19 +145,33 @@ export async function runSparseSignedPippengerMSM(options: {
     windowCountsHead: Array.from(metadata.windowCounts.slice(0, 16)),
     });
   }
-  const zeroInput = createStorageBufferFromBytes(device, `${labelPrefix}-zero`, zeroPointBytes, pointBytes);
-  const basesInput = createStorageBufferFromBytes(
-    device,
-    `${labelPrefix}-bases`,
-    basesBytes,
-    Math.max(1, termsPerInstance * count) * pointBytes,
-  );
+  const storageInUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
+  const storagePointUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
+
+  const zeroSize = Math.max(4, pointBytes);
+  const zeroInput = pool
+    ? pool.acquire(zeroSize, storageInUsage, `${labelPrefix}-zero`)
+    : createStorageBufferFromBytes(device, `${labelPrefix}-zero`, zeroPointBytes, pointBytes);
+  if (pool) {
+    device.queue.writeBuffer(zeroInput, 0, zeroPointBytes.buffer, zeroPointBytes.byteOffset, zeroPointBytes.byteLength);
+  }
+
+  const basesSize = Math.max(1, termsPerInstance * count) * pointBytes;
+  const basesInput = pool
+    ? pool.acquire(basesSize, storageInUsage, `${labelPrefix}-bases`)
+    : createStorageBufferFromBytes(device, `${labelPrefix}-bases`, basesBytes, basesSize);
+  if (pool) {
+    device.queue.writeBuffer(basesInput, 0, basesBytes.buffer, basesBytes.byteOffset, basesBytes.byteLength);
+  }
   const baseIndicesInput = createU32StorageBuffer(device, `${labelPrefix}-base-indices`, metadata.baseIndices);
   const bucketPointersInput = createU32StorageBuffer(device, `${labelPrefix}-bucket-pointers`, metadata.bucketPointers);
   const bucketSizesInput = createU32StorageBuffer(device, `${labelPrefix}-bucket-sizes`, metadata.bucketSizes);
 
   const bucketCountOut = metadata.bucketPointers.length;
-  const bucketOutput = createEmptyPointStorageBuffer(device, `${labelPrefix}-bucket-out`, bucketCountOut, pointBytes);
+  const bucketSize = Math.max(1, bucketCountOut) * pointBytes;
+  const bucketOutput = pool
+    ? pool.acquire(bucketSize, storagePointUsage, `${labelPrefix}-bucket-out`)
+    : createEmptyPointStorageBuffer(device, `${labelPrefix}-bucket-out`, bucketCountOut, pointBytes);
   const bucketParams = createParamsBuffer(device, `${labelPrefix}-bucket-params`, uniformBytes, {
     count: bucketCountOut,
     termsPerInstance,
@@ -172,6 +199,7 @@ export async function runSparseSignedPippengerMSM(options: {
 
   const { windowOutput, cleanupBuffers: windowReductionCleanup } = await runtime.reduceWindows({
     device,
+    pool,
     pointBytes,
     uniformBytes,
     zeroInput,
@@ -185,7 +213,10 @@ export async function runSparseSignedPippengerMSM(options: {
     labelPrefix,
   });
 
-  const finalOutput = createEmptyPointStorageBuffer(device, `${labelPrefix}-final-out`, count, pointBytes);
+  const finalSize = Math.max(1, count) * pointBytes;
+  const finalOutput = pool
+    ? pool.acquire(finalSize, storagePointUsage, `${labelPrefix}-final-out`)
+    : createEmptyPointStorageBuffer(device, `${labelPrefix}-final-out`, count, pointBytes);
   const finalParams = createParamsBuffer(device, `${labelPrefix}-final-params`, uniformBytes, {
     count,
     termsPerInstance,
@@ -206,18 +237,26 @@ export async function runSparseSignedPippengerMSM(options: {
 
   const result = await readbackBuffer(device, finalOutput, Math.max(1, count) * pointBytes);
 
-  zeroInput.destroy();
-  basesInput.destroy();
+  if (pool) {
+    pool.release(zeroInput);
+    pool.release(basesInput);
+    pool.release(bucketOutput);
+    pool.release(windowOutput);
+    pool.release(finalOutput);
+  } else {
+    zeroInput.destroy();
+    basesInput.destroy();
+    bucketOutput.destroy();
+    windowOutput.destroy();
+    finalOutput.destroy();
+  }
   baseIndicesInput.destroy();
   bucketPointersInput.destroy();
   bucketSizesInput.destroy();
   bucketValuesInput.destroy();
   windowStartsInput.destroy();
   windowCountsInput.destroy();
-  bucketOutput.destroy();
   windowReductionCleanup.forEach((buffer) => buffer.destroy());
-  windowOutput.destroy();
-  finalOutput.destroy();
   bucketParams.destroy();
   finalParams.destroy();
 
