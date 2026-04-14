@@ -48,6 +48,7 @@ export function createPreferredByteBaseSource(options: {
   fixtureBinPath?: string;
   generatedLoadBases?: (size: number) => Promise<Uint8Array>;
   generateHint?: (size: number) => string;
+  fixtureLabel?: string;
 }): BaseSourceProvider<Uint8Array, PreferredByteBaseSourceContext> {
   const params = new URLSearchParams(options.locationSearch);
   const explicitSourceRaw = params.get("base-source") ?? params.get("baseSource");
@@ -76,7 +77,8 @@ export function createPreferredByteBaseSource(options: {
   }
 
   function missingFixtureMessage(size: number): string {
-    const base = "no local G1 base fixture is available";
+    const noun = options.fixtureLabel ?? "base";
+    const base = `no local ${noun} fixture is available`;
     if (!options.generateHint) {
       return base;
     }

@@ -9,6 +9,7 @@ import {
 } from "../../../src/curvegpu/browser_utils.js";
 import { benchmarkTotalDuration } from "./shared/bench_total.js";
 import { createPreferredByteBaseSource } from "../../../src/curvegpu/msm_bench_sources.js";
+import { createOptimizedG2MSMBenchModule } from "../../../src/curvegpu/g2_msm_bench_optimized.js";
 import { makeRandomScalarBatch } from "../../../src/curvegpu/msm_shared.js";
 import type {
   CurveGPUElementBytes,
@@ -46,6 +47,8 @@ type CurveBenchConfig = {
   componentBytes: number;
   pointBytes: number;
   opsVectorsPath: string;
+  fixtureJSONPath?: string;
+  fixtureBinPath?: string;
 };
 
 const CURVE_CONFIGS: Record<SupportedCurveID, CurveBenchConfig> = {
@@ -56,6 +59,8 @@ const CURVE_CONFIGS: Record<SupportedCurveID, CurveBenchConfig> = {
     componentBytes: 32,
     pointBytes: 192,
     opsVectorsPath: "/testdata/vectors/g2/bn254_g2_ops.json?v=1",
+    fixtureJSONPath: "/testdata/fixtures/g2/bn254_bases_jacobian.json?v=1",
+    fixtureBinPath: "/testdata/fixtures/g2/bn254_bases_jacobian.bin?v=1",
   },
   bls12_381: {
     curve: "bls12_381",
@@ -64,6 +69,8 @@ const CURVE_CONFIGS: Record<SupportedCurveID, CurveBenchConfig> = {
     componentBytes: 48,
     pointBytes: 288,
     opsVectorsPath: "/testdata/vectors/g2/bls12_381_g2_ops.json?v=1",
+    fixtureJSONPath: "/testdata/fixtures/g2/bls12_381_bases_jacobian.json?v=1",
+    fixtureBinPath: "/testdata/fixtures/g2/bls12_381_bases_jacobian.bin?v=1",
   },
 };
 
@@ -145,6 +152,10 @@ function makeMSMScalarsPacked(count: number): Uint8Array {
   return out;
 }
 
+function fixtureGenerationHint(curve: SupportedCurveID, size: number): string {
+  return `make fixture-${curve}-g2 G2_COUNT=${size}`;
+}
+
 async function buildGeneratedBases(
   curve: Awaited<ReturnType<typeof createRequestedCurveModule>>,
   config: CurveBenchConfig,
@@ -180,12 +191,17 @@ async function runBenchmark(): Promise<void> {
 
     const initStart = performance.now();
     const curve = await createRequestedCurveModule(config.curve);
+    const optimizedMSM = createOptimizedG2MSMBenchModule(curve.context, config.curve, config.pointBytes);
     const g2Vectors = await fetchJSON<G2OpsVectors>(config.opsVectorsPath);
     const generator = findGeneratorPoint(g2Vectors);
     const baseSourceProvider = createPreferredByteBaseSource({
       locationSearch: window.location.search,
       pointBytes: config.pointBytes,
+      fixtureJSONPath: config.fixtureJSONPath,
+      fixtureBinPath: config.fixtureBinPath,
       generatedLoadBases: async (size) => buildGeneratedBases(curve, config, generator, size),
+      generateHint: (size) => fixtureGenerationHint(config.curve, size <= 0 ? (1 << 14) : size),
+      fixtureLabel: "G2 base",
     });
     const baseSourceInit = await baseSourceProvider.init();
     const initMs = performance.now() - initStart;
@@ -211,9 +227,9 @@ async function runBenchmark(): Promise<void> {
       });
       const scalarsPacked = makeMSMScalarsPacked(size);
       const prepMs = performance.now() - prepStart;
-      const window = curve.g2msm.bestWindow(size);
+      const window = optimizedMSM.bestWindow(size);
       const benchmark = await benchmarkTotalDuration(iters, async () => {
-        await curve.g2msm.pippengerPackedJacobianBases(baseBytes, scalarsPacked, {
+        await optimizedMSM.pippengerPackedJacobianBases(baseBytes, scalarsPacked, {
           count: 1,
           termsPerInstance: size,
           window,
@@ -222,7 +238,7 @@ async function runBenchmark(): Promise<void> {
       lines.push(
         [
           `${size}`,
-          "msm_pippenger_affine",
+          "msm_pippenger_packed",
           `${window}`,
           initMs.toFixed(3),
           prepMs.toFixed(3),

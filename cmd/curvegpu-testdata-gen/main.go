@@ -16,7 +16,7 @@ type target struct {
 	run            func(string) error
 }
 
-func buildTargets(fixtureCount int) []target {
+func buildTargets(g1FixtureCount int, g2FixtureCount int) []target {
 	return []target{
 		{name: "bn254-fr-vectors", defaultEnabled: true, run: func(root string) error {
 			return writeJSON(filepath.Join(root, "testdata/vectors/fr/bn254_fr_ops.json"), testgen.BuildBN254FROpsVectors())
@@ -81,42 +81,84 @@ func buildTargets(fixtureCount int) []target {
 		{name: "bn254-g1-bases-fixture", defaultEnabled: true, run: func(root string) error {
 			outPath := filepath.Join(root, "testdata/fixtures/g1/bn254_bases_jacobian.bin")
 			metaPath := filepath.Join(root, "testdata/fixtures/g1/bn254_bases_jacobian.json")
-			data, err := testgen.BuildSequentialBN254G1Bases(fixtureCount)
+			data, err := testgen.BuildSequentialBN254G1Bases(g1FixtureCount)
 			if err != nil {
 				return err
 			}
 			if err := writeBinary(outPath, data); err != nil {
 				return err
 			}
-			metaJSON, err := testgen.MarshalMetadataJSON(testgen.BuildBN254G1BaseFixtureMetadata(fixtureCount))
+			metaJSON, err := testgen.MarshalMetadataJSON(testgen.BuildBN254G1BaseFixtureMetadata(g1FixtureCount))
 			if err != nil {
 				return err
 			}
 			if err := writeBinary(metaPath, metaJSON); err != nil {
 				return err
 			}
-			fmt.Printf("wrote %s (%d points)\n", outPath, fixtureCount)
+			fmt.Printf("wrote %s (%d points)\n", outPath, g1FixtureCount)
 			fmt.Printf("wrote %s\n", metaPath)
 			return nil
 		}},
 		{name: "bls12-381-g1-bases-fixture", defaultEnabled: true, run: func(root string) error {
 			outPath := filepath.Join(root, "testdata/fixtures/g1/bls12_381_bases_jacobian.bin")
 			metaPath := filepath.Join(root, "testdata/fixtures/g1/bls12_381_bases_jacobian.json")
-			data, err := testgen.BuildSequentialBLS12381G1Bases(fixtureCount)
+			data, err := testgen.BuildSequentialBLS12381G1Bases(g1FixtureCount)
 			if err != nil {
 				return err
 			}
 			if err := writeBinary(outPath, data); err != nil {
 				return err
 			}
-			metaJSON, err := testgen.MarshalMetadataJSON(testgen.BuildBLS12381G1BaseFixtureMetadata(fixtureCount))
+			metaJSON, err := testgen.MarshalMetadataJSON(testgen.BuildBLS12381G1BaseFixtureMetadata(g1FixtureCount))
 			if err != nil {
 				return err
 			}
 			if err := writeBinary(metaPath, metaJSON); err != nil {
 				return err
 			}
-			fmt.Printf("wrote %s (%d points)\n", outPath, fixtureCount)
+			fmt.Printf("wrote %s (%d points)\n", outPath, g1FixtureCount)
+			fmt.Printf("wrote %s\n", metaPath)
+			return nil
+		}},
+		{name: "bn254-g2-bases-fixture", defaultEnabled: true, run: func(root string) error {
+			outPath := filepath.Join(root, "testdata/fixtures/g2/bn254_bases_jacobian.bin")
+			metaPath := filepath.Join(root, "testdata/fixtures/g2/bn254_bases_jacobian.json")
+			data, err := testgen.BuildSequentialBN254G2Bases(g2FixtureCount)
+			if err != nil {
+				return err
+			}
+			if err := writeBinary(outPath, data); err != nil {
+				return err
+			}
+			metaJSON, err := testgen.MarshalMetadataJSON(testgen.BuildBN254G2BaseFixtureMetadata(g2FixtureCount))
+			if err != nil {
+				return err
+			}
+			if err := writeBinary(metaPath, metaJSON); err != nil {
+				return err
+			}
+			fmt.Printf("wrote %s (%d points)\n", outPath, g2FixtureCount)
+			fmt.Printf("wrote %s\n", metaPath)
+			return nil
+		}},
+		{name: "bls12-381-g2-bases-fixture", defaultEnabled: true, run: func(root string) error {
+			outPath := filepath.Join(root, "testdata/fixtures/g2/bls12_381_bases_jacobian.bin")
+			metaPath := filepath.Join(root, "testdata/fixtures/g2/bls12_381_bases_jacobian.json")
+			data, err := testgen.BuildSequentialBLS12381G2Bases(g2FixtureCount)
+			if err != nil {
+				return err
+			}
+			if err := writeBinary(outPath, data); err != nil {
+				return err
+			}
+			metaJSON, err := testgen.MarshalMetadataJSON(testgen.BuildBLS12381G2BaseFixtureMetadata(g2FixtureCount))
+			if err != nil {
+				return err
+			}
+			if err := writeBinary(metaPath, metaJSON); err != nil {
+				return err
+			}
+			fmt.Printf("wrote %s (%d points)\n", outPath, g2FixtureCount)
 			fmt.Printf("wrote %s\n", metaPath)
 			return nil
 		}},
@@ -127,9 +169,10 @@ func main() {
 	list := flag.Bool("list", false, "list available targets")
 	only := flag.String("target", "", "run only a single target name")
 	fixtureCount := flag.Int("fixture-count", 1<<15, "point count for G1 base fixture targets")
+	g2FixtureCount := flag.Int("g2-fixture-count", 1<<14, "point count for G2 base fixture targets")
 	flag.Parse()
 
-	targets := buildTargets(*fixtureCount)
+	targets := buildTargets(*fixtureCount, *g2FixtureCount)
 
 	if *list {
 		for _, t := range targets {

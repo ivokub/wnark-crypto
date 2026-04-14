@@ -1,6 +1,7 @@
-.PHONY: web-build testdata fixture-bn254-g1 fixture-bls12_381-g1 metal-bench-fr-ntt-range poc-wasm-build poc-wasm-fixture-bn254 poc-wasm-fixture-bls12_381 poc-wasm-fixture-bn254-2pow18 poc-wasm-fixture-bls12_381-2pow18
+.PHONY: web-build testdata fixture-bn254-g1 fixture-bls12_381-g1 fixture-bn254-g2 fixture-bls12_381-g2 metal-bench-fr-ntt-range poc-wasm-build poc-wasm-fixture-bn254 poc-wasm-fixture-bls12_381 poc-wasm-fixture-bn254-2pow18 poc-wasm-fixture-bls12_381-2pow18
 
 COUNT ?= 524288
+G2_COUNT ?= 16384
 MIN_LOG ?= 10
 MAX_LOG ?= 20
 ITERS ?= 1
@@ -16,6 +17,12 @@ fixture-bn254-g1:
 
 fixture-bls12_381-g1:
 	go run ./cmd/curvegpu-testdata-gen -target bls12-381-g1-bases-fixture -fixture-count $(COUNT)
+
+fixture-bn254-g2:
+	go run ./cmd/curvegpu-testdata-gen -target bn254-g2-bases-fixture -g2-fixture-count $(G2_COUNT)
+
+fixture-bls12_381-g2:
+	go run ./cmd/curvegpu-testdata-gen -target bls12-381-g2-bases-fixture -g2-fixture-count $(G2_COUNT)
 
 metal-bench-fr-ntt-range:
 	@for log in $$(seq $(MIN_LOG) $(MAX_LOG)); do \
