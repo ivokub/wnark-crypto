@@ -172,6 +172,81 @@ function createWeightedPippengerRuntime(device: GPUDevice, shaderCode: string, l
   };
 }
 
+function createJacPippengerRuntime(device: GPUDevice, shaderCode: string, labelPrefix: string): PippengerRuntime {
+  const kernels = createMSMKernelSet(device, shaderCode, labelPrefix, {
+    bucket: "g1_msm_bucket_jac_main",
+    weightJac: "g1_msm_weight_jac_main",
+    subsumJac: "g1_msm_subsum_jac_main",
+    combine: "g1_msm_combine_jac_main",
+  });
+  return {
+    bucket: kernels.bucket,
+    combine: kernels.combine,
+    async reduceWindows(options: WindowReductionOptions): Promise<WindowReductionResult> {
+      const {
+        device,
+        pointBytes,
+        uniformBytes,
+        zeroInput,
+        bucketOutput,
+        bucketCountOut,
+        bucketValuesInput,
+        windowStartsInput,
+        windowCountsInput,
+        metadata,
+        count,
+        labelPrefix,
+      } = options;
+
+      const weightedBucketOutput = createEmptyPointStorageBuffer(device, `${labelPrefix}-jac-weighted-out`, bucketCountOut, pointBytes);
+      const weightParams = createParamsBuffer(device, `${labelPrefix}-jac-weight-params`, uniformBytes, {
+        count: bucketCountOut,
+      });
+      const weightBindGroup = createBindGroupForBuffers(
+        device,
+        kernels.weightJac,
+        `${labelPrefix}-jac-weight-bg`,
+        bucketOutput,
+        zeroInput,
+        weightedBucketOutput,
+        weightParams,
+        bucketValuesInput,
+      );
+      await submitKernel(device, kernels.weightJac, weightBindGroup, bucketCountOut, `${labelPrefix}-jac-weight`, 64);
+
+      const windowOutput = createEmptyPointStorageBuffer(device, `${labelPrefix}-jac-window-out`, count * metadata.numWindows, pointBytes);
+      const windowParams = createParamsBuffer(device, `${labelPrefix}-jac-window-params`, uniformBytes, {
+        count: count * metadata.numWindows,
+      });
+      const windowBindGroup = createBindGroupForBuffers(
+        device,
+        kernels.subsumJac,
+        `${labelPrefix}-jac-window-bg`,
+        weightedBucketOutput,
+        zeroInput,
+        windowOutput,
+        windowParams,
+        bucketValuesInput,
+        windowStartsInput,
+        windowCountsInput,
+      );
+      await submitKernel(
+        device,
+        kernels.subsumJac,
+        windowBindGroup,
+        count * metadata.numWindows * 64,
+        `${labelPrefix}-jac-window`,
+        64,
+      );
+
+      return {
+        windowOutput,
+        cleanupBuffers: [weightedBucketOutput, weightParams, windowParams],
+      };
+    },
+  };
+}
+
 export const simpleSparsePippengerStrategy: PippengerStrategy = {
   id: "simple-sparse",
   createRuntime: createSimplePippengerRuntime,
@@ -180,6 +255,11 @@ export const simpleSparsePippengerStrategy: PippengerStrategy = {
 export const weightedSparsePippengerStrategy: PippengerStrategy = {
   id: "weighted-sparse",
   createRuntime: createWeightedPippengerRuntime,
+};
+
+export const jacSparsePippengerStrategy: PippengerStrategy = {
+  id: "jac-sparse",
+  createRuntime: createJacPippengerRuntime,
 };
 
 export async function runSparseSignedPippengerMSM(options: {

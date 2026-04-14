@@ -5,9 +5,8 @@ import { createG2Module } from "./g2_module.js";
 import { createG2MSMModule } from "./g2_msm_module.js";
 import { createMSMModule } from "./msm_module.js";
 import {
-  simpleSparsePippengerStrategy,
+  jacSparsePippengerStrategy,
   type PippengerStrategy,
-  weightedSparsePippengerStrategy,
 } from "./msm_pippenger.js";
 import { createNTTModule } from "./ntt_module.js";
 import { shapeFor } from "./types.js";
@@ -56,9 +55,15 @@ const CURVE_DEFINITIONS: Record<SupportedCurveID, CurveDefinition> = {
     frModulusHex: "0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
     fpArithShaderPath: "/shaders/curves/bn254/fp_arith.wgsl?v=3",
     g1ArithShaderParts: fieldShaderParts("/shaders/curves/bn254/fp_arith.wgsl?v=3", "/shaders/curves/bn254/g1_arith.wgsl?v=1"),
-    g1MSMShaderParts: fieldShaderParts("/shaders/curves/bn254/fp_arith.wgsl?v=3", "/shaders/curves/bn254/g1_arith.wgsl?v=1"),
+    g1MSMShaderParts: [
+      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-types",
+      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-consts",
+      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-core",
+      "/shaders/curves/bn254/g1_arith.wgsl?v=2",
+      "/shaders/common/g1_msm_jac.wgsl?v=1",
+    ],
     g2ArithShaderParts: fieldShaderParts("/shaders/curves/bn254/fp_arith.wgsl?v=3", "/shaders/curves/bn254/g2_arith.wgsl?v=1"),
-    msmStrategy: simpleSparsePippengerStrategy,
+    msmStrategy: jacSparsePippengerStrategy,
     coordinateBytes: 32,
     pointBytes: 96,
     g2CoordinateBytes: 64,
@@ -74,9 +79,15 @@ const CURVE_DEFINITIONS: Record<SupportedCurveID, CurveDefinition> = {
     frModulusHex: "0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001",
     fpArithShaderPath: "/shaders/curves/bls12_381/fp_arith.wgsl?v=4",
     g1ArithShaderParts: fieldShaderParts("/shaders/curves/bls12_381/fp_arith.wgsl?v=4", "/shaders/curves/bls12_381/g1_arith.wgsl?v=2"),
-    g1MSMShaderParts: fieldShaderParts("/shaders/curves/bls12_381/fp_arith.wgsl?v=4", "/shaders/curves/bls12_381/g1_msm.wgsl?v=3"),
+    g1MSMShaderParts: [
+      "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-types",
+      "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-consts",
+      "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-core",
+      "/shaders/curves/bls12_381/g1_msm.wgsl?v=4",
+      "/shaders/common/g1_msm_jac.wgsl?v=1",
+    ],
     g2ArithShaderParts: fieldShaderParts("/shaders/curves/bls12_381/fp_arith.wgsl?v=4", "/shaders/curves/bls12_381/g2_arith.wgsl?v=1"),
-    msmStrategy: weightedSparsePippengerStrategy,
+    msmStrategy: jacSparsePippengerStrategy,
     coordinateBytes: 48,
     pointBytes: 144,
     g2CoordinateBytes: 96,

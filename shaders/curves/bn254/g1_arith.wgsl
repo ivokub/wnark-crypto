@@ -282,6 +282,58 @@ fn g1_scalar_mul_affine_small(base: G1Point, scalar: u32) -> G1Point {
   return g1_jac_to_affine(acc);
 }
 
+fn g1_add_jac(p: G1Point, q: G1Point) -> G1Point {
+  if (g1_jac_is_infinity(p)) {
+    return q;
+  }
+  if (g1_jac_is_infinity(q)) {
+    return p;
+  }
+  let z1z1 = fp_square(p.z);
+  let z2z2 = fp_square(q.z);
+  let u1 = fp_mul(p.x, z2z2);
+  let u2 = fp_mul(q.x, z1z1);
+  let s1 = fp_mul(fp_mul(p.y, q.z), z2z2);
+  let s2 = fp_mul(fp_mul(q.y, p.z), z1z1);
+  let h = fp_sub(u2, u1);
+  let r = fp_double(fp_sub(s2, s1));
+  if (fp_is_zero(h)) {
+    if (fp_is_zero(r)) {
+      return g1_double_jac(p);
+    }
+    return g1_jac_infinity();
+  }
+  let i = fp_double(fp_double(fp_square(h)));
+  let j = fp_mul(h, i);
+  let v = fp_mul(u1, i);
+  var out: G1Point;
+  out.x = fp_sub(fp_sub(fp_sub(fp_square(r), j), v), v);
+  out.y = fp_sub(fp_mul(fp_sub(v, out.x), r), fp_double(fp_mul(s1, j)));
+  let z_sum = fp_add(p.z, q.z);
+  out.z = fp_mul(fp_sub(fp_sub(fp_square(z_sum), z1z1), z2z2), h);
+  return out;
+}
+
+fn g1_scalar_mul_jac_small(base: G1Point, scalar: u32) -> G1Point {
+  if (scalar == 0u || g1_jac_is_infinity(base)) {
+    return g1_jac_infinity();
+  }
+  var acc = g1_jac_infinity();
+  var b = base;
+  var k = scalar;
+  loop {
+    if (k == 0u) {
+      break;
+    }
+    if ((k & 1u) != 0u) {
+      acc = g1_add_jac(acc, b);
+    }
+    b = g1_double_jac(b);
+    k = k >> 1u;
+  }
+  return acc;
+}
+
 fn g1_dispatch(opcode: u32, a: G1Point, b: G1Point) -> G1Point {
   if (opcode == G1_OP_COPY) {
     return a;
