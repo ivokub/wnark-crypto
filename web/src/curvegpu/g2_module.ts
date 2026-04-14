@@ -7,12 +7,11 @@ import type {
   G2Module,
   SupportedCurveID,
 } from "./api.js";
+import type { SimpleKernel } from "./runtime_common.js";
 import {
   cloneBytes,
-  createSimpleKernel,
   ensureByteLength,
   lazyAsync,
-  loadShaderParts,
   runSimpleKernel,
 } from "./runtime_common.js";
 
@@ -166,11 +165,11 @@ export function createG2Module(
     componentBytes: number;
     coordinateBytes: number;
     pointBytes: number;
-    shaderParts: readonly string[];
+    kernel: SimpleKernel;
   },
   fp: FieldModule,
 ): G2Module {
-  const { curve, componentBytes, coordinateBytes, pointBytes, shaderParts } = options;
+  const { curve, componentBytes, coordinateBytes, pointBytes, kernel } = options;
   const label = `${curve}-g2`;
 
   const zeroCoordinate = zeroFp2(componentBytes);
@@ -184,10 +183,6 @@ export function createG2Module(
     y: zeroFp2(componentBytes),
   };
 
-  const getKernel = lazyAsync(async () => {
-    const shaderCode = await loadShaderParts(shaderParts);
-    return createSimpleKernel(context.device, label, shaderCode, "g2_ops_main", context.debug);
-  });
   const getOneMontgomery = lazyAsync(async () => {
     const c0 = await fp.montOne();
     const c1 = zeroBytes(componentBytes);
@@ -210,7 +205,6 @@ export function createG2Module(
     if (inputA.length !== count || inputB.length !== count) {
       throw new Error(`${label}: mismatched jacobian batch lengths`);
     }
-    const kernel = await getKernel();
     const output = await runSimpleKernel({
       device: context.device,
       kernel,
@@ -236,7 +230,6 @@ export function createG2Module(
     if (inputA.length !== count || inputB.length !== count) {
       throw new Error(`${label}: mismatched mixed batch lengths`);
     }
-    const kernel = await getKernel();
     const oneMontZ = await getOneMontgomery();
     const output = await runSimpleKernel({
       device: context.device,
@@ -259,7 +252,6 @@ export function createG2Module(
     if (count === 0) {
       return [];
     }
-    const kernel = await getKernel();
     const oneMontZ = await getOneMontgomery();
     const output = await runSimpleKernel({
       device: context.device,
@@ -376,6 +368,30 @@ export function createG2Module(
         acc = await runMixedBatch(OP_ADD_MIXED, acc, activeBases);
       }
       return runJacobianBatch(OP_JAC_TO_AFFINE, acc, zeros);
+    },
+    async addAffine(a: CurveGPUG2AffinePoint, b: CurveGPUG2AffinePoint): Promise<CurveGPUG2AffinePoint> {
+      return affineFromJacobian(await this.affineAdd(a, b));
+    },
+    async addAffineBatch(a: readonly CurveGPUG2AffinePoint[], b: readonly CurveGPUG2AffinePoint[]): Promise<CurveGPUG2AffinePoint[]> {
+      return (await this.affineAddBatch(a, b)).map(affineFromJacobian);
+    },
+    async negAffine(point: CurveGPUG2AffinePoint): Promise<CurveGPUG2AffinePoint> {
+      return affineFromJacobian(await this.negJacobian(await this.affineToJacobian(point)));
+    },
+    async negAffineBatch(points: readonly CurveGPUG2AffinePoint[]): Promise<CurveGPUG2AffinePoint[]> {
+      return (await this.negJacobianBatch(await this.affineToJacobianBatch(points))).map(affineFromJacobian);
+    },
+    async doubleAffine(point: CurveGPUG2AffinePoint): Promise<CurveGPUG2AffinePoint> {
+      return affineFromJacobian(await this.doubleJacobian(await this.affineToJacobian(point)));
+    },
+    async doubleAffineBatch(points: readonly CurveGPUG2AffinePoint[]): Promise<CurveGPUG2AffinePoint[]> {
+      return (await this.doubleJacobianBatch(await this.affineToJacobianBatch(points))).map(affineFromJacobian);
+    },
+    async scalarMulAffineResult(base: CurveGPUG2AffinePoint, scalar: Uint8Array): Promise<CurveGPUG2AffinePoint> {
+      return affineFromJacobian(await this.scalarMulAffine(base, scalar));
+    },
+    async scalarMulAffineResultBatch(bases: readonly CurveGPUG2AffinePoint[], scalars: readonly Uint8Array[]): Promise<CurveGPUG2AffinePoint[]> {
+      return (await this.scalarMulAffineBatch(bases, scalars)).map(affineFromJacobian);
     },
   };
 }

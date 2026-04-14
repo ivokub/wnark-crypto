@@ -246,6 +246,18 @@ export interface G1Module {
   /** Multiply affine bases by scalar-field elements. */
   scalarMulAffine(base: CurveGPUAffinePoint, scalar: CurveGPUElementBytes): Promise<CurveGPUJacobianPoint>;
   scalarMulAffineBatch(bases: readonly CurveGPUAffinePoint[], scalars: readonly CurveGPUElementBytes[]): Promise<CurveGPUJacobianPoint[]>;
+  /** Add two affine points and return the result in affine form. */
+  addAffine(a: CurveGPUAffinePoint, b: CurveGPUAffinePoint): Promise<CurveGPUAffinePoint>;
+  addAffineBatch(a: readonly CurveGPUAffinePoint[], b: readonly CurveGPUAffinePoint[]): Promise<CurveGPUAffinePoint[]>;
+  /** Negate an affine point and return the result in affine form. */
+  negAffine(point: CurveGPUAffinePoint): Promise<CurveGPUAffinePoint>;
+  negAffineBatch(points: readonly CurveGPUAffinePoint[]): Promise<CurveGPUAffinePoint[]>;
+  /** Double an affine point and return the result in affine form. */
+  doubleAffine(point: CurveGPUAffinePoint): Promise<CurveGPUAffinePoint>;
+  doubleAffineBatch(points: readonly CurveGPUAffinePoint[]): Promise<CurveGPUAffinePoint[]>;
+  /** Multiply an affine base by a scalar and return the result in affine form. */
+  scalarMulAffineResult(base: CurveGPUAffinePoint, scalar: CurveGPUElementBytes): Promise<CurveGPUAffinePoint>;
+  scalarMulAffineResultBatch(bases: readonly CurveGPUAffinePoint[], scalars: readonly CurveGPUElementBytes[]): Promise<CurveGPUAffinePoint[]>;
 }
 
 /**
@@ -280,6 +292,18 @@ export interface G2Module {
   affineAddBatch(a: readonly CurveGPUG2AffinePoint[], b: readonly CurveGPUG2AffinePoint[]): Promise<CurveGPUG2JacobianPoint[]>;
   scalarMulAffine(base: CurveGPUG2AffinePoint, scalar: CurveGPUElementBytes): Promise<CurveGPUG2JacobianPoint>;
   scalarMulAffineBatch(bases: readonly CurveGPUG2AffinePoint[], scalars: readonly CurveGPUElementBytes[]): Promise<CurveGPUG2JacobianPoint[]>;
+  /** Add two affine points and return the result in affine form. */
+  addAffine(a: CurveGPUG2AffinePoint, b: CurveGPUG2AffinePoint): Promise<CurveGPUG2AffinePoint>;
+  addAffineBatch(a: readonly CurveGPUG2AffinePoint[], b: readonly CurveGPUG2AffinePoint[]): Promise<CurveGPUG2AffinePoint[]>;
+  /** Negate an affine point and return the result in affine form. */
+  negAffine(point: CurveGPUG2AffinePoint): Promise<CurveGPUG2AffinePoint>;
+  negAffineBatch(points: readonly CurveGPUG2AffinePoint[]): Promise<CurveGPUG2AffinePoint[]>;
+  /** Double an affine point and return the result in affine form. */
+  doubleAffine(point: CurveGPUG2AffinePoint): Promise<CurveGPUG2AffinePoint>;
+  doubleAffineBatch(points: readonly CurveGPUG2AffinePoint[]): Promise<CurveGPUG2AffinePoint[]>;
+  /** Multiply an affine base by a scalar and return the result in affine form. */
+  scalarMulAffineResult(base: CurveGPUG2AffinePoint, scalar: CurveGPUElementBytes): Promise<CurveGPUG2AffinePoint>;
+  scalarMulAffineResultBatch(bases: readonly CurveGPUG2AffinePoint[], scalars: readonly CurveGPUElementBytes[]): Promise<CurveGPUG2AffinePoint[]>;
 }
 
 /**
@@ -320,6 +344,12 @@ export interface MSMModule {
     scalars: readonly CurveGPUElementBytes[],
     options?: CurveGPUMSMOptions,
   ): Promise<CurveGPUJacobianPoint>;
+  /** Run a single affine-base Pippenger MSM and return the result in affine form. */
+  pippengerAffineResult(
+    bases: readonly CurveGPUAffinePoint[],
+    scalars: readonly CurveGPUElementBytes[],
+    options?: CurveGPUMSMOptions,
+  ): Promise<CurveGPUAffinePoint>;
   /** Run a batched affine-base Pippenger MSM. */
   pippengerAffineBatch(
     bases: readonly CurveGPUAffinePoint[],
@@ -354,6 +384,12 @@ export interface G2MSMModule {
     scalars: readonly CurveGPUElementBytes[],
     options?: CurveGPUMSMOptions,
   ): Promise<CurveGPUG2JacobianPoint>;
+  /** Run a single affine-base Pippenger MSM and return the result in affine form. */
+  pippengerAffineResult(
+    bases: readonly CurveGPUG2AffinePoint[],
+    scalars: readonly CurveGPUElementBytes[],
+    options?: CurveGPUMSMOptions,
+  ): Promise<CurveGPUG2AffinePoint>;
   pippengerAffineBatch(
     bases: readonly CurveGPUG2AffinePoint[],
     scalars: readonly CurveGPUElementBytes[],

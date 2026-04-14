@@ -5,6 +5,7 @@ import type {
   CurveGPUJacobianPoint,
   CurveGPUPackedPointLayout,
   FieldModule,
+  G1Module,
   MSMModule,
   SupportedCurveID,
   CurveGPUMSMOptions,
@@ -12,8 +13,8 @@ import type {
 import { splitBytesLEToU32 } from "./convert.js";
 import { bestPippengerWindow } from "./msm_shared.js";
 import { runSparseSignedPippengerMSM } from "./msm_pippenger.js";
-import type { PippengerRuntime, PippengerStrategy } from "./msm_pippenger.js";
-import { cloneBytes, ensureByteLength, lazyAsync, loadShaderParts } from "./runtime_common.js";
+import type { PippengerRuntime } from "./msm_pippenger.js";
+import { cloneBytes, ensureByteLength, lazyAsync } from "./runtime_common.js";
 
 function clonePoint(point: CurveGPUJacobianPoint): CurveGPUJacobianPoint {
   return { x: cloneBytes(point.x), y: cloneBytes(point.y), z: cloneBytes(point.z) };
@@ -86,19 +87,15 @@ export function createMSMModule(
     curve: SupportedCurveID;
     coordinateBytes: number;
     pointBytes: number;
-    shaderParts: readonly string[];
-    strategy: PippengerStrategy;
+    runtime: PippengerRuntime;
   },
   fp: FieldModule,
+  g1: G1Module,
 ): MSMModule {
-  const { curve, coordinateBytes, pointBytes, shaderParts, strategy } = options;
+  const { curve, coordinateBytes, pointBytes, runtime } = options;
   const label = `${curve}-g1-msm`;
 
   const getOneMontgomery = lazyAsync(async () => fp.montOne());
-  const getRuntime = lazyAsync(async (): Promise<PippengerRuntime> => {
-    const shaderCode = await loadShaderParts(shaderParts);
-    return strategy.createRuntime(context.device, shaderCode, label, context.debug);
-  });
 
   async function runBatch(
     bases: readonly CurveGPUAffinePoint[],
@@ -121,7 +118,6 @@ export function createMSMModule(
     }
 
     const oneMontZ = await getOneMontgomery();
-    const runtime = await getRuntime();
     const window = options.window ?? bestPippengerWindow(termsPerInstance);
     const output = await runSparseSignedPippengerMSM({
       device: context.device,
@@ -155,6 +151,13 @@ export function createMSMModule(
     ): Promise<CurveGPUJacobianPoint> {
       return (await runBatch(bases, scalars, { ...options, count: options.count ?? 1 }))[0];
     },
+    async pippengerAffineResult(
+      bases: readonly CurveGPUAffinePoint[],
+      scalars: readonly CurveGPUElementBytes[],
+      options: CurveGPUMSMOptions = {},
+    ): Promise<CurveGPUAffinePoint> {
+      return g1.jacobianToAffine(await this.pippengerAffine(bases, scalars, options));
+    },
     async pippengerAffineBatch(
       bases: readonly CurveGPUAffinePoint[],
       scalars: readonly CurveGPUElementBytes[],
@@ -183,7 +186,6 @@ export function createMSMModule(
         throw new Error(`${label}: expected ${expectedPointBytes} base bytes, got ${basesPacked.byteLength}`);
       }
       ensurePackedScalars(scalarsPacked, count * termsPerInstance, `${label}.scalarsPacked`);
-      const runtime = await getRuntime();
       const window = options.window ?? bestPippengerWindow(termsPerInstance);
       return runSparseSignedPippengerMSM({
         device: context.device,

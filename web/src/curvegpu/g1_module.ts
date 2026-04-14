@@ -7,12 +7,11 @@ import type {
   G1Module,
   SupportedCurveID,
 } from "./api.js";
+import type { SimpleKernel } from "./runtime_common.js";
 import {
   cloneBytes,
-  createSimpleKernel,
   ensureByteLength,
   lazyAsync,
-  loadShaderParts,
   runSimpleKernel,
 } from "./runtime_common.js";
 
@@ -118,20 +117,16 @@ export function createG1Module(
     coordinateBytes: number;
     pointBytes: number;
     zeroHex: string;
-    shaderParts: readonly string[];
+    kernel: SimpleKernel;
   },
   fp: FieldModule,
 ): G1Module {
-  const { curve, coordinateBytes, pointBytes, zeroHex, shaderParts } = options;
+  const { curve, coordinateBytes, pointBytes, zeroHex, kernel } = options;
   const label = `${curve}-g1`;
   const zeroCoordinate = zeroBytes(coordinateBytes);
   const zeroJacobianPoint = { x: zeroBytes(coordinateBytes), y: zeroBytes(coordinateBytes), z: zeroBytes(coordinateBytes) };
   const zeroAffinePoint = { x: zeroBytes(coordinateBytes), y: zeroBytes(coordinateBytes) };
 
-  const getKernel = lazyAsync(async () => {
-    const shaderCode = await loadShaderParts(shaderParts);
-    return createSimpleKernel(context.device, label, shaderCode, "g1_ops_main", context.debug);
-  });
   const getOneMontgomery = lazyAsync(async () => fp.montOne());
 
   async function runJacobianBatch(
@@ -146,7 +141,6 @@ export function createG1Module(
     if (inputA.length !== count || inputB.length !== count) {
       throw new Error(`${label}: mismatched jacobian batch lengths`);
     }
-    const kernel = await getKernel();
     const output = await runSimpleKernel({
       device: context.device,
       kernel,
@@ -172,7 +166,6 @@ export function createG1Module(
     if (inputA.length !== count || inputB.length !== count) {
       throw new Error(`${label}: mismatched mixed batch lengths`);
     }
-    const kernel = await getKernel();
     const oneMontZ = await getOneMontgomery();
     const output = await runSimpleKernel({
       device: context.device,
@@ -195,7 +188,6 @@ export function createG1Module(
     if (count === 0) {
       return [];
     }
-    const kernel = await getKernel();
     const oneMontZ = await getOneMontgomery();
     const output = await runSimpleKernel({
       device: context.device,
@@ -311,6 +303,30 @@ export function createG1Module(
         acc = await runMixedBatch(OP_ADD_MIXED, acc, activeBases);
       }
       return runJacobianBatch(OP_JAC_TO_AFFINE, acc, zeros);
+    },
+    async addAffine(a: CurveGPUAffinePoint, b: CurveGPUAffinePoint): Promise<CurveGPUAffinePoint> {
+      return affineFromJacobian(await this.affineAdd(a, b));
+    },
+    async addAffineBatch(a: readonly CurveGPUAffinePoint[], b: readonly CurveGPUAffinePoint[]): Promise<CurveGPUAffinePoint[]> {
+      return (await this.affineAddBatch(a, b)).map(affineFromJacobian);
+    },
+    async negAffine(point: CurveGPUAffinePoint): Promise<CurveGPUAffinePoint> {
+      return affineFromJacobian(await this.negJacobian(await this.affineToJacobian(point)));
+    },
+    async negAffineBatch(points: readonly CurveGPUAffinePoint[]): Promise<CurveGPUAffinePoint[]> {
+      return (await this.negJacobianBatch(await this.affineToJacobianBatch(points))).map(affineFromJacobian);
+    },
+    async doubleAffine(point: CurveGPUAffinePoint): Promise<CurveGPUAffinePoint> {
+      return affineFromJacobian(await this.doubleJacobian(await this.affineToJacobian(point)));
+    },
+    async doubleAffineBatch(points: readonly CurveGPUAffinePoint[]): Promise<CurveGPUAffinePoint[]> {
+      return (await this.doubleJacobianBatch(await this.affineToJacobianBatch(points))).map(affineFromJacobian);
+    },
+    async scalarMulAffineResult(base: CurveGPUAffinePoint, scalar: CurveGPUElementBytes): Promise<CurveGPUAffinePoint> {
+      return affineFromJacobian(await this.scalarMulAffine(base, scalar));
+    },
+    async scalarMulAffineResultBatch(bases: readonly CurveGPUAffinePoint[], scalars: readonly CurveGPUElementBytes[]): Promise<CurveGPUAffinePoint[]> {
+      return (await this.scalarMulAffineBatch(bases, scalars)).map(affineFromJacobian);
     },
   };
 }

@@ -102,7 +102,7 @@ async function runExample(curveId: SupportedCurveID, log: (lines: string[]) => v
   log(lines);
 
   const context = await createCurveGPUContext();
-  const curve = createCurveModule(context, curveId);
+  const curve = await createCurveModule(context, curveId);
   const diagnostics = context.diagnostics;
   lines.push("1. Creating WebGPU context... OK");
   if (diagnostics.vendor) {

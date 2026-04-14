@@ -36,5 +36,5 @@ export function appendContextDiagnostics(lines: string[], context: CurveGPUConte
 
 export async function createRequestedCurveModule(curve = getRequestedCurveId()): Promise<CurveModule> {
   const context = await createCurveGPUContext();
-  return createCurveModule(context, curve);
+  return await createCurveModule(context, curve);
 }

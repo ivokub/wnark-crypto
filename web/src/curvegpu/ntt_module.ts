@@ -1,14 +1,13 @@
 import type { CurveGPUContext, CurveGPUElementBytes, FieldModule, NTTModule, SupportedCurveID } from "./api.js";
+import type { SimpleKernel } from "./runtime_common.js";
 import {
   cloneBytes,
   createSimpleBindGroup,
-  createSimpleKernel,
   createSimpleStorageBuffer,
   createSimpleStorageBufferFromBytes,
   createSimpleUniformBuffer,
   ensureByteLength,
   lazyAsync,
-  loadShaderText,
   packElementBatch,
   readbackSimpleBuffer,
   runSimpleKernel,
@@ -113,31 +112,22 @@ export function createNTTModule(
   context: CurveGPUContext,
   options: {
     curve: SupportedCurveID;
-    arithmeticShaderPath: string;
-    vectorShaderPath: string;
-    nttShaderPath: string;
+    vectorKernel: SimpleKernel;
+    fieldKernel: SimpleKernel;
+    nttKernel: SimpleKernel;
     domainPath: string;
     modulusHex: string;
   },
   fr: FieldModule,
 ): NTTModule {
-  const { curve, arithmeticShaderPath, vectorShaderPath, nttShaderPath, domainPath, modulusHex } = options;
+  const { curve, vectorKernel, fieldKernel, nttKernel, domainPath, modulusHex } = options;
   const label = `${curve}-fr-ntt`;
   const elementBytes = fr.byteSize;
   const zeroElement = new Uint8Array(elementBytes);
 
-  const getVectorKernel = lazyAsync(async () => {
-    const shaderCode = await loadShaderText(vectorShaderPath);
-    return createSimpleKernel(context.device, `${label}-vector`, shaderCode, "fr_vector_main", context.debug);
-  });
-  const getFieldKernel = lazyAsync(async () => {
-    const shaderCode = await loadShaderText(arithmeticShaderPath);
-    return createSimpleKernel(context.device, `${label}-field`, shaderCode, "fr_ops_main", context.debug);
-  });
-  const getNTTKernel = lazyAsync(async () => {
-    const shaderCode = await loadShaderText(nttShaderPath);
-    return createSimpleKernel(context.device, `${label}-stage`, shaderCode, "fr_ntt_stage_main", context.debug);
-  });
+  const getVectorKernel = lazyAsync(async () => vectorKernel);
+  const getFieldKernel = lazyAsync(async () => fieldKernel);
+  const getNTTKernel = lazyAsync(async () => nttKernel);
   const getDomains = lazyAsync(async () => fetchJSON<DomainMetadataFile>(domainPath));
   const domainCache = new Map<number, Promise<PreparedDomain>>();
   const modulus = BigInt(modulusHex);
@@ -286,7 +276,7 @@ export function createNTTModule(
     );
 
     const dispatch = async (
-      kernel: ReturnType<typeof createSimpleKernel>,
+      kernel: SimpleKernel,
       inputA: GPUBuffer,
       inputB: GPUBuffer,
       output: GPUBuffer,

@@ -2,7 +2,6 @@ export {};
 
 import { bytesToHex, createPageUI, fetchJSON, hexToBytes } from "../../../src/curvegpu/browser_utils.js";
 import { createOptimizedG2MSMBenchModule } from "../../../src/curvegpu/g2_msm_bench_optimized.js";
-import { createJacG2MSMModule } from "../../../src/curvegpu/g2_msm_jac.js";
 import type {
   CurveGPUElementBytes,
   CurveGPUFp2Element,
@@ -228,7 +227,6 @@ async function runSmoke(config: G2MSMConfig): Promise<void> {
   try {
     const curve = await createRequestedCurveModule(config.curve);
     const optimizedMSM = createOptimizedG2MSMBenchModule(curve.context, config.curve, curve.g2.pointBytes);
-    const jacMSM = createJacG2MSMModule(curve.context, config.curve, curve.g2.pointBytes);
     const vectors = await fetchJSON<G2MSMVectors>(config.vectorPath);
 
     lines.push("1. Requesting adapter... OK");
@@ -303,7 +301,7 @@ async function runSmoke(config: G2MSMConfig): Promise<void> {
     writeLog(lines);
 
     const jacPackedResults = unpackJacobianPoints(
-      await jacMSM.pippengerPackedJacobianBases(packedBases, packedScalars, {
+      await curve.g2msm.pippengerPackedJacobianBases(packedBases, packedScalars, {
         count: vectors.msm_cases.length,
         termsPerInstance: vectors.terms_per_instance,
         window,

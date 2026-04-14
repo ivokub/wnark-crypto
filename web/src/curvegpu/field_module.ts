@@ -1,10 +1,9 @@
 import type { CurveGPUContext, CurveGPUElementBytes, FieldModule, SupportedCurveID } from "./api.js";
+import type { SimpleKernel } from "./runtime_common.js";
 import {
   cloneBytes,
-  createSimpleKernel,
   ensureByteLength,
   lazyAsync,
-  loadShaderText,
   packElementBatch,
   runSimpleKernel,
   unpackElementBatch,
@@ -61,19 +60,14 @@ export function createFieldModule(
   field: "fr" | "fp",
   options: {
     byteSize: number;
-    shaderPath: string;
+    kernel: SimpleKernel;
     entryPoint: "fr_ops_main" | "fp_ops_main";
     label: string;
     shape: FieldModule["shape"];
   },
 ): FieldModule {
-  const { byteSize, shaderPath, entryPoint, label, shape } = options;
+  const { byteSize, kernel, entryPoint: _entryPoint, label, shape } = options;
   const zeroValue = new Uint8Array(byteSize);
-
-  const getKernel = lazyAsync(async () => {
-    const shaderCode = await loadShaderText(shaderPath);
-    return createSimpleKernel(context.device, label, shaderCode, entryPoint, context.debug);
-  });
 
   async function runPacked(opcode: FieldOpCode, inputA: Uint8Array, inputB?: Uint8Array): Promise<Uint8Array> {
     const count = ensurePackedElements(inputA, byteSize, `${label}.packedA`);
@@ -81,7 +75,6 @@ export function createFieldModule(
     if (b.byteLength !== inputA.byteLength) {
       throw new Error(`${label}.packedB: expected ${inputA.byteLength} bytes, got ${b.byteLength}`);
     }
-    const kernel = await getKernel();
     return runSimpleKernel({
       device: context.device,
       kernel,
@@ -105,7 +98,6 @@ export function createFieldModule(
       throw new Error(`${label}: mismatched batch lengths`);
     }
 
-    const kernel = await getKernel();
     const output = await runSimpleKernel({
       device: context.device,
       kernel,
