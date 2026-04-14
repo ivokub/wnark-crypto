@@ -1,7 +1,29 @@
 import { CurveGPUShaderError } from "./errors.js";
 
+let bundledShaders: Record<string, string> | null = null;
+
+/**
+ * Install a pre-built shader bundle so the library can operate without
+ * making `fetch()` requests for WGSL files.
+ *
+ * Typically called automatically by importing the generated
+ * `shader_bundle.generated.js` file (produced by `npm run build:shaders`).
+ * When a bundle is installed, `fetchShaderText` reads from it and only falls
+ * back to `fetch()` for paths not present in the bundle.
+ */
+export function setBundledShaders(bundle: Record<string, string>): void {
+  bundledShaders = bundle;
+}
+
 export async function fetchShaderText(path: string): Promise<string> {
-  const response = await fetch(path.split("#", 1)[0]);
+  const filePath = path.split("#", 1)[0];
+  if (bundledShaders) {
+    const content = bundledShaders[filePath];
+    if (content !== undefined) {
+      return content;
+    }
+  }
+  const response = await fetch(filePath);
   if (!response.ok) {
     throw new CurveGPUShaderError(`failed to load shader ${path}: ${response.status} ${response.statusText}`);
   }

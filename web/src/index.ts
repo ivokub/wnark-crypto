@@ -28,6 +28,8 @@ export {
   CurveGPUShaderError,
 } from "./curvegpu/errors.js";
 
+export { setBundledShaders } from "./curvegpu/shaders.js";
+
 export { createCurveGPUContext } from "./curvegpu/context.js";
 
 export {

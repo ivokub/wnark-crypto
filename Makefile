@@ -1,4 +1,4 @@
-.PHONY: web-build testdata fixture-bn254-g1 fixture-bls12_381-g1 fixture-bn254-g2 fixture-bls12_381-g2 metal-bench-fr-ntt-range poc-wasm-build poc-wasm-fixture-bn254 poc-wasm-fixture-bls12_381 poc-wasm-fixture-bn254-2pow18 poc-wasm-fixture-bls12_381-2pow18
+.PHONY: web-build web-bundle-shaders testdata fixture-bn254-g1 fixture-bls12_381-g1 fixture-bn254-g2 fixture-bls12_381-g2 metal-bench-fr-ntt-range poc-wasm-build poc-wasm-fixture-bn254 poc-wasm-fixture-bls12_381 poc-wasm-fixture-bn254-2pow18 poc-wasm-fixture-bls12_381-2pow18
 
 COUNT ?= 524288
 G2_COUNT ?= 524288
@@ -6,7 +6,10 @@ MIN_LOG ?= 10
 MAX_LOG ?= 20
 ITERS ?= 1
 
-web-build:
+web-bundle-shaders:
+	cd web && npm run build:shaders
+
+web-build: web-bundle-shaders
 	cd web && npm run build
 
 testdata:

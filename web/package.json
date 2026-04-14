@@ -23,7 +23,8 @@
     "README.md"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.json"
+    "build": "rm -rf dist && tsc -p tsconfig.json",
+    "build:shaders": "node scripts/bundle-shaders.mjs"
   },
   "devDependencies": {
     "typescript": "^5.8.0"
