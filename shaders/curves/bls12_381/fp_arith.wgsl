@@ -432,7 +432,9 @@ fn fp_store(index: u32, value: Fp) {
   }
 }
 
-@compute @workgroup_size(64)
+override WORKGROUP_SIZE: u32 = 64;
+
+@compute @workgroup_size(WORKGROUP_SIZE)
 fn fp_ops_main(@builtin(global_invocation_id) id: vec3<u32>) {
   let i = id.x;
   if (i >= params.count) {

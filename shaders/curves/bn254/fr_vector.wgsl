@@ -373,7 +373,9 @@ fn fr_dispatch(index: u32) -> Fr {
   return fr_zero();
 }
 
-@compute @workgroup_size(64)
+override WORKGROUP_SIZE: u32 = 64;
+
+@compute @workgroup_size(WORKGROUP_SIZE)
 fn fr_vector_main(@builtin(global_invocation_id) id: vec3<u32>) {
   let i = id.x;
   if (i >= params.count) {

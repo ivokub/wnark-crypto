@@ -12,6 +12,8 @@ export interface PipelineRegistry {
 export type OpsShaderSpec = {
   shaderParts: readonly string[];
   entryPoint: string;
+  /** Pass WORKGROUP_SIZE override constant at pipeline creation time. Only valid for shaders that declare `override WORKGROUP_SIZE`. */
+  useWorkgroupOverride?: boolean;
 };
 
 export type MSMShaderSpec = {
@@ -23,9 +25,11 @@ export async function buildPipelineRegistry(options: {
   device: GPUDevice;
   opsShaders: OpsShaderSpec[];
   msmShaders: MSMShaderSpec[];
+  /** Workgroup size to use for ops kernels that declare `override WORKGROUP_SIZE`. Defaults to 64. */
+  opsWorkgroupSize?: number;
   debug?: boolean;
 }): Promise<PipelineRegistry> {
-  const { device, opsShaders, msmShaders, debug = false } = options;
+  const { device, opsShaders, msmShaders, opsWorkgroupSize = 64, debug = false } = options;
 
   // Shared bind group layout for ops kernels (4-binding: read-only-storage×2, storage, uniform)
   const opsLayout = device.createBindGroupLayout({
@@ -82,12 +86,16 @@ export async function buildPipelineRegistry(options: {
       if (debug) {
         console.debug(`[curvegpu] createComputePipelineAsync: ${spec.entryPoint}`);
       }
+      const effectiveWorkgroupSize = spec.useWorkgroupOverride ? opsWorkgroupSize : 64;
+      const computeDesc: GPUProgrammableStage = spec.useWorkgroupOverride
+        ? { module: shaderModule, entryPoint: spec.entryPoint, constants: { WORKGROUP_SIZE: effectiveWorkgroupSize } }
+        : { module: shaderModule, entryPoint: spec.entryPoint };
       const pipeline = await device.createComputePipelineAsync({
         label: `curvegpu-ops-${spec.entryPoint}`,
         layout: opsPipelineLayout,
-        compute: { module: shaderModule, entryPoint: spec.entryPoint },
+        compute: computeDesc,
       });
-      opsKernels.set(spec.entryPoint, { pipeline, bindGroupLayout: opsLayout });
+      opsKernels.set(spec.entryPoint, { pipeline, bindGroupLayout: opsLayout, workgroupSize: effectiveWorkgroupSize });
     }),
     ...msmShaders.map(async (spec, i) => {
       const shaderCode = msmShaderTexts[i];

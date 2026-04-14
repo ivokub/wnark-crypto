@@ -32,6 +32,8 @@ export interface CurveDefinition {
   readonly g2CoordinateBytes: number;
   readonly g2PointBytes: number;
   readonly zeroHex: string;
+  /** Whether the g1_ops_main shader supports the WORKGROUP_SIZE override constant. BN254 g1_arith.wgsl also contains MSM kernels with fixed-size var<workgroup> arrays, so it cannot use the override. */
+  readonly g1OpsWorkgroupOverride: boolean;
 }
 
 function fieldShaderParts(fpArithShaderPath: string, curveShaderPath: string): readonly string[] {
@@ -73,6 +75,7 @@ const CURVE_DEFINITIONS: Record<SupportedCurveID, CurveDefinition> = {
     g2CoordinateBytes: 64,
     g2PointBytes: 192,
     zeroHex: "0000000000000000000000000000000000000000000000000000000000000000",
+    g1OpsWorkgroupOverride: false,
   },
   bls12_381: {
     id: "bls12_381",
@@ -102,6 +105,7 @@ const CURVE_DEFINITIONS: Record<SupportedCurveID, CurveDefinition> = {
     pointBytes: 144,
     g2CoordinateBytes: 96,
     g2PointBytes: 288,
+    g1OpsWorkgroupOverride: true,
     zeroHex:
       "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
   },
@@ -130,15 +134,17 @@ export async function createCurveModule(context: CurveGPUContext, curve: Support
   const frShape = shapeFor(curve, "fr");
   const fpShape = shapeFor(curve, "fp");
 
+  const opsWorkgroupSize = Math.min(context.maxWorkgroupSize, 256);
   const registry = await buildPipelineRegistry({
     device: context.device,
+    opsWorkgroupSize,
     opsShaders: [
-      { shaderParts: [definition.frArithShaderPath], entryPoint: "fr_ops_main" },
-      { shaderParts: [definition.fpArithShaderPath], entryPoint: "fp_ops_main" },
-      { shaderParts: definition.g1ArithShaderParts, entryPoint: "g1_ops_main" },
-      { shaderParts: definition.g2ArithShaderParts, entryPoint: "g2_ops_main" },
-      { shaderParts: [definition.frVectorShaderPath], entryPoint: "fr_vector_main" },
-      { shaderParts: [definition.frNTTShaderPath], entryPoint: "fr_ntt_stage_main" },
+      { shaderParts: [definition.frArithShaderPath], entryPoint: "fr_ops_main", useWorkgroupOverride: true },
+      { shaderParts: [definition.fpArithShaderPath], entryPoint: "fp_ops_main", useWorkgroupOverride: true },
+      { shaderParts: definition.g1ArithShaderParts, entryPoint: "g1_ops_main", useWorkgroupOverride: definition.g1OpsWorkgroupOverride },
+      { shaderParts: definition.g2ArithShaderParts, entryPoint: "g2_ops_main", useWorkgroupOverride: true },
+      { shaderParts: [definition.frVectorShaderPath], entryPoint: "fr_vector_main", useWorkgroupOverride: true },
+      { shaderParts: [definition.frNTTShaderPath], entryPoint: "fr_ntt_stage_main", useWorkgroupOverride: true },
     ],
     msmShaders: [
       {

@@ -213,7 +213,7 @@ export function createG2Module(
       inputB: packJacobianPoints(inputB, componentBytes, pointBytes, `${label}.inputB`),
       outputBytes: count * pointBytes,
       uniformWords: Uint32Array.from([count, opcode, 0, 0, 0, 0, 0, 0]),
-      workgroups: Math.ceil(count / 64),
+      workgroups: Math.ceil(count / kernel.workgroupSize),
     });
     return unpackJacobianPoints(output, count, componentBytes, pointBytes);
   }
@@ -239,7 +239,7 @@ export function createG2Module(
       inputB: packAffinePoints(inputB, componentBytes, pointBytes, oneMontZ, zeroCoordinate, `${label}.inputB`),
       outputBytes: count * pointBytes,
       uniformWords: Uint32Array.from([count, opcode, 0, 0, 0, 0, 0, 0]),
-      workgroups: Math.ceil(count / 64),
+      workgroups: Math.ceil(count / kernel.workgroupSize),
     });
     return unpackJacobianPoints(output, count, componentBytes, pointBytes);
   }
@@ -261,7 +261,7 @@ export function createG2Module(
       inputB: packJacobianPoints(makeZeroJacobianBatch(count), componentBytes, pointBytes, `${label}.inputB`),
       outputBytes: count * pointBytes,
       uniformWords: Uint32Array.from([count, opcode, 0, 0, 0, 0, 0, 0]),
-      workgroups: Math.ceil(count / 64),
+      workgroups: Math.ceil(count / kernel.workgroupSize),
     });
     return unpackJacobianPoints(output, count, componentBytes, pointBytes);
   }

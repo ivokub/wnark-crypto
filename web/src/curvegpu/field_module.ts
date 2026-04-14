@@ -83,7 +83,7 @@ export function createFieldModule(
       inputB: b,
       outputBytes: count * byteSize,
       uniformWords: Uint32Array.from([count, opcode, 0, 0, 0, 0, 0, 0]),
-      workgroups: Math.ceil(count / 64),
+      workgroups: Math.ceil(count / kernel.workgroupSize),
     });
   }
 
@@ -106,7 +106,7 @@ export function createFieldModule(
       inputB: packElementBatch(b, byteSize, `${label}.inputB`),
       outputBytes: count * byteSize,
       uniformWords: Uint32Array.from([count, opcode, 0, 0, 0, 0, 0, 0]),
-      workgroups: Math.ceil(count / 64),
+      workgroups: Math.ceil(count / kernel.workgroupSize),
     });
     return unpackElementBatch(output, byteSize, count);
   }

@@ -474,7 +474,9 @@ fn fr_store(index: u32, value: Fr) {
   output[base + 7u] = value.limbs[7];
 }
 
-@compute @workgroup_size(64)
+override WORKGROUP_SIZE: u32 = 64;
+
+@compute @workgroup_size(WORKGROUP_SIZE)
 fn fr_ops_main(@builtin(global_invocation_id) id: vec3<u32>) {
   let i = id.x;
   if (i >= params.count) {

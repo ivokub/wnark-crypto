@@ -178,7 +178,7 @@ export function createNTTModule(
       inputB: packElementBatch(factors ?? Array.from({ length: count }, () => zeroElement), elementBytes, `${label}.factors`),
       outputBytes: count * elementBytes,
       uniformWords: Uint32Array.from([count, opcode, logCount, 0, 0, 0, 0, 0]),
-      workgroups: Math.ceil(count / 64),
+      workgroups: Math.ceil(count / kernel.workgroupSize),
     });
     return unpackElementBatch(output, elementBytes, count);
   }
@@ -198,7 +198,7 @@ export function createNTTModule(
       inputB: factorBytes,
       outputBytes: count * elementBytes,
       uniformWords: Uint32Array.from([count, opcode, logCount, 0, 0, 0, 0, 0]),
-      workgroups: Math.ceil(count / 64),
+      workgroups: Math.ceil(count / kernel.workgroupSize),
     });
   }
 
@@ -215,7 +215,7 @@ export function createNTTModule(
         inputB: cloneBytes(stages[stage]),
         outputBytes: count * elementBytes,
         uniformWords: Uint32Array.from([count, 1 << stage, inverse ? 1 : 0, 0, 0, 0, 0, 0]),
-        workgroups: Math.ceil(count / 64),
+        workgroups: Math.ceil(count / kernel.workgroupSize),
       });
       state = unpackElementBatch(output, elementBytes, count);
     }
@@ -235,7 +235,7 @@ export function createNTTModule(
         inputB: cloneBytes(stages[stage]),
         outputBytes: count * elementBytes,
         uniformWords: Uint32Array.from([count, 1 << stage, inverse ? 1 : 0, 0, 0, 0, 0, 0]),
-        workgroups: Math.ceil(count / 64),
+        workgroups: Math.ceil(count / kernel.workgroupSize),
       });
     }
     return state;
@@ -281,13 +281,12 @@ export function createNTTModule(
       inputB: GPUBuffer,
       output: GPUBuffer,
       uniformWords: Uint32Array,
-      workgroups: number,
       opLabel: string,
     ): Promise<void> => {
       const uniform = createSimpleUniformBuffer(context.device, `${opLabel}-params`, uniformWords);
       try {
         const bindGroup = createSimpleBindGroup(context.device, kernel, `${opLabel}-bg`, inputA, inputB, output, uniform);
-        await submitSimpleKernel(context.device, kernel, bindGroup, workgroups, opLabel);
+        await submitSimpleKernel(context.device, kernel, bindGroup, Math.ceil(count / kernel.workgroupSize), opLabel);
       } finally {
         uniform.destroy();
       }
@@ -307,7 +306,6 @@ export function createNTTModule(
           zeroAux,
           next,
           Uint32Array.from([count, FIELD_OP_TO_MONT, 0, 0, 0, 0, 0, 0]),
-          Math.ceil(count / 64),
           `${label}-to-mont`,
         );
         swap();
@@ -319,7 +317,6 @@ export function createNTTModule(
         zeroAux,
         next,
         Uint32Array.from([count, VECTOR_OP_BIT_REVERSE_COPY, Math.round(Math.log2(count)), 0, 0, 0, 0, 0]),
-        Math.ceil(count / 64),
         `${label}-bit-reverse`,
       );
       swap();
@@ -339,7 +336,6 @@ export function createNTTModule(
             twiddleBuffer,
             next,
             Uint32Array.from([count, 1 << stage, inverse ? 1 : 0, 0, 0, 0, 0, 0]),
-            Math.ceil(count / 64),
             `${label}-stage-${stage}-${inverse ? "inv" : "fwd"}`,
           );
         } finally {
@@ -362,7 +358,6 @@ export function createNTTModule(
             factorBuffer,
             next,
             Uint32Array.from([count, VECTOR_OP_MUL_FACTORS, 0, 0, 0, 0, 0, 0]),
-            Math.ceil(count / 64),
             `${label}-inverse-scale`,
           );
         } finally {
@@ -378,7 +373,6 @@ export function createNTTModule(
           zeroAux,
           next,
           Uint32Array.from([count, FIELD_OP_FROM_MONT, 0, 0, 0, 0, 0, 0]),
-          Math.ceil(count / 64),
           `${label}-from-mont`,
         );
         swap();

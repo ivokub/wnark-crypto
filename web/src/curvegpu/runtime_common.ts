@@ -14,6 +14,7 @@ declare const GPUMapMode: { READ: number };
 export type SimpleKernel = {
   pipeline: GPUComputePipeline;
   bindGroupLayout: GPUBindGroupLayout;
+  workgroupSize: number;
 };
 
 function logComputePipelineCreation(label: string, entryPoint: string, debug: boolean): void {
@@ -214,7 +215,7 @@ export function createSimpleKernel(
     layout: pipelineLayout,
     compute: { module: shaderModule, entryPoint },
   });
-  return { pipeline, bindGroupLayout };
+  return { pipeline, bindGroupLayout, workgroupSize: 64 };
 }
 
 function createStorageBuffer(device: GPUDevice, label: string, size: number, usage: GPUBufferUsageFlags): GPUBuffer {
