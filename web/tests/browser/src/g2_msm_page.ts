@@ -1,7 +1,6 @@
 export {};
 
 import { bytesToHex, fetchJSON, hexToBytes } from "../../../src/curvegpu/browser_utils.js";
-import { createOptimizedG2MSMBenchModule } from "../../../src/curvegpu/g2_msm_bench_optimized.js";
 import type {
   CurveGPUElementBytes,
   CurveGPUFp2Element,
@@ -212,7 +211,6 @@ export async function runSuite(module: CurveModule, log: (msg: string) => void):
   const config = CONFIGS[module.id];
   log(`=== ${config.title} ===`);
   log("");
-  const optimizedMSM = createOptimizedG2MSMBenchModule(module.context, module.id, module.g2.pointBytes);
   const vectors = await fetchJSON<G2MSMVectors>(config.vectorPath);
   log(`terms_per_instance = ${vectors.terms_per_instance}`);
   log(`cases.msm = ${vectors.msm_cases.length}`);
@@ -253,19 +251,6 @@ export async function runSuite(module: CurveModule, log: (msg: string) => void):
   const packedScalars = packScalars(
     vectors.msm_cases.flatMap((item) => item.scalars_bytes_le.map((value) => hexToBytes(value) as CurveGPUElementBytes)),
   );
-
-  const packedResults = unpackJacobianPoints(
-    await optimizedMSM.pippengerPackedJacobianBases(packedBases, packedScalars, {
-      count: vectors.msm_cases.length,
-      termsPerInstance: vectors.terms_per_instance,
-      window,
-    }),
-    vectors.msm_cases.length,
-    module.g2.componentBytes,
-    module.g2.pointBytes,
-  );
-  await expectJacobianBatchAffineEqual(module, `msm_pippenger_packed (window=${window})`, packedResults, vectors.msm_cases.map((item) => item.expected_affine));
-  log(`msm_pippenger_packed (window=${window}): OK`);
 
   const jacPackedResults = unpackJacobianPoints(
     await module.g2msm.pippengerPackedJacobianBases(packedBases, packedScalars, {

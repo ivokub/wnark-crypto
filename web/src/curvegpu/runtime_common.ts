@@ -17,17 +17,6 @@ export type SimpleKernel = {
   workgroupSize: number;
 };
 
-function logComputePipelineCreation(label: string, entryPoint: string, debug: boolean): void {
-  if (!debug) {
-    return;
-  }
-  const key = "__curvegpuComputePipelineCreateCount";
-  const state = globalThis as typeof globalThis & { [key: string]: number | undefined };
-  const count = (state[key] ?? 0) + 1;
-  state[key] = count;
-  console.debug(`[curvegpu] createComputePipeline #${count}: ${label} entry=${entryPoint}`);
-}
-
 export function lazyAsync<T>(factory: () => Promise<T>): () => Promise<T> {
   let promise: Promise<T> | null = null;
   return (): Promise<T> => {
@@ -183,39 +172,6 @@ export async function readbackSimpleBuffer(
     }
     readbackBuffer.destroy();
   }
-}
-
-export function createSimpleKernel(
-  device: GPUDevice,
-  label: string,
-  shaderCode: string,
-  entryPoint: string,
-  debug = false,
-): SimpleKernel {
-  const shaderModule = device.createShaderModule({
-    label: `${label}-shader`,
-    code: shaderCode,
-  });
-  const bindGroupLayout = device.createBindGroupLayout({
-    label: `${label}-bgl`,
-    entries: [
-      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
-      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
-      { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
-      { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-    ],
-  });
-  const pipelineLayout = device.createPipelineLayout({
-    label: `${label}-pl`,
-    bindGroupLayouts: [bindGroupLayout],
-  });
-  logComputePipelineCreation(`${label}-${entryPoint}`, entryPoint, debug);
-  const pipeline = device.createComputePipeline({
-    label: `${label}-${entryPoint}`,
-    layout: pipelineLayout,
-    compute: { module: shaderModule, entryPoint },
-  });
-  return { pipeline, bindGroupLayout, workgroupSize: 64 };
 }
 
 function createStorageBuffer(device: GPUDevice, label: string, size: number, usage: GPUBufferUsageFlags): GPUBuffer {

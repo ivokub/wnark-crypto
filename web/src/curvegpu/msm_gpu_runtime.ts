@@ -24,56 +24,6 @@ declare const GPUBufferUsage: {
 };
 declare const GPUMapMode: { READ: number };
 
-export function createMSMKernel(
-  device: GPUDevice,
-  shaderCode: string,
-  labelPrefix: string,
-  entryPoint = "g1_ops_main",
-  debug = false,
-): Kernel {
-  const shaderModule = device.createShaderModule({
-    label: `${labelPrefix}-shader`,
-    code: shaderCode,
-  });
-  const bindGroupLayout = device.createBindGroupLayout({
-    label: `${labelPrefix}-bgl`,
-    entries: [
-      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
-      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
-      { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
-      { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-      { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
-      { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
-      { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
-    ],
-  });
-  const pipelineLayout = device.createPipelineLayout({
-    label: `${labelPrefix}-pl`,
-    bindGroupLayouts: [bindGroupLayout],
-  });
-  logComputePipelineCreation(`${labelPrefix}-${entryPoint}`, entryPoint, debug);
-  const pipeline = device.createComputePipeline({
-    label: `${labelPrefix}-${entryPoint}`,
-    layout: pipelineLayout,
-    compute: { module: shaderModule, entryPoint },
-  });
-  return { pipeline, bindGroupLayout };
-}
-
-export function createMSMKernelSet<T extends Record<string, string>>(
-  device: GPUDevice,
-  shaderCode: string,
-  labelPrefix: string,
-  entryPoints: T,
-  debug = false,
-): { [K in keyof T]: Kernel } {
-  const out = {} as { [K in keyof T]: Kernel };
-  for (const [name, entryPoint] of Object.entries(entryPoints)) {
-    out[name as keyof T] = createMSMKernel(device, shaderCode, labelPrefix, entryPoint, debug);
-  }
-  return out;
-}
-
 export async function createMSMKernelSetAsync<T extends Record<string, string>>(
   device: GPUDevice,
   shaderCode: string,
