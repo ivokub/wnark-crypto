@@ -3,6 +3,14 @@ export type Kernel = {
   bindGroupLayout: GPUBindGroupLayout;
 };
 
+function logComputePipelineCreation(label: string, entryPoint: string): void {
+  const key = "__curvegpuComputePipelineCreateCount";
+  const state = globalThis as typeof globalThis & { [key: string]: number | undefined };
+  const count = (state[key] ?? 0) + 1;
+  state[key] = count;
+  console.debug(`[curvegpu] createComputePipeline #${count}: ${label} entry=${entryPoint}`);
+}
+
 declare const GPUShaderStage: { COMPUTE: number };
 declare const GPUBufferUsage: {
   STORAGE: number;
@@ -39,6 +47,7 @@ export function createMSMKernel(
     label: `${labelPrefix}-pl`,
     bindGroupLayouts: [bindGroupLayout],
   });
+  logComputePipelineCreation(`${labelPrefix}-${entryPoint}`, entryPoint);
   const pipeline = device.createComputePipeline({
     label: `${labelPrefix}-${entryPoint}`,
     layout: pipelineLayout,
@@ -57,6 +66,47 @@ export function createMSMKernelSet<T extends Record<string, string>>(
   for (const [name, entryPoint] of Object.entries(entryPoints)) {
     out[name as keyof T] = createMSMKernel(device, shaderCode, labelPrefix, entryPoint);
   }
+  return out;
+}
+
+export async function createMSMKernelSetAsync<T extends Record<string, string>>(
+  device: GPUDevice,
+  shaderCode: string,
+  labelPrefix: string,
+  entryPoints: T,
+): Promise<{ [K in keyof T]: Kernel }> {
+  const shaderModule = device.createShaderModule({
+    label: `${labelPrefix}-shader`,
+    code: shaderCode,
+  });
+  const bindGroupLayout = device.createBindGroupLayout({
+    label: `${labelPrefix}-bgl`,
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+      { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+      { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+      { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+      { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+      { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+    ],
+  });
+  const pipelineLayout = device.createPipelineLayout({
+    label: `${labelPrefix}-pl`,
+    bindGroupLayouts: [bindGroupLayout],
+  });
+  const out = {} as { [K in keyof T]: Kernel };
+  await Promise.all(
+    Object.entries(entryPoints).map(async ([name, entryPoint]) => {
+      logComputePipelineCreation(`${labelPrefix}-${entryPoint}`, entryPoint);
+      const pipeline = await device.createComputePipelineAsync({
+        label: `${labelPrefix}-${entryPoint}`,
+        layout: pipelineLayout,
+        compute: { module: shaderModule, entryPoint },
+      });
+      out[name as keyof T] = { pipeline, bindGroupLayout };
+    }),
+  );
   return out;
 }
 
@@ -173,15 +223,18 @@ export async function submitKernel(
   bindGroup: GPUBindGroup,
   count: number,
   label: string,
+  workgroupSize = 64,
 ): Promise<void> {
+  console.debug(`[curvegpu] submitKernel start: ${label} count=${count}`);
   const encoder = device.createCommandEncoder({ label: `${label}-encoder` });
   const pass = encoder.beginComputePass({ label: `${label}-pass` });
   pass.setPipeline(kernel.pipeline);
   pass.setBindGroup(0, bindGroup);
-  pass.dispatchWorkgroups(Math.ceil(count / 64));
+  pass.dispatchWorkgroups(Math.ceil(count / workgroupSize));
   pass.end();
   device.queue.submit([encoder.finish()]);
   await device.queue.onSubmittedWorkDone();
+  console.debug(`[curvegpu] submitKernel done: ${label}`);
 }
 
 export async function readbackBuffer(

@@ -4,10 +4,17 @@ import type {
   CurveGPUPackedPointLayout,
   SupportedCurveID,
 } from "./api.js";
-import { createBindGroupForBuffers, createEmptyPointStorageBuffer, createMSMKernelSetAsync, createParamsBuffer, createStorageBufferFromBytes, createU32StorageBuffer, submitKernel, type Kernel } from "./msm_gpu_runtime.js";
-import { runSparseSignedPippengerMSM } from "./msm_pippenger.js";
+import {
+  createBindGroupForBuffers,
+  createEmptyPointStorageBuffer,
+  createMSMKernelSetAsync,
+  createParamsBuffer,
+  submitKernel,
+} from "./msm_gpu_runtime.js";
+import { runSparseSignedPippengerMSM, type PippengerRuntime } from "./msm_pippenger.js";
 import { bestPippengerWindow } from "./msm_shared.js";
 import { lazyAsync, loadShaderParts } from "./runtime_common.js";
+import type { OptimizedG2MSMBenchModule } from "./g2_msm_bench_optimized.js";
 
 type WindowReductionOptions = {
   device: GPUDevice;
@@ -32,20 +39,120 @@ type WindowReductionResult = {
   cleanupBuffers: GPUBuffer[];
 };
 
-type PippengerRuntime = {
-  bucket: Kernel;
-  bucketWorkgroupSize?: number;
-  combine: Kernel;
-  reduceWindows(options: WindowReductionOptions): Promise<WindowReductionResult>;
-};
+function shaderPartsForCurve(curve: SupportedCurveID): readonly string[] {
+  if (curve === "bn254") {
+    return [
+      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-types",
+      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-consts",
+      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-core",
+      "/shaders/curves/bn254/g2_arith.wgsl?v=2",
+      "/shaders/common/g2_msm_jac.wgsl?v=1",
+    ];
+  }
+  return [
+    "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-types",
+    "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-consts",
+    "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-core",
+    "/shaders/curves/bls12_381/g2_arith.wgsl?v=2",
+    "/shaders/common/g2_msm_jac.wgsl?v=1",
+  ];
+}
 
-export interface OptimizedG2MSMBenchModule {
-  bestWindow(termCount: number): number;
-  pippengerPackedJacobianBases(
-    basesPacked: Uint8Array,
-    scalarsPacked: Uint8Array,
-    options: CurveGPUMSMOptions & { layout?: CurveGPUPackedPointLayout },
-  ): Promise<Uint8Array>;
+async function createJacG2PippengerRuntime(
+  device: GPUDevice,
+  shaderCode: string,
+  labelPrefix: string,
+): Promise<PippengerRuntime> {
+  const kernels = await createMSMKernelSetAsync(device, shaderCode, labelPrefix, {
+    bucket: "g2_msm_bucket_jac_main",
+    weightJac: "g2_msm_weight_jac_main",
+    subsumJac: "g2_msm_subsum_jac_main",
+    combine: "g2_msm_combine_jac_main",
+  });
+  return {
+    bucket: kernels.bucket,
+    bucketWorkgroupSize: 32,
+    combine: kernels.combine,
+    async reduceWindows(options: WindowReductionOptions): Promise<WindowReductionResult> {
+      const {
+        device,
+        pointBytes,
+        uniformBytes,
+        zeroInput,
+        bucketOutput,
+        bucketCountOut,
+        bucketValuesInput,
+        windowStartsInput,
+        windowCountsInput,
+        metadata,
+        count,
+        labelPrefix,
+      } = options;
+
+      const weightedBucketOutput = createEmptyPointStorageBuffer(
+        device,
+        `${labelPrefix}-jac-weighted-out`,
+        bucketCountOut,
+        pointBytes,
+      );
+      const weightParams = createParamsBuffer(device, `${labelPrefix}-jac-weight-params`, uniformBytes, {
+        count: bucketCountOut,
+      });
+      const weightBindGroup = createBindGroupForBuffers(
+        device,
+        kernels.weightJac,
+        `${labelPrefix}-jac-weight-bg`,
+        bucketOutput,
+        zeroInput,
+        weightedBucketOutput,
+        weightParams,
+        bucketValuesInput,
+      );
+      await submitKernel(
+        device,
+        kernels.weightJac,
+        weightBindGroup,
+        bucketCountOut,
+        `${labelPrefix}-jac-weight`,
+        32,
+      );
+
+      const windowOutput = createEmptyPointStorageBuffer(
+        device,
+        `${labelPrefix}-jac-window-out`,
+        count * metadata.numWindows,
+        pointBytes,
+      );
+      const windowParams = createParamsBuffer(device, `${labelPrefix}-jac-window-params`, uniformBytes, {
+        count: count * metadata.numWindows,
+      });
+      const windowBindGroup = createBindGroupForBuffers(
+        device,
+        kernels.subsumJac,
+        `${labelPrefix}-jac-window-bg`,
+        weightedBucketOutput,
+        zeroInput,
+        windowOutput,
+        windowParams,
+        bucketValuesInput,
+        windowStartsInput,
+        windowCountsInput,
+      );
+      await submitKernel(
+        device,
+        kernels.subsumJac,
+        windowBindGroup,
+        count * metadata.numWindows * 32,
+        `${labelPrefix}-jac-window`,
+        32,
+      );
+
+      return {
+        windowOutput,
+        cleanupBuffers: [weightedBucketOutput, weightParams, windowParams],
+      };
+    },
+  };
 }
 
 function ensurePackedScalars(scalarsPacked: Uint8Array, count: number, label: string): void {
@@ -67,121 +174,15 @@ function packScalarWordsPacked(scalarsPacked: Uint8Array): Uint32Array {
   return out;
 }
 
-function shaderPartsForCurve(curve: SupportedCurveID): readonly string[] {
-  if (curve === "bn254") {
-    return [
-      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-types",
-      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-consts",
-      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-core",
-      "/shaders/curves/bn254/g2_arith.wgsl?v=1",
-      "/shaders/common/g2_msm.wgsl?v=2",
-    ];
-  }
-  return [
-    "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-types",
-    "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-consts",
-    "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-core",
-    "/shaders/curves/bls12_381/g2_arith.wgsl?v=1",
-    "/shaders/common/g2_msm.wgsl?v=2",
-  ];
-}
-
-async function createWeightedG2PippengerRuntime(
-  device: GPUDevice,
-  shaderCode: string,
-  labelPrefix: string,
-): Promise<PippengerRuntime> {
-  const kernels = await createMSMKernelSetAsync(device, shaderCode, labelPrefix, {
-    bucket: "g2_msm_bucket_sparse_main",
-    weightBuckets: "g2_msm_weight_buckets_main",
-    subsumPhase1: "g2_msm_subsum_phase1_main",
-    combine: "g2_msm_combine_main",
-  });
-  return {
-    bucket: kernels.bucket,
-    bucketWorkgroupSize: 32,
-    combine: kernels.combine,
-    async reduceWindows(options: WindowReductionOptions): Promise<WindowReductionResult> {
-      const {
-        device,
-        pointBytes,
-        uniformBytes,
-        zeroInput,
-        bucketOutput,
-        bucketCountOut,
-        bucketValuesInput,
-        windowStartsInput,
-        windowCountsInput,
-        metadata,
-        count,
-        labelPrefix,
-      } = options;
-      const weightedBucketOutput = createEmptyPointStorageBuffer(
-        device,
-        `${labelPrefix}-weighted-out`,
-        bucketCountOut,
-        pointBytes,
-      );
-      const weightParams = createParamsBuffer(device, `${labelPrefix}-weight-params`, uniformBytes, {
-        count: bucketCountOut,
-      });
-      const weightBindGroup = createBindGroupForBuffers(
-        device,
-        kernels.weightBuckets,
-        `${labelPrefix}-weight-bg`,
-        bucketOutput,
-        zeroInput,
-        weightedBucketOutput,
-        weightParams,
-        bucketValuesInput,
-      );
-      await submitKernel(device, kernels.weightBuckets, weightBindGroup, bucketCountOut, `${labelPrefix}-weight`);
-
-      const windowOutput = createEmptyPointStorageBuffer(
-        device,
-        `${labelPrefix}-window-out`,
-        count * metadata.numWindows,
-        pointBytes,
-      );
-      const windowParams = createParamsBuffer(device, `${labelPrefix}-window-params`, uniformBytes, {
-        count: count * metadata.numWindows,
-      });
-      const windowBindGroup = createBindGroupForBuffers(
-        device,
-        kernels.subsumPhase1,
-        `${labelPrefix}-window-bg`,
-        weightedBucketOutput,
-        zeroInput,
-        windowOutput,
-        windowParams,
-        bucketValuesInput,
-        windowStartsInput,
-        windowCountsInput,
-      );
-      await submitKernel(
-        device,
-        kernels.subsumPhase1,
-        windowBindGroup,
-        count * metadata.numWindows * 64,
-        `${labelPrefix}-window`,
-      );
-      return {
-        windowOutput,
-        cleanupBuffers: [weightedBucketOutput, weightParams, windowParams],
-      };
-    },
-  };
-}
-
-export function createOptimizedG2MSMBenchModule(
+export function createJacG2MSMModule(
   context: CurveGPUContext,
   curve: SupportedCurveID,
   pointBytes: number,
 ): OptimizedG2MSMBenchModule {
-  const label = `${curve}-g2-msm-bench`;
+  const label = `${curve}-g2-jac-msm`;
   const getRuntime = lazyAsync(async (): Promise<PippengerRuntime> => {
     const shaderCode = await loadShaderParts(shaderPartsForCurve(curve));
-    return createWeightedG2PippengerRuntime(context.device, shaderCode, label);
+    return createJacG2PippengerRuntime(context.device, shaderCode, label);
   });
 
   return {

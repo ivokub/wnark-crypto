@@ -1,4 +1,4 @@
-var<workgroup> g2_window_shared: array<G2Point, 64>;
+var<workgroup> g2_window_shared: array<G2Point, 32>;
 
 fn g2_add_affine(a: G2Point, b: G2Point) -> G2Point {
   return g2_jac_to_affine(g2_add_mixed(g2_affine_to_jac(a), b));
@@ -21,24 +21,18 @@ fn g2_scalar_mul_affine_small(base: G2Point, scalar: u32) -> G2Point {
     return g2_jac_to_affine(g2_jac_infinity());
   }
   var acc = g2_jac_infinity();
-  var cur_jac = g2_affine_to_jac(base);
-  var cur_aff = base;
   var k = scalar;
   loop {
-    if ((k & 1u) != 0u) {
-      acc = g2_add_mixed(acc, cur_aff);
-    }
-    k = k >> 1u;
     if (k == 0u) {
       break;
     }
-    cur_jac = g2_double_jac(cur_jac);
-    cur_aff = g2_jac_to_affine(cur_jac);
+    acc = g2_add_mixed(acc, base);
+    k = k - 1u;
   }
   return g2_jac_to_affine(acc);
 }
 
-@compute @workgroup_size(64)
+@compute @workgroup_size(32)
 fn g2_msm_bucket_sparse_main(@builtin(global_invocation_id) id: vec3<u32>) {
   let i = id.x;
   if (i >= params_count()) {
@@ -75,7 +69,7 @@ fn g2_msm_weight_buckets_main(@builtin(global_invocation_id) id: vec3<u32>) {
   g2_store(i, g2_scalar_mul_affine_small(point, value));
 }
 
-@compute @workgroup_size(64)
+@compute @workgroup_size(32)
 fn g2_msm_subsum_phase1_main(
   @builtin(local_invocation_id) local_id: vec3<u32>,
   @builtin(workgroup_id) wg_id: vec3<u32>,
@@ -97,12 +91,12 @@ fn g2_msm_subsum_phase1_main(
     if (!g2_affine_is_infinity(point)) {
       local_sum = g2_add_mixed(local_sum, point);
     }
-    j = j + 64u;
+    j = j + 32u;
   }
   g2_window_shared[tid] = g2_jac_to_affine(local_sum);
   workgroupBarrier();
 
-  var stride = 32u;
+  var stride = 16u;
   loop {
     if (stride == 0u) {
       break;

@@ -1,6 +1,8 @@
 export {};
 
 import { bytesToHex, createPageUI, fetchJSON, hexToBytes } from "../../../src/curvegpu/browser_utils.js";
+import { createOptimizedG2MSMBenchModule } from "../../../src/curvegpu/g2_msm_bench_optimized.js";
+import { createJacG2MSMModule } from "../../../src/curvegpu/g2_msm_jac.js";
 import type {
   CurveGPUElementBytes,
   CurveGPUFp2Element,
@@ -121,9 +123,83 @@ function expectAffineBatch(name: string, got: readonly CurveGPUG2AffinePoint[], 
   for (let i = 0; i < got.length; i += 1) {
     const gotHex = affineToHex(got[i]);
     if (!equalFp2(gotHex.x, want[i].x) || !equalFp2(gotHex.y, want[i].y)) {
-      throw new Error(`${name}: mismatch at index ${i}`);
+      throw new Error(
+        `${name}: mismatch at index ${i}` +
+          ` got=(${gotHex.x.c0_bytes_le}/${gotHex.x.c1_bytes_le},${gotHex.y.c0_bytes_le}/${gotHex.y.c1_bytes_le})` +
+          ` want=(${want[i].x.c0_bytes_le}/${want[i].x.c1_bytes_le},${want[i].y.c0_bytes_le}/${want[i].y.c1_bytes_le})`,
+      );
     }
   }
+}
+
+async function expectJacobianBatchAffineEqual(
+  curve: CurveModule,
+  name: string,
+  got: readonly CurveGPUG2JacobianPoint[],
+  want: readonly JacobianPoint[],
+): Promise<void> {
+  const affine = await curve.g2.jacobianToAffineBatch(got);
+  expectAffineBatch(name, affine, want);
+}
+
+function packAffinePointsWithOneZ(
+  bases: readonly CurveGPUG2AffinePoint[],
+  componentBytes: number,
+  pointBytes: number,
+  oneMontC0: Uint8Array,
+): Uint8Array {
+  const out = new Uint8Array(bases.length * pointBytes);
+  for (let i = 0; i < bases.length; i += 1) {
+    const base = i * pointBytes;
+    out.set(bases[i].x.c0, base);
+    out.set(bases[i].x.c1, base + componentBytes);
+    out.set(bases[i].y.c0, base + 2 * componentBytes);
+    out.set(bases[i].y.c1, base + 3 * componentBytes);
+    const isInfinity =
+      bases[i].x.c0.every((byte) => byte === 0) &&
+      bases[i].x.c1.every((byte) => byte === 0) &&
+      bases[i].y.c0.every((byte) => byte === 0) &&
+      bases[i].y.c1.every((byte) => byte === 0);
+    if (!isInfinity) {
+      out.set(oneMontC0, base + 4 * componentBytes);
+    }
+  }
+  return out;
+}
+
+function packScalars(scalars: readonly CurveGPUElementBytes[]): Uint8Array {
+  const out = new Uint8Array(scalars.length * 32);
+  for (let i = 0; i < scalars.length; i += 1) {
+    out.set(scalars[i], i * 32);
+  }
+  return out;
+}
+
+function unpackJacobianPoints(
+  bytes: Uint8Array,
+  count: number,
+  componentBytes: number,
+  pointBytes: number,
+): CurveGPUG2JacobianPoint[] {
+  const out: CurveGPUG2JacobianPoint[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const base = i * pointBytes;
+    out.push({
+      x: {
+        c0: bytes.slice(base, base + componentBytes),
+        c1: bytes.slice(base + componentBytes, base + 2 * componentBytes),
+      },
+      y: {
+        c0: bytes.slice(base + 2 * componentBytes, base + 3 * componentBytes),
+        c1: bytes.slice(base + 3 * componentBytes, base + 4 * componentBytes),
+      },
+      z: {
+        c0: bytes.slice(base + 4 * componentBytes, base + 5 * componentBytes),
+        c1: bytes.slice(base + 5 * componentBytes, base + 6 * componentBytes),
+      },
+    });
+  }
+  return out;
 }
 
 async function naiveMSMAffine(
@@ -151,6 +227,8 @@ async function runSmoke(config: G2MSMConfig): Promise<void> {
 
   try {
     const curve = await createRequestedCurveModule(config.curve);
+    const optimizedMSM = createOptimizedG2MSMBenchModule(curve.context, config.curve, curve.g2.pointBytes);
+    const jacMSM = createJacG2MSMModule(curve.context, config.curve, curve.g2.pointBytes);
     const vectors = await fetchJSON<G2MSMVectors>(config.vectorPath);
 
     lines.push("1. Requesting adapter... OK");
@@ -186,8 +264,61 @@ async function runSmoke(config: G2MSMConfig): Promise<void> {
         window,
       },
     );
-    expectPointBatch(`msm_pippenger_affine (window=${window})`, pippengerResults, vectors.msm_cases.map((item) => item.expected_affine));
+    await expectJacobianBatchAffineEqual(
+      curve,
+      `msm_pippenger_affine (window=${window})`,
+      pippengerResults,
+      vectors.msm_cases.map((item) => item.expected_affine),
+    );
     lines.push(`msm_pippenger_affine (window=${window}): OK`);
+    writeLog(lines);
+
+    const oneMontC0 = await curve.fp.montOne();
+    const packedBases = packAffinePointsWithOneZ(
+      vectors.msm_cases.flatMap((item) => item.bases_affine.map(affineFromHex)),
+      curve.g2.componentBytes,
+      curve.g2.pointBytes,
+      oneMontC0,
+    );
+    const packedScalars = packScalars(
+      vectors.msm_cases.flatMap((item) => item.scalars_bytes_le.map((value) => hexToBytes(value) as CurveGPUElementBytes)),
+    );
+    const packedResults = unpackJacobianPoints(
+      await optimizedMSM.pippengerPackedJacobianBases(packedBases, packedScalars, {
+        count: vectors.msm_cases.length,
+        termsPerInstance: vectors.terms_per_instance,
+        window,
+      }),
+      vectors.msm_cases.length,
+      curve.g2.componentBytes,
+      curve.g2.pointBytes,
+    );
+    await expectJacobianBatchAffineEqual(
+      curve,
+      `msm_pippenger_packed (window=${window})`,
+      packedResults,
+      vectors.msm_cases.map((item) => item.expected_affine),
+    );
+    lines.push(`msm_pippenger_packed (window=${window}): OK`);
+    writeLog(lines);
+
+    const jacPackedResults = unpackJacobianPoints(
+      await jacMSM.pippengerPackedJacobianBases(packedBases, packedScalars, {
+        count: vectors.msm_cases.length,
+        termsPerInstance: vectors.terms_per_instance,
+        window,
+      }),
+      vectors.msm_cases.length,
+      curve.g2.componentBytes,
+      curve.g2.pointBytes,
+    );
+    await expectJacobianBatchAffineEqual(
+      curve,
+      `msm_jac_pippenger_packed (window=${window})`,
+      jacPackedResults,
+      vectors.msm_cases.map((item) => item.expected_affine),
+    );
+    lines.push(`msm_jac_pippenger_packed (window=${window}): OK`);
     writeLog(lines);
 
     lines.push("");

@@ -6,10 +6,12 @@ import {
   fetchJSON,
   hexToBytes,
   mustElement,
+  yieldToBrowser,
 } from "../../../src/curvegpu/browser_utils.js";
 import { benchmarkTotalDuration } from "./shared/bench_total.js";
 import { createPreferredByteBaseSource } from "../../../src/curvegpu/msm_bench_sources.js";
 import { createOptimizedG2MSMBenchModule } from "../../../src/curvegpu/g2_msm_bench_optimized.js";
+import { createJacG2MSMModule } from "../../../src/curvegpu/g2_msm_jac.js";
 import { makeRandomScalarBatch } from "../../../src/curvegpu/msm_shared.js";
 import type {
   CurveGPUElementBytes,
@@ -192,6 +194,7 @@ async function runBenchmark(): Promise<void> {
     const initStart = performance.now();
     const curve = await createRequestedCurveModule(config.curve);
     const optimizedMSM = createOptimizedG2MSMBenchModule(curve.context, config.curve, config.pointBytes);
+    const jacMSM = createJacG2MSMModule(curve.context, config.curve, config.pointBytes);
     const g2Vectors = await fetchJSON<G2OpsVectors>(config.opsVectorsPath);
     const generator = findGeneratorPoint(g2Vectors);
     const baseSourceProvider = createPreferredByteBaseSource({
@@ -214,11 +217,48 @@ async function runBenchmark(): Promise<void> {
     if (baseSourceInit.postMetricLines) {
       lines.push(...baseSourceInit.postMetricLines);
     }
+    const prewarmSize = 1 << minLog;
+    lines.push(`4. Prewarming optimized G2 MSM runtime at size ${prewarmSize}...`);
+    writeLog(lines);
+    await yieldToBrowser();
+    {
+      const { bases: prewarmBases } = await baseSourceProvider.loadBases({
+        context: baseSourceInit.context,
+        size: prewarmSize,
+      });
+      const prewarmScalars = makeMSMScalarsPacked(prewarmSize);
+      const prewarmWindow = optimizedMSM.bestWindow(prewarmSize);
+      await optimizedMSM.pippengerPackedJacobianBases(prewarmBases, prewarmScalars, {
+        count: 1,
+        termsPerInstance: prewarmSize,
+        window: prewarmWindow,
+      });
+    }
+    lines[lines.length - 1] = `4. Prewarming optimized G2 MSM runtime at size ${prewarmSize}... OK`;
+    lines.push(`5. Prewarming Jacobian G2 MSM runtime at size ${prewarmSize}...`);
+    writeLog(lines);
+    await yieldToBrowser();
+    {
+      const { bases: prewarmBases } = await baseSourceProvider.loadBases({
+        context: baseSourceInit.context,
+        size: prewarmSize,
+      });
+      const prewarmScalars = makeMSMScalarsPacked(prewarmSize);
+      const prewarmWindow = jacMSM.bestWindow(prewarmSize);
+      await jacMSM.pippengerPackedJacobianBases(prewarmBases, prewarmScalars, {
+        count: 1,
+        termsPerInstance: prewarmSize,
+        window: prewarmWindow,
+      });
+    }
+    lines[lines.length - 1] = `5. Prewarming Jacobian G2 MSM runtime at size ${prewarmSize}... OK`;
     lines.push("");
     lines.push("size,op,window,init_ms,prep_ms,cold_total_ms,cold_with_init_prep_ms,warm_total_ms");
     writeLog(lines);
+    await yieldToBrowser();
 
     for (let logSize = minLog; logSize <= maxLog; logSize += 1) {
+      await yieldToBrowser();
       const size = 1 << logSize;
       const prepStart = performance.now();
       const { bases: baseBytes } = await baseSourceProvider.loadBases({
@@ -234,7 +274,7 @@ async function runBenchmark(): Promise<void> {
           termsPerInstance: size,
           window,
         });
-      });
+      }, yieldToBrowser);
       lines.push(
         [
           `${size}`,
@@ -245,6 +285,27 @@ async function runBenchmark(): Promise<void> {
           benchmark.coldMs.toFixed(3),
           (initMs + prepMs + benchmark.coldMs).toFixed(3),
           benchmark.warmMs.toFixed(3),
+        ].join(","),
+      );
+      writeLog(lines);
+
+      const jacBenchmark = await benchmarkTotalDuration(iters, async () => {
+        await jacMSM.pippengerPackedJacobianBases(baseBytes, scalarsPacked, {
+          count: 1,
+          termsPerInstance: size,
+          window,
+        });
+      }, yieldToBrowser);
+      lines.push(
+        [
+          `${size}`,
+          "msm_jac_pippenger_packed",
+          `${window}`,
+          initMs.toFixed(3),
+          prepMs.toFixed(3),
+          jacBenchmark.coldMs.toFixed(3),
+          (initMs + prepMs + jacBenchmark.coldMs).toFixed(3),
+          jacBenchmark.warmMs.toFixed(3),
         ].join(","),
       );
       writeLog(lines);

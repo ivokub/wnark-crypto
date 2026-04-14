@@ -35,6 +35,7 @@ type WindowReductionResult = {
 
 export type PippengerRuntime = {
   bucket: Kernel;
+  bucketWorkgroupSize?: number;
   combine: Kernel;
   reduceWindows(options: WindowReductionOptions): Promise<WindowReductionResult>;
 };
@@ -211,6 +212,25 @@ export async function runSparseSignedPippengerMSM(options: {
   } = options;
 
   const metadata = buildSparseSignedBucketMetadataWords(scalarWords, count, termsPerInstance, window, maxChunkSize);
+  console.debug("[curvegpu] msm metadata", {
+    labelPrefix,
+    count,
+    termsPerInstance,
+    window,
+    pointBytes,
+    numWindows: metadata.numWindows,
+    bucketCount: metadata.bucketCount,
+    bucketCountOut: metadata.bucketPointers.length,
+    baseIndicesLen: metadata.baseIndices.length,
+    bucketPointersLen: metadata.bucketPointers.length,
+    bucketSizesLen: metadata.bucketSizes.length,
+    bucketValuesLen: metadata.bucketValues.length,
+    windowStartsLen: metadata.windowStarts.length,
+    windowCountsLen: metadata.windowCounts.length,
+    bucketSizesHead: Array.from(metadata.bucketSizes.slice(0, 16)),
+    bucketValuesHead: Array.from(metadata.bucketValues.slice(0, 16)),
+    windowCountsHead: Array.from(metadata.windowCounts.slice(0, 16)),
+  });
   const zeroInput = createStorageBufferFromBytes(device, `${labelPrefix}-zero`, zeroPointBytes, pointBytes);
   const basesInput = createStorageBufferFromBytes(
     device,
@@ -243,7 +263,7 @@ export async function runSparseSignedPippengerMSM(options: {
     bucketPointersInput,
     bucketSizesInput,
   );
-  await submitKernel(device, runtime.bucket, bucketBindGroup, bucketCountOut, `${labelPrefix}-bucket`);
+  await submitKernel(device, runtime.bucket, bucketBindGroup, bucketCountOut, `${labelPrefix}-bucket`, runtime.bucketWorkgroupSize ?? 64);
 
   const bucketValuesInput = createU32StorageBuffer(device, `${labelPrefix}-bucket-values`, metadata.bucketValues);
   const windowStartsInput = createU32StorageBuffer(device, `${labelPrefix}-window-starts`, metadata.windowStarts);

@@ -16,6 +16,14 @@ export type SimpleKernel = {
   bindGroupLayout: GPUBindGroupLayout;
 };
 
+function logComputePipelineCreation(label: string, entryPoint: string): void {
+  const key = "__curvegpuComputePipelineCreateCount";
+  const state = globalThis as typeof globalThis & { [key: string]: number | undefined };
+  const count = (state[key] ?? 0) + 1;
+  state[key] = count;
+  console.debug(`[curvegpu] createComputePipeline #${count}: ${label} entry=${entryPoint}`);
+}
+
 export function lazyAsync<T>(factory: () => Promise<T>): () => Promise<T> {
   let promise: Promise<T> | null = null;
   return (): Promise<T> => {
@@ -196,6 +204,7 @@ export function createSimpleKernel(
     label: `${label}-pl`,
     bindGroupLayouts: [bindGroupLayout],
   });
+  logComputePipelineCreation(`${label}-${entryPoint}`, entryPoint);
   const pipeline = device.createComputePipeline({
     label: `${label}-${entryPoint}`,
     layout: pipelineLayout,
