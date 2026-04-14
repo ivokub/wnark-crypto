@@ -70,16 +70,41 @@ export interface CurveGPUG2JacobianPoint {
 
 /**
  * Options for affine MSM execution.
+ *
+ * All fields are optional; sensible defaults are chosen automatically.
  */
 export type CurveGPUMSMOptions = {
+  /**
+   * Number of independent MSM instances to compute in a single call.
+   * Each instance uses `termsPerInstance` consecutive base/scalar pairs
+   * from the input arrays. Defaults to `1`.
+   */
   count?: number;
+  /**
+   * Number of (base, scalar) pairs per MSM instance. When `count` is 1 and
+   * this field is omitted, the full length of the input arrays is used.
+   */
   termsPerInstance?: number;
+  /**
+   * Pippenger window size in bits. If omitted, the library selects a window
+   * size based on `termsPerInstance` via `bestWindow()`.
+   */
   window?: number;
+  /**
+   * Maximum number of terms processed per GPU dispatch chunk. Smaller values
+   * reduce peak GPU memory usage at the cost of more dispatches. Defaults to
+   * `256`.
+   */
   maxChunkSize?: number;
 };
 
 /**
  * Supported packed point encodings for bulk APIs.
+ *
+ * `"jacobian_x_y_z_le"` — Six consecutive little-endian field-element byte
+ * strings in the order `x, y, z`. For affine points represented in Jacobian
+ * form set `z` to the Montgomery-form one element; for the point at infinity
+ * leave all six components zero-filled.
  */
 export type CurveGPUPackedPointLayout = "jacobian_x_y_z_le";
 
@@ -87,7 +112,9 @@ export type CurveGPUPackedPointLayout = "jacobian_x_y_z_le";
  * Subset of device limits that matter for the current curve workloads.
  */
 export type CurveGPURequestedLimits = {
+  /** Maximum byte size of a single storage buffer binding. */
   maxStorageBufferBindingSize?: number;
+  /** Maximum byte size of a GPU buffer. */
   maxBufferSize?: number;
 };
 
@@ -95,9 +122,13 @@ export type CurveGPURequestedLimits = {
  * Human-readable adapter details useful for logging, debugging, and telemetry.
  */
 export type CurveGPUAdapterDiagnostics = {
+  /** GPU vendor string, e.g. `"apple"`, `"nvidia"`, `"intel"`. */
   vendor?: string;
+  /** GPU architecture string, e.g. `"common-3"`. */
   architecture?: string;
+  /** Free-form GPU description provided by the driver. */
   description?: string;
+  /** Whether the browser selected a software (fallback) adapter. */
   isFallbackAdapter?: boolean;
 };
 
@@ -105,8 +136,23 @@ export type CurveGPUAdapterDiagnostics = {
  * Options for acquiring a browser WebGPU context.
  */
 export type CurveGPUContextOptions = {
+  /**
+   * Hint to the browser about which GPU to prefer on multi-GPU systems.
+   * `"high-performance"` requests a discrete GPU; `"low-power"` requests an
+   * integrated GPU. Defaults to the browser's own selection.
+   */
   powerPreference?: GPUPowerPreference;
+  /**
+   * When `true` (the default), the adapter's reported limits for
+   * `maxStorageBufferBindingSize` and `maxBufferSize` are propagated to
+   * `requestDevice`. Set to `false` to request a device with default limits,
+   * which may restrict the maximum MSM size.
+   */
   requireAdapterLimits?: boolean;
+  /**
+   * Explicit device limits to request, overriding the adapter-derived values.
+   * Useful when you know the exact buffer sizes your workload needs.
+   */
   requiredLimits?: CurveGPURequestedLimits;
   /** Enable verbose debug logging from GPU operations. Defaults to `false`. */
   debug?: boolean;
@@ -119,10 +165,15 @@ export type CurveGPUContextOptions = {
  * field, group, NTT, and MSM work.
  */
 export interface CurveGPUContext {
+  /** The underlying WebGPU adapter selected by the browser. */
   readonly adapter: GPUAdapter;
+  /** The WebGPU logical device used for all GPU operations. */
   readonly device: GPUDevice;
+  /** Adapter metadata, or `null` if `requestAdapterInfo()` is unavailable. */
   readonly adapterInfo: GPUAdapterInfo | null;
+  /** Human-readable diagnostics derived from the adapter. */
   readonly diagnostics: CurveGPUAdapterDiagnostics;
+  /** Limits that were requested when the device was created. */
   readonly requestedLimits: CurveGPURequestedLimits;
   /** Whether verbose debug logging is enabled for GPU operations. */
   readonly debug: boolean;
@@ -141,8 +192,9 @@ export interface CurveGPUContext {
   /**
    * Release any library-owned resources associated with the context.
    *
-   * Browser WebGPU device lifetime is still managed by the browser, so this is
-   * currently a logical shutdown hook rather than a hard device destroy.
+   * Drains the buffer pool and performs any other cleanup. Browser WebGPU
+   * device lifetime is still managed by the browser, so this is a logical
+   * shutdown hook rather than a hard device destroy.
    */
   close(): void;
 }
@@ -223,14 +275,14 @@ export interface G1Module {
   readonly coordinateBytes: number;
   readonly pointBytes: number;
   readonly zeroHex: string;
-  /** Return the affine point at infinity. */
+  /** Return the affine point at infinity (all-zero coordinates). */
   affineInfinity(): CurveGPUAffinePoint;
-  /** Return the zero Jacobian point. */
+  /** Return the zero Jacobian point (all-zero coordinates) synchronously. */
   jacobianZero(): CurveGPUJacobianPoint;
   /** Copy a Jacobian point through the GPU implementation. */
   copy(point: CurveGPUJacobianPoint): Promise<CurveGPUJacobianPoint>;
   copyBatch(points: readonly CurveGPUJacobianPoint[]): Promise<CurveGPUJacobianPoint[]>;
-  /** Construct the Jacobian point at infinity. */
+  /** Construct the Jacobian point at infinity via the GPU. */
   jacobianInfinity(): Promise<CurveGPUJacobianPoint>;
   jacobianInfinityBatch(count: number): Promise<CurveGPUJacobianPoint[]>;
   /** Lift affine points into Jacobian coordinates. */
@@ -242,7 +294,7 @@ export interface G1Module {
   /** Double Jacobian points. */
   doubleJacobian(point: CurveGPUJacobianPoint): Promise<CurveGPUJacobianPoint>;
   doubleJacobianBatch(points: readonly CurveGPUJacobianPoint[]): Promise<CurveGPUJacobianPoint[]>;
-  /** Add an affine point into a Jacobian accumulator. */
+  /** Add an affine point into a Jacobian accumulator (mixed addition). */
   addMixed(point: CurveGPUJacobianPoint, affine: CurveGPUAffinePoint): Promise<CurveGPUJacobianPoint>;
   addMixedBatch(points: readonly CurveGPUJacobianPoint[], affine: readonly CurveGPUAffinePoint[]): Promise<CurveGPUJacobianPoint[]>;
   /**
@@ -256,7 +308,7 @@ export interface G1Module {
   /** Add two affine points and return the result in Jacobian form. */
   affineAdd(a: CurveGPUAffinePoint, b: CurveGPUAffinePoint): Promise<CurveGPUJacobianPoint>;
   affineAddBatch(a: readonly CurveGPUAffinePoint[], b: readonly CurveGPUAffinePoint[]): Promise<CurveGPUJacobianPoint[]>;
-  /** Multiply affine bases by scalar-field elements. */
+  /** Multiply an affine base by a scalar and return the result in Jacobian form. */
   scalarMulAffine(base: CurveGPUAffinePoint, scalar: CurveGPUElementBytes): Promise<CurveGPUJacobianPoint>;
   scalarMulAffineBatch(bases: readonly CurveGPUAffinePoint[], scalars: readonly CurveGPUElementBytes[]): Promise<CurveGPUJacobianPoint[]>;
   /** Add two affine points and return the result in affine form. */
@@ -276,45 +328,64 @@ export interface G1Module {
 /**
  * G2 point operations for a specific curve.
  *
- * Coordinates are represented over the quadratic extension field as `{c0,c1}`
- * byte-string pairs.
+ * Coordinates are represented over the quadratic extension field as `{c0, c1}`
+ * byte-string pairs. The arithmetic rules mirror `G1Module` but operate on
+ * `CurveGPUG2AffinePoint` and `CurveGPUG2JacobianPoint` types.
  */
 export interface G2Module {
   readonly context: CurveGPUContext;
   readonly curve: SupportedCurveID;
+  /** Byte size of one base-field component (`c0` or `c1`). */
   readonly componentBytes: number;
+  /** Byte size of one G2 coordinate (two components: `2 * componentBytes`). */
   readonly coordinateBytes: number;
+  /** Byte size of one G2 Jacobian point (six components: `6 * componentBytes`). */
   readonly pointBytes: number;
+  /** Return the affine G2 point at infinity (all-zero components). */
   affineInfinity(): CurveGPUG2AffinePoint;
+  /** Return the zero G2 Jacobian point (all-zero components) synchronously. */
   jacobianZero(): CurveGPUG2JacobianPoint;
+  /** Copy a G2 Jacobian point through the GPU implementation. */
   copy(point: CurveGPUG2JacobianPoint): Promise<CurveGPUG2JacobianPoint>;
   copyBatch(points: readonly CurveGPUG2JacobianPoint[]): Promise<CurveGPUG2JacobianPoint[]>;
+  /** Construct the G2 Jacobian point at infinity via the GPU. */
   jacobianInfinity(): Promise<CurveGPUG2JacobianPoint>;
   jacobianInfinityBatch(count: number): Promise<CurveGPUG2JacobianPoint[]>;
+  /** Lift affine G2 points into Jacobian coordinates. */
   affineToJacobian(point: CurveGPUG2AffinePoint): Promise<CurveGPUG2JacobianPoint>;
   affineToJacobianBatch(points: readonly CurveGPUG2AffinePoint[]): Promise<CurveGPUG2JacobianPoint[]>;
+  /** Negate G2 Jacobian points. */
   negJacobian(point: CurveGPUG2JacobianPoint): Promise<CurveGPUG2JacobianPoint>;
   negJacobianBatch(points: readonly CurveGPUG2JacobianPoint[]): Promise<CurveGPUG2JacobianPoint[]>;
+  /** Double G2 Jacobian points. */
   doubleJacobian(point: CurveGPUG2JacobianPoint): Promise<CurveGPUG2JacobianPoint>;
   doubleJacobianBatch(points: readonly CurveGPUG2JacobianPoint[]): Promise<CurveGPUG2JacobianPoint[]>;
+  /** Add an affine G2 point into a Jacobian accumulator (mixed addition). */
   addMixed(point: CurveGPUG2JacobianPoint, affine: CurveGPUG2AffinePoint): Promise<CurveGPUG2JacobianPoint>;
   addMixedBatch(points: readonly CurveGPUG2JacobianPoint[], affine: readonly CurveGPUG2AffinePoint[]): Promise<CurveGPUG2JacobianPoint[]>;
+  /**
+   * Convert G2 Jacobian points to affine coordinates.
+   *
+   * Returns affine points; the `z` component is not present in the result type.
+   */
   jacobianToAffine(point: CurveGPUG2JacobianPoint): Promise<CurveGPUG2AffinePoint>;
   jacobianToAffineBatch(points: readonly CurveGPUG2JacobianPoint[]): Promise<CurveGPUG2AffinePoint[]>;
+  /** Add two affine G2 points and return the result in Jacobian form. */
   affineAdd(a: CurveGPUG2AffinePoint, b: CurveGPUG2AffinePoint): Promise<CurveGPUG2JacobianPoint>;
   affineAddBatch(a: readonly CurveGPUG2AffinePoint[], b: readonly CurveGPUG2AffinePoint[]): Promise<CurveGPUG2JacobianPoint[]>;
+  /** Multiply an affine G2 base by a scalar and return the result in Jacobian form. */
   scalarMulAffine(base: CurveGPUG2AffinePoint, scalar: CurveGPUElementBytes): Promise<CurveGPUG2JacobianPoint>;
   scalarMulAffineBatch(bases: readonly CurveGPUG2AffinePoint[], scalars: readonly CurveGPUElementBytes[]): Promise<CurveGPUG2JacobianPoint[]>;
-  /** Add two affine points and return the result in affine form. */
+  /** Add two affine G2 points and return the result in affine form. */
   addAffine(a: CurveGPUG2AffinePoint, b: CurveGPUG2AffinePoint): Promise<CurveGPUG2AffinePoint>;
   addAffineBatch(a: readonly CurveGPUG2AffinePoint[], b: readonly CurveGPUG2AffinePoint[]): Promise<CurveGPUG2AffinePoint[]>;
-  /** Negate an affine point and return the result in affine form. */
+  /** Negate an affine G2 point and return the result in affine form. */
   negAffine(point: CurveGPUG2AffinePoint): Promise<CurveGPUG2AffinePoint>;
   negAffineBatch(points: readonly CurveGPUG2AffinePoint[]): Promise<CurveGPUG2AffinePoint[]>;
-  /** Double an affine point and return the result in affine form. */
+  /** Double an affine G2 point and return the result in affine form. */
   doubleAffine(point: CurveGPUG2AffinePoint): Promise<CurveGPUG2AffinePoint>;
   doubleAffineBatch(points: readonly CurveGPUG2AffinePoint[]): Promise<CurveGPUG2AffinePoint[]>;
-  /** Multiply an affine base by a scalar and return the result in affine form. */
+  /** Multiply an affine G2 base by a scalar and return the result in affine form. */
   scalarMulAffineResult(base: CurveGPUG2AffinePoint, scalar: CurveGPUElementBytes): Promise<CurveGPUG2AffinePoint>;
   scalarMulAffineResultBatch(bases: readonly CurveGPUG2AffinePoint[], scalars: readonly CurveGPUElementBytes[]): Promise<CurveGPUG2AffinePoint[]>;
 }
@@ -349,7 +420,7 @@ export interface MSMModule {
   readonly context: CurveGPUContext;
   readonly curve: SupportedCurveID;
   readonly group: "g1";
-  /** Choose the default Pippenger window for a given term count. */
+  /** Choose the default Pippenger window size for a given term count. */
   bestWindow(termCount: number): number;
   /** Run a single affine-base Pippenger MSM and return the result in Jacobian form. */
   pippengerAffine(
@@ -363,7 +434,13 @@ export interface MSMModule {
     scalars: readonly CurveGPUElementBytes[],
     options?: CurveGPUMSMOptions,
   ): Promise<CurveGPUAffinePoint>;
-  /** Run a batched affine-base Pippenger MSM. */
+  /**
+   * Run a batched affine-base Pippenger MSM.
+   *
+   * `bases` and `scalars` are interleaved: the first `termsPerInstance` pairs
+   * belong to instance 0, the next `termsPerInstance` pairs to instance 1, etc.
+   * `options.count` and `options.termsPerInstance` must both be provided.
+   */
   pippengerAffineBatch(
     bases: readonly CurveGPUAffinePoint[],
     scalars: readonly CurveGPUElementBytes[],
@@ -387,27 +464,56 @@ export interface MSMModule {
   ): Promise<Uint8Array>;
 }
 
+/**
+ * Multi-scalar multiplication module over G2 affine bases.
+ *
+ * The API mirrors `MSMModule` but operates on G2 points over the quadratic
+ * extension field. Bases are supplied in affine form; results are returned in
+ * Jacobian form unless an `AffineResult` variant is used.
+ */
 export interface G2MSMModule {
   readonly context: CurveGPUContext;
   readonly curve: SupportedCurveID;
   readonly group: "g2";
+  /** Choose the default Pippenger window size for a given term count. */
   bestWindow(termCount: number): number;
+  /** Run a single affine-base G2 Pippenger MSM and return the result in Jacobian form. */
   pippengerAffine(
     bases: readonly CurveGPUG2AffinePoint[],
     scalars: readonly CurveGPUElementBytes[],
     options?: CurveGPUMSMOptions,
   ): Promise<CurveGPUG2JacobianPoint>;
-  /** Run a single affine-base Pippenger MSM and return the result in affine form. */
+  /** Run a single affine-base G2 Pippenger MSM and return the result in affine form. */
   pippengerAffineResult(
     bases: readonly CurveGPUG2AffinePoint[],
     scalars: readonly CurveGPUElementBytes[],
     options?: CurveGPUMSMOptions,
   ): Promise<CurveGPUG2AffinePoint>;
+  /**
+   * Run a batched affine-base G2 Pippenger MSM.
+   *
+   * `bases` and `scalars` are interleaved: the first `termsPerInstance` pairs
+   * belong to instance 0, the next `termsPerInstance` pairs to instance 1, etc.
+   * `options.count` and `options.termsPerInstance` must both be provided.
+   */
   pippengerAffineBatch(
     bases: readonly CurveGPUG2AffinePoint[],
     scalars: readonly CurveGPUElementBytes[],
     options: CurveGPUMSMOptions,
   ): Promise<CurveGPUG2JacobianPoint[]>;
+  /**
+   * Run G2 Pippenger MSM from packed bytes.
+   *
+   * `basesPacked` must be in `jacobian_x_y_z_le` layout: six consecutive
+   * base-field components per point (`x.c0, x.c1, y.c0, y.c1, z.c0, z.c1`).
+   * Set `z.c0` to the Montgomery-form one element for affine inputs; leave all
+   * components zero for the point at infinity.
+   *
+   * `scalarsPacked` is a packed sequence of regular-form 32-byte scalars.
+   *
+   * The result is returned in the same packed `jacobian_x_y_z_le` layout,
+   * one Jacobian point per MSM instance.
+   */
   pippengerPackedJacobianBases(
     basesPacked: Uint8Array,
     scalarsPacked: Uint8Array,
@@ -419,16 +525,26 @@ export interface G2MSMModule {
  * High-level curve module returned by the library.
  *
  * This groups the curve-specific submodules behind one stable object per
- * supported curve.
+ * supported curve. Obtain an instance via `createCurveModule` (or the
+ * curve-specific helpers `createBN254` / `createBLS12381`).
  */
 export interface CurveModule {
+  /** The curve this module was created for. */
   readonly id: SupportedCurveID;
+  /** The WebGPU context shared across all submodules. */
   readonly context: CurveGPUContext;
+  /** Scalar-field (`Fr`) arithmetic. */
   readonly fr: FieldModule;
+  /** Base-field (`Fp`) arithmetic. */
   readonly fp: FieldModule;
+  /** G1 point operations. */
   readonly g1: G1Module;
+  /** G2 point operations over the quadratic extension field. */
   readonly g2: G2Module;
+  /** Scalar-field NTT. */
   readonly ntt: NTTModule;
+  /** Multi-scalar multiplication over G1. */
   readonly msm: MSMModule;
+  /** Multi-scalar multiplication over G2. */
   readonly g2msm: G2MSMModule;
 }
