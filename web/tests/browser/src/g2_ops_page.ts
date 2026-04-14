@@ -1,14 +1,15 @@
 export {};
 
-import { bytesToHex, createPageUI, fetchJSON, hexToBytes } from "../../../src/curvegpu/browser_utils.js";
+import { bytesToHex, fetchJSON, hexToBytes } from "../../../src/curvegpu/browser_utils.js";
 import type {
   CurveGPUFp2Element,
   CurveGPUG2AffinePoint,
   CurveGPUG2JacobianPoint,
+  CurveModule,
   G2Module,
   SupportedCurveID,
 } from "../../../src/index.js";
-import { appendContextDiagnostics, createRequestedCurveModule, curveDisplayName, getRequestedCurveId } from "./shared/page_library.js";
+import { curveDisplayName } from "./shared/page_library.js";
 
 type Fp2Point = {
   c0_bytes_le: string;
@@ -61,15 +62,6 @@ const CONFIGS: Record<SupportedCurveID, G2OpsConfig> = {
   },
 };
 
-const runButton = document.getElementById("run") as HTMLButtonElement;
-const statusEl = document.getElementById("status") as HTMLSpanElement;
-const logEl = document.getElementById("log") as HTMLPreElement;
-const { setStatus, setPageState, writeLog } = createPageUI(statusEl, logEl);
-
-function getConfig(): G2OpsConfig {
-  return CONFIGS[getRequestedCurveId()];
-}
-
 function fp2FromHex(point: Fp2Point): CurveGPUFp2Element {
   return { c0: hexToBytes(point.c0_bytes_le), c1: hexToBytes(point.c1_bytes_le) };
 }
@@ -98,7 +90,7 @@ function equalFp2(a: Fp2Point, b: Fp2Point): boolean {
   return a.c0_bytes_le === b.c0_bytes_le && a.c1_bytes_le === b.c1_bytes_le;
 }
 
-function expectPointBatch(name: string, got: readonly CurveGPUG2JacobianPoint[], want: readonly JacobianPoint[], lines: string[]): void {
+function expectPointBatch(name: string, got: readonly CurveGPUG2JacobianPoint[], want: readonly JacobianPoint[], log: (msg: string) => void): void {
   if (got.length !== want.length) {
     throw new Error(`${name}: length mismatch got=${got.length} want=${want.length}`);
   }
@@ -112,10 +104,10 @@ function expectPointBatch(name: string, got: readonly CurveGPUG2JacobianPoint[],
       throw new Error(`${name}: mismatch at index ${i}`);
     }
   }
-  lines.push(`${name}: OK`);
+  log(`${name}: OK`);
 }
 
-function expectAffineBatch(name: string, got: readonly CurveGPUG2AffinePoint[], want: readonly AffinePoint[], lines: string[]): void {
+function expectAffineBatch(name: string, got: readonly CurveGPUG2AffinePoint[], want: readonly AffinePoint[], log: (msg: string) => void): void {
   if (got.length !== want.length) {
     throw new Error(`${name}: length mismatch got=${got.length} want=${want.length}`);
   }
@@ -125,7 +117,7 @@ function expectAffineBatch(name: string, got: readonly CurveGPUG2AffinePoint[], 
       throw new Error(`${name}: mismatch at index ${i}`);
     }
   }
-  lines.push(`${name}: OK`);
+  log(`${name}: OK`);
 }
 
 function zeroFp2(componentBytes: number): Fp2Point {
@@ -133,82 +125,40 @@ function zeroFp2(componentBytes: number): Fp2Point {
   return { c0_bytes_le: zero, c1_bytes_le: zero };
 }
 
-async function runSmoke(config: G2OpsConfig): Promise<void> {
-  const lines = [`=== ${config.title} ===`, ""];
-  writeLog(lines);
-  setStatus("Running");
-  setPageState("running");
-  runButton.disabled = true;
+export async function runSuite(module: CurveModule, log: (msg: string) => void): Promise<{ passed: number; failed: number }> {
+  const config = CONFIGS[module.id];
+  log(`=== ${config.title} ===`);
+  log("");
+  const vectors = await fetchJSON<G2OpsVectors>(config.vectorPath);
+  log(`cases.g2 = ${vectors.point_cases.length}`);
 
-  try {
-    const curve = await createRequestedCurveModule(config.curve);
-    const vectors = await fetchJSON<G2OpsVectors>(config.vectorPath);
-    const g2: G2Module = curve.g2;
+  const g2: G2Module = module.g2;
+  const pAffine = vectors.point_cases.map((item) => affineFromHex(item.p_affine));
+  const qAffine = vectors.point_cases.map((item) => affineFromHex(item.q_affine));
+  const pJacobian = vectors.point_cases.map((item) => jacobianFromHex(item.p_jacobian));
+  const negWant = vectors.point_cases.map((item) => item.neg_p_jacobian);
+  const doubleWant = vectors.point_cases.map((item) => item.double_p_jacobian);
+  const addWant = vectors.point_cases.map((item) => item.add_mixed_p_plus_q_jacobian);
+  const affineWant = vectors.point_cases.map((item) => ({
+    x: item.p_affine_output.x,
+    y: item.p_affine_output.y,
+  }));
+  const affineAddWant = vectors.point_cases.map((item) => item.affine_add_p_plus_q);
+  const oneMont = await module.fp.montOne();
+  const oneFp2 = { c0_bytes_le: bytesToHex(oneMont), c1_bytes_le: bytesToHex(module.fp.zero()) };
+  const zero = zeroFp2(g2.componentBytes);
+  const jacInfinityWant = vectors.point_cases.map(() => ({ x: oneFp2, y: oneFp2, z: zero }));
 
-    lines.push("1. Requesting adapter... OK");
-    appendContextDiagnostics(lines, curve.context);
-    lines.push("2. Requesting device... OK");
-    lines.push("3. Loading vectors... OK");
-    lines.push(`cases.g2 = ${vectors.point_cases.length}`);
-    lines.push("4. Initializing curve module... OK");
-    writeLog(lines);
+  expectPointBatch("copy", await g2.copyBatch(pJacobian), vectors.point_cases.map((item) => item.p_jacobian), log);
+  expectPointBatch("jac_infinity", await g2.jacobianInfinityBatch(vectors.point_cases.length), jacInfinityWant, log);
+  expectPointBatch("affine_to_jac", await g2.affineToJacobianBatch(pAffine), vectors.point_cases.map((item) => item.p_jacobian), log);
+  expectPointBatch("neg_jac", await g2.negJacobianBatch(pJacobian), negWant, log);
+  expectAffineBatch("jac_to_affine", await g2.jacobianToAffineBatch(pJacobian), affineWant, log);
+  expectPointBatch("double_jac", await g2.doubleJacobianBatch(pJacobian), doubleWant, log);
+  expectPointBatch("add_mixed", await g2.addMixedBatch(pJacobian, qAffine), addWant, log);
+  expectPointBatch("affine_add", await g2.affineAddBatch(pAffine, qAffine), affineAddWant, log);
 
-    const pAffine = vectors.point_cases.map((item) => affineFromHex(item.p_affine));
-    const qAffine = vectors.point_cases.map((item) => affineFromHex(item.q_affine));
-    const pJacobian = vectors.point_cases.map((item) => jacobianFromHex(item.p_jacobian));
-    const negWant = vectors.point_cases.map((item) => item.neg_p_jacobian);
-    const doubleWant = vectors.point_cases.map((item) => item.double_p_jacobian);
-    const addWant = vectors.point_cases.map((item) => item.add_mixed_p_plus_q_jacobian);
-    const affineWant = vectors.point_cases.map((item) => ({
-      x: item.p_affine_output.x,
-      y: item.p_affine_output.y,
-    }));
-    const affineAddWant = vectors.point_cases.map((item) => item.affine_add_p_plus_q);
-    const oneMont = await curve.fp.montOne();
-    const oneFp2 = { c0_bytes_le: bytesToHex(oneMont), c1_bytes_le: bytesToHex(curve.fp.zero()) };
-    const zero = zeroFp2(curve.g2.componentBytes);
-    const jacInfinityWant = vectors.point_cases.map(() => ({ x: oneFp2, y: oneFp2, z: zero }));
-
-    expectPointBatch("copy", await g2.copyBatch(pJacobian), vectors.point_cases.map((item) => item.p_jacobian), lines);
-    writeLog(lines);
-    expectPointBatch("jac_infinity", await g2.jacobianInfinityBatch(vectors.point_cases.length), jacInfinityWant, lines);
-    writeLog(lines);
-    expectPointBatch("affine_to_jac", await g2.affineToJacobianBatch(pAffine), vectors.point_cases.map((item) => item.p_jacobian), lines);
-    writeLog(lines);
-    expectPointBatch("neg_jac", await g2.negJacobianBatch(pJacobian), negWant, lines);
-    writeLog(lines);
-    expectAffineBatch("jac_to_affine", await g2.jacobianToAffineBatch(pJacobian), affineWant, lines);
-    writeLog(lines);
-    expectPointBatch("double_jac", await g2.doubleJacobianBatch(pJacobian), doubleWant, lines);
-    writeLog(lines);
-    expectPointBatch("add_mixed", await g2.addMixedBatch(pJacobian, qAffine), addWant, lines);
-    writeLog(lines);
-    expectPointBatch("affine_add", await g2.affineAddBatch(pAffine, qAffine), affineAddWant, lines);
-    writeLog(lines);
-
-    lines.push("");
-    lines.push(`PASS: ${curveDisplayName(config.curve)} G2 browser smoke succeeded`);
-    writeLog(lines);
-    setStatus("Pass");
-    setPageState("pass");
-  } catch (error) {
-    lines.push(`FAIL: ${error instanceof Error ? error.message : String(error)}`);
-    writeLog(lines);
-    setStatus("Fail");
-    setPageState("fail");
-  } finally {
-    runButton.disabled = false;
-  }
-}
-
-runButton.addEventListener("click", () => {
-  void runSmoke(getConfig());
-});
-
-const config = getConfig();
-const params = new URLSearchParams(window.location.search);
-if (params.get("autorun") === "1") {
-  void runSmoke(config);
-} else {
-  writeLog([`=== ${config.title} ===`, "", `Press Run to execute the ${config.curve} G2 smoke test in browser WebGPU.`]);
+  log("");
+  log(`PASS: ${curveDisplayName(module.id)} G2 browser smoke succeeded`);
+  return { passed: 1, failed: 0 };
 }

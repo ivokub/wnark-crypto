@@ -1,8 +1,8 @@
 export {};
 
-import { bytesToHex, createPageUI, fetchJSON, hexToBytes } from "../../../src/curvegpu/browser_utils.js";
-import type { CurveGPUElementBytes, SupportedCurveID } from "../../../src/index.js";
-import { appendContextDiagnostics, createRequestedCurveModule, curveDisplayName, getRequestedCurveId } from "./shared/page_library.js";
+import { bytesToHex, fetchJSON, hexToBytes } from "../../../src/curvegpu/browser_utils.js";
+import type { CurveGPUElementBytes, CurveModule, SupportedCurveID } from "../../../src/index.js";
+import { curveDisplayName } from "./shared/page_library.js";
 
 type NTTCase = {
   name: string;
@@ -38,15 +38,6 @@ const CONFIGS: Record<SupportedCurveID, NTTConfig> = {
   },
 };
 
-const runButton = document.getElementById("run") as HTMLButtonElement;
-const statusEl = document.getElementById("status") as HTMLSpanElement;
-const logEl = document.getElementById("log") as HTMLPreElement;
-const { setStatus, setPageState, writeLog } = createPageUI(statusEl, logEl);
-
-function getConfig(): NTTConfig {
-  return CONFIGS[getRequestedCurveId()];
-}
-
 function bytesList(hexValues: readonly string[]): CurveGPUElementBytes[] {
   return hexValues.map(hexToBytes);
 }
@@ -63,58 +54,24 @@ function expectHexBatch(name: string, got: readonly CurveGPUElementBytes[], want
   }
 }
 
-async function runSmoke(config: NTTConfig): Promise<void> {
-  const lines = [`=== ${config.title} ===`, ""];
-  writeLog(lines);
-  setStatus("Running");
-  setPageState("running");
-  runButton.disabled = true;
+export async function runSuite(module: CurveModule, log: (msg: string) => void): Promise<{ passed: number; failed: number }> {
+  const config = CONFIGS[module.id];
+  log(`=== ${config.title} ===`);
+  log("");
+  const vectors = await fetchJSON<FRNTTVectors>(config.vectorPath);
+  log(`cases.ntt = ${vectors.ntt_cases.length}`);
 
-  try {
-    const curve = await createRequestedCurveModule(config.curve);
-    const vectors = await fetchJSON<FRNTTVectors>(config.vectorPath);
-
-    lines.push("1. Requesting adapter... OK");
-    appendContextDiagnostics(lines, curve.context);
-    lines.push("2. Requesting device... OK");
-    lines.push("3. Loading vectors... OK");
-    lines.push(`cases.ntt = ${vectors.ntt_cases.length}`);
-    lines.push("4. Initializing curve module... OK");
-    writeLog(lines);
-
-    for (const item of vectors.ntt_cases) {
-      const input = bytesList(item.input_mont_le);
-      const forward = await curve.ntt.forward(input);
-      expectHexBatch(`${item.name}: forward_ntt`, forward, item.forward_expected_le);
-      const inverse = await curve.ntt.inverse(forward);
-      expectHexBatch(`${item.name}: inverse_ntt`, inverse, item.inverse_expected_le);
-    }
-
-    lines.push("forward_ntt: OK");
-    lines.push("inverse_ntt: OK");
-    lines.push("");
-    lines.push(`PASS: ${curveDisplayName(config.curve)} fr NTT browser smoke succeeded`);
-    writeLog(lines);
-    setStatus("Pass");
-    setPageState("pass");
-  } catch (error) {
-    lines.push(`FAIL: ${error instanceof Error ? error.message : String(error)}`);
-    writeLog(lines);
-    setStatus("Fail");
-    setPageState("fail");
-  } finally {
-    runButton.disabled = false;
+  for (const item of vectors.ntt_cases) {
+    const input = bytesList(item.input_mont_le);
+    const forward = await module.ntt.forward(input);
+    expectHexBatch(`${item.name}: forward_ntt`, forward, item.forward_expected_le);
+    const inverse = await module.ntt.inverse(forward);
+    expectHexBatch(`${item.name}: inverse_ntt`, inverse, item.inverse_expected_le);
   }
-}
 
-runButton.addEventListener("click", () => {
-  void runSmoke(getConfig());
-});
-
-const config = getConfig();
-const params = new URLSearchParams(window.location.search);
-if (params.get("autorun") === "1") {
-  void runSmoke(config);
-} else {
-  writeLog([`=== ${config.title} ===`, "", `Press Run to execute the ${config.curve} fr NTT smoke test in browser WebGPU.`]);
+  log("forward_ntt: OK");
+  log("inverse_ntt: OK");
+  log("");
+  log(`PASS: ${curveDisplayName(module.id)} fr NTT browser smoke succeeded`);
+  return { passed: 1, failed: 0 };
 }

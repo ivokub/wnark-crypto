@@ -1,8 +1,8 @@
 export {};
 
-import { bytesToHex, createPageUI, fetchJSON, hexToBytes } from "../../../src/curvegpu/browser_utils.js";
-import type { CurveGPUElementBytes, FieldModule, SupportedCurveID } from "../../../src/index.js";
-import { appendContextDiagnostics, createRequestedCurveModule, curveDisplayName, getRequestedCurveId } from "./shared/page_library.js";
+import { bytesToHex, fetchJSON, hexToBytes } from "../../../src/curvegpu/browser_utils.js";
+import type { CurveGPUElementBytes, CurveModule, FieldModule, SupportedCurveID } from "../../../src/index.js";
+import { curveDisplayName } from "./shared/page_library.js";
 
 type ElementCase = {
   name: string;
@@ -56,15 +56,6 @@ const CONFIGS: Record<SupportedCurveID, FpOpsConfig> = {
   },
 };
 
-const runButton = document.getElementById("run") as HTMLButtonElement;
-const statusEl = document.getElementById("status") as HTMLSpanElement;
-const logEl = document.getElementById("log") as HTMLPreElement;
-const { setStatus, setPageState, writeLog } = createPageUI(statusEl, logEl);
-
-function getConfig(): FpOpsConfig {
-  return CONFIGS[getRequestedCurveId()];
-}
-
 function combineElementCases(vectors: FPOpsVectors): ElementCase[] {
   return [...vectors.element_cases, ...vectors.edge_cases, ...vectors.differential_cases];
 }
@@ -81,7 +72,7 @@ function bytesList(hexValues: readonly string[]): Uint8Array[] {
   return hexValues.map(hexToBytes);
 }
 
-function expectHexBatch(name: string, got: readonly CurveGPUElementBytes[], wantHex: readonly string[], lines: string[]): void {
+function expectHexBatch(name: string, got: readonly CurveGPUElementBytes[], wantHex: readonly string[], log: (msg: string) => void): void {
   if (got.length !== wantHex.length) {
     throw new Error(`${name}: length mismatch got=${got.length} want=${wantHex.length}`);
   }
@@ -91,10 +82,10 @@ function expectHexBatch(name: string, got: readonly CurveGPUElementBytes[], want
       throw new Error(`${name}: mismatch at index ${i}: got=${gotHex} want=${wantHex[i]}`);
     }
   }
-  lines.push(`${name}: OK`);
+  log(`${name}: OK`);
 }
 
-function expectBoolBatch(name: string, got: readonly boolean[], want: readonly boolean[], lines: string[]): void {
+function expectBoolBatch(name: string, got: readonly boolean[], want: readonly boolean[], log: (msg: string) => void): void {
   if (got.length !== want.length) {
     throw new Error(`${name}: length mismatch got=${got.length} want=${want.length}`);
   }
@@ -103,7 +94,7 @@ function expectBoolBatch(name: string, got: readonly boolean[], want: readonly b
       throw new Error(`${name}: mismatch at index ${i}: got=${String(got[i])} want=${String(want[i])}`);
     }
   }
-  lines.push(`${name}: OK`);
+  log(`${name}: OK`);
 }
 
 function mustFindConvertCase(cases: readonly ConvertCase[], name: string): ConvertCase {
@@ -114,25 +105,18 @@ function mustFindConvertCase(cases: readonly ConvertCase[], name: string): Conve
   return found;
 }
 
-async function runBrowserSmoke(config: FpOpsConfig): Promise<string[]> {
-  const lines: string[] = [`=== ${config.title} ===`, ""];
-  writeLog(lines);
-
-  const curve = await createRequestedCurveModule(config.curve);
+export async function runSuite(module: CurveModule, log: (msg: string) => void): Promise<{ passed: number; failed: number }> {
+  const config = CONFIGS[module.id];
+  log(`=== ${config.title} ===`);
+  log("");
   const vectors = await fetchJSON<FPOpsVectors>(config.vectorPath);
+  log(`cases.sanity = ${vectors.element_cases.length}`);
+  log(`cases.edge = ${vectors.edge_cases.length}`);
+  log(`cases.differential = ${vectors.differential_cases.length}`);
+  log(`cases.normalize = ${vectors.normalize_cases.length}`);
+  log(`cases.convert = ${vectors.convert_cases.length}`);
 
-  lines.push("1. Requesting adapter... OK");
-  appendContextDiagnostics(lines, curve.context);
-  lines.push("2. Requesting device... OK");
-  lines.push("3. Loading vectors... OK");
-  lines.push(`cases.sanity = ${vectors.element_cases.length}`);
-  lines.push(`cases.edge = ${vectors.edge_cases.length}`);
-  lines.push(`cases.differential = ${vectors.differential_cases.length}`);
-  lines.push(`cases.normalize = ${vectors.normalize_cases.length}`);
-  lines.push(`cases.convert = ${vectors.convert_cases.length}`);
-  writeLog(lines);
-
-  const fp: FieldModule = curve.fp;
+  const fp: FieldModule = module.fp;
   const elementCases = combineElementCases(vectors);
   const aHex = elementCases.map((item) => item.a_bytes_le);
   const bHex = elementCases.map((item) => item.b_bytes_le);
@@ -141,48 +125,35 @@ async function runBrowserSmoke(config: FpOpsConfig): Promise<string[]> {
   const zeroHexValue = zeroHex(fp.byteSize);
   const oneMontHex = bytesToHex(await fp.montOne());
 
-  expectHexBatch("copy", await fp.copyBatch(aBytes), aHex, lines);
-  writeLog(lines);
-  expectBoolBatch("equal", await fp.equalBatch(aBytes, bBytes), elementCases.map((item) => isNonZeroHex(item.equal_bytes_le)), lines);
-  writeLog(lines);
-  expectHexBatch("zero", Array.from({ length: elementCases.length }, () => fp.zero()), Array.from({ length: elementCases.length }, () => zeroHexValue), lines);
-  writeLog(lines);
+  expectHexBatch("copy", await fp.copyBatch(aBytes), aHex, log);
+  expectBoolBatch("equal", await fp.equalBatch(aBytes, bBytes), elementCases.map((item) => isNonZeroHex(item.equal_bytes_le)), log);
+  expectHexBatch("zero", Array.from({ length: elementCases.length }, () => fp.zero()), Array.from({ length: elementCases.length }, () => zeroHexValue), log);
   const oneBatch = Array.from({ length: elementCases.length }, () => hexToBytes(oneMontHex));
-  expectHexBatch("one", oneBatch, Array.from({ length: elementCases.length }, () => oneMontHex), lines);
-  writeLog(lines);
-  expectHexBatch("add", await fp.addBatch(aBytes, bBytes), elementCases.map((item) => item.add_bytes_le), lines);
-  writeLog(lines);
-  expectHexBatch("sub", await fp.subBatch(aBytes, bBytes), elementCases.map((item) => item.sub_bytes_le), lines);
-  writeLog(lines);
-  expectHexBatch("neg", await fp.negBatch(aBytes), elementCases.map((item) => item.neg_a_bytes_le), lines);
-  writeLog(lines);
-  expectHexBatch("double", await fp.doubleBatch(aBytes), elementCases.map((item) => item.double_a_bytes_le), lines);
-  writeLog(lines);
-  expectHexBatch("mul", await fp.mulBatch(aBytes, bBytes), elementCases.map((item) => item.mul_bytes_le), lines);
-  writeLog(lines);
-  expectHexBatch("square", await fp.squareBatch(aBytes), elementCases.map((item) => item.square_a_bytes_le), lines);
-  writeLog(lines);
+  expectHexBatch("one", oneBatch, Array.from({ length: elementCases.length }, () => oneMontHex), log);
+  expectHexBatch("add", await fp.addBatch(aBytes, bBytes), elementCases.map((item) => item.add_bytes_le), log);
+  expectHexBatch("sub", await fp.subBatch(aBytes, bBytes), elementCases.map((item) => item.sub_bytes_le), log);
+  expectHexBatch("neg", await fp.negBatch(aBytes), elementCases.map((item) => item.neg_a_bytes_le), log);
+  expectHexBatch("double", await fp.doubleBatch(aBytes), elementCases.map((item) => item.double_a_bytes_le), log);
+  expectHexBatch("mul", await fp.mulBatch(aBytes, bBytes), elementCases.map((item) => item.mul_bytes_le), log);
+  expectHexBatch("square", await fp.squareBatch(aBytes), elementCases.map((item) => item.square_a_bytes_le), log);
   expectHexBatch(
     "to_mont",
     await fp.toMontgomeryBatch(bytesList(vectors.convert_cases.map((item) => item.regular_bytes_le))),
     vectors.convert_cases.map((item) => item.mont_bytes_le),
-    lines,
+    log,
   );
-  writeLog(lines);
   expectHexBatch(
     "from_mont",
     await fp.fromMontgomeryBatch(bytesList(vectors.convert_cases.map((item) => item.mont_bytes_le))),
     vectors.convert_cases.map((item) => item.regular_bytes_le),
-    lines,
+    log,
   );
-  writeLog(lines);
   expectHexBatch(
     "normalize",
     await fp.normalizeMontBatch(bytesList(vectors.normalize_cases.map((item) => item.input_bytes_le))),
     vectors.normalize_cases.map((item) => item.expected_bytes_le),
-    lines,
+    log,
   );
-  writeLog(lines);
 
   const oneCase = mustFindConvertCase(vectors.convert_cases, "one");
   const oneHexExpected = bytesToHex(await fp.montOne());
@@ -190,42 +161,7 @@ async function runBrowserSmoke(config: FpOpsConfig): Promise<string[]> {
     throw new Error(`one: mismatch got=${oneHexExpected} want=${oneCase.mont_bytes_le}`);
   }
 
-  lines.push("");
-  lines.push(`PASS: ${curveDisplayName(config.curve)} fp browser smoke succeeded`);
-  writeLog(lines);
-  return lines;
-}
-
-async function main(): Promise<void> {
-  const config = getConfig();
-  runButton.disabled = true;
-  setPageState("running");
-  setStatus("Running");
-
-  try {
-    const lines = await runBrowserSmoke(config);
-    writeLog(lines);
-    setPageState("pass");
-    setStatus("Pass");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    writeLog([`=== ${config.title} ===`, "", `FAIL: ${message}`]);
-    setPageState("fail");
-    setStatus("Fail");
-    throw error;
-  } finally {
-    runButton.disabled = false;
-  }
-}
-
-runButton.addEventListener("click", () => {
-  void main();
-});
-
-const config = getConfig();
-const params = new URLSearchParams(window.location.search);
-if (params.get("autorun") === "1") {
-  void main();
-} else {
-  writeLog([`=== ${config.title} ===`, "", `Press Run to execute the ${config.curve} fp smoke test in browser WebGPU.`]);
+  log("");
+  log(`PASS: ${curveDisplayName(module.id)} fp browser smoke succeeded`);
+  return { passed: 1, failed: 0 };
 }

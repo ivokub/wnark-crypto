@@ -1,6 +1,6 @@
 export {};
 
-import { bytesToHex, createPageUI, fetchJSON, hexToBytes } from "../../../src/curvegpu/browser_utils.js";
+import { bytesToHex, fetchJSON, hexToBytes } from "../../../src/curvegpu/browser_utils.js";
 import { createOptimizedG2MSMBenchModule } from "../../../src/curvegpu/g2_msm_bench_optimized.js";
 import type {
   CurveGPUElementBytes,
@@ -10,7 +10,7 @@ import type {
   CurveModule,
   SupportedCurveID,
 } from "../../../src/index.js";
-import { appendContextDiagnostics, createRequestedCurveModule, curveDisplayName, getRequestedCurveId } from "./shared/page_library.js";
+import { curveDisplayName } from "./shared/page_library.js";
 
 type Fp2Point = {
   c0_bytes_le: string;
@@ -58,15 +58,6 @@ const CONFIGS: Record<SupportedCurveID, G2MSMConfig> = {
     vectorPath: "/testdata/vectors/g2/bls12_381_g2_msm.json?v=1",
   },
 };
-
-const runButton = document.getElementById("run") as HTMLButtonElement;
-const statusEl = document.getElementById("status") as HTMLSpanElement;
-const logEl = document.getElementById("log") as HTMLPreElement;
-const { setStatus, setPageState, writeLog } = createPageUI(statusEl, logEl);
-
-function getConfig(): G2MSMConfig {
-  return CONFIGS[getRequestedCurveId()];
-}
 
 function fp2FromHex(point: Fp2Point): CurveGPUFp2Element {
   return { c0: hexToBytes(point.c0_bytes_le), c1: hexToBytes(point.c1_bytes_le) };
@@ -132,12 +123,12 @@ function expectAffineBatch(name: string, got: readonly CurveGPUG2AffinePoint[], 
 }
 
 async function expectJacobianBatchAffineEqual(
-  curve: CurveModule,
+  module: CurveModule,
   name: string,
   got: readonly CurveGPUG2JacobianPoint[],
   want: readonly JacobianPoint[],
 ): Promise<void> {
-  const affine = await curve.g2.jacobianToAffineBatch(got);
+  const affine = await module.g2.jacobianToAffineBatch(got);
   expectAffineBatch(name, affine, want);
 }
 
@@ -202,146 +193,94 @@ function unpackJacobianPoints(
 }
 
 async function naiveMSMAffine(
-  curve: CurveModule,
+  module: CurveModule,
   bases: readonly CurveGPUG2AffinePoint[],
   scalars: readonly CurveGPUElementBytes[],
 ): Promise<CurveGPUG2AffinePoint> {
-  const scaled = await curve.g2.scalarMulAffineBatch(bases, scalars);
+  const scaled = await module.g2.scalarMulAffineBatch(bases, scalars);
   if (scaled.length === 0) {
-    return curve.g2.affineInfinity();
+    return module.g2.affineInfinity();
   }
-  let accJacobian = await curve.g2.affineToJacobian(toAffinePoint(scaled[0]));
+  let accJacobian = await module.g2.affineToJacobian(toAffinePoint(scaled[0]));
   for (let i = 1; i < scaled.length; i += 1) {
-    accJacobian = await curve.g2.addMixed(accJacobian, toAffinePoint(scaled[i]));
+    accJacobian = await module.g2.addMixed(accJacobian, toAffinePoint(scaled[i]));
   }
-  return curve.g2.jacobianToAffine(accJacobian);
+  return module.g2.jacobianToAffine(accJacobian);
 }
 
-async function runSmoke(config: G2MSMConfig): Promise<void> {
-  const lines = [`=== ${config.title} ===`, ""];
-  writeLog(lines);
-  setStatus("Running");
-  setPageState("running");
-  runButton.disabled = true;
+export async function runSuite(module: CurveModule, log: (msg: string) => void): Promise<{ passed: number; failed: number }> {
+  const config = CONFIGS[module.id];
+  log(`=== ${config.title} ===`);
+  log("");
+  const optimizedMSM = createOptimizedG2MSMBenchModule(module.context, module.id, module.g2.pointBytes);
+  const vectors = await fetchJSON<G2MSMVectors>(config.vectorPath);
+  log(`terms_per_instance = ${vectors.terms_per_instance}`);
+  log(`cases.msm = ${vectors.msm_cases.length}`);
 
-  try {
-    const curve = await createRequestedCurveModule(config.curve);
-    const optimizedMSM = createOptimizedG2MSMBenchModule(curve.context, config.curve, curve.g2.pointBytes);
-    const vectors = await fetchJSON<G2MSMVectors>(config.vectorPath);
-
-    lines.push("1. Requesting adapter... OK");
-    appendContextDiagnostics(lines, curve.context);
-    lines.push("2. Requesting device... OK");
-    lines.push("3. Loading vectors... OK");
-    lines.push(`terms_per_instance = ${vectors.terms_per_instance}`);
-    lines.push(`cases.msm = ${vectors.msm_cases.length}`);
-    lines.push("4. Initializing curve module... OK");
-    writeLog(lines);
-
-    const naiveResults: CurveGPUG2AffinePoint[] = [];
-    for (const msmCase of vectors.msm_cases) {
-      naiveResults.push(
-        await naiveMSMAffine(
-          curve,
-          msmCase.bases_affine.map(affineFromHex),
-          msmCase.scalars_bytes_le.map((value) => hexToBytes(value) as CurveGPUElementBytes),
-        ),
-      );
-    }
-    expectAffineBatch("msm_naive_affine", naiveResults, vectors.msm_cases.map((item) => item.expected_affine));
-    lines.push("msm_naive_affine: OK");
-    writeLog(lines);
-
-    const window = 4;
-    const pippengerResults = await curve.g2msm.pippengerAffineBatch(
-      vectors.msm_cases.flatMap((item) => item.bases_affine.map(affineFromHex)),
-      vectors.msm_cases.flatMap((item) => item.scalars_bytes_le.map((value) => hexToBytes(value) as CurveGPUElementBytes)),
-      {
-        count: vectors.msm_cases.length,
-        termsPerInstance: vectors.terms_per_instance,
-        window,
-      },
+  const naiveResults: CurveGPUG2AffinePoint[] = [];
+  for (const msmCase of vectors.msm_cases) {
+    naiveResults.push(
+      await naiveMSMAffine(
+        module,
+        msmCase.bases_affine.map(affineFromHex),
+        msmCase.scalars_bytes_le.map((value) => hexToBytes(value) as CurveGPUElementBytes),
+      ),
     );
-    await expectJacobianBatchAffineEqual(
-      curve,
-      `msm_pippenger_affine (window=${window})`,
-      pippengerResults,
-      vectors.msm_cases.map((item) => item.expected_affine),
-    );
-    lines.push(`msm_pippenger_affine (window=${window}): OK`);
-    writeLog(lines);
-
-    const oneMontC0 = await curve.fp.montOne();
-    const packedBases = packAffinePointsWithOneZ(
-      vectors.msm_cases.flatMap((item) => item.bases_affine.map(affineFromHex)),
-      curve.g2.componentBytes,
-      curve.g2.pointBytes,
-      oneMontC0,
-    );
-    const packedScalars = packScalars(
-      vectors.msm_cases.flatMap((item) => item.scalars_bytes_le.map((value) => hexToBytes(value) as CurveGPUElementBytes)),
-    );
-    const packedResults = unpackJacobianPoints(
-      await optimizedMSM.pippengerPackedJacobianBases(packedBases, packedScalars, {
-        count: vectors.msm_cases.length,
-        termsPerInstance: vectors.terms_per_instance,
-        window,
-      }),
-      vectors.msm_cases.length,
-      curve.g2.componentBytes,
-      curve.g2.pointBytes,
-    );
-    await expectJacobianBatchAffineEqual(
-      curve,
-      `msm_pippenger_packed (window=${window})`,
-      packedResults,
-      vectors.msm_cases.map((item) => item.expected_affine),
-    );
-    lines.push(`msm_pippenger_packed (window=${window}): OK`);
-    writeLog(lines);
-
-    const jacPackedResults = unpackJacobianPoints(
-      await curve.g2msm.pippengerPackedJacobianBases(packedBases, packedScalars, {
-        count: vectors.msm_cases.length,
-        termsPerInstance: vectors.terms_per_instance,
-        window,
-      }),
-      vectors.msm_cases.length,
-      curve.g2.componentBytes,
-      curve.g2.pointBytes,
-    );
-    await expectJacobianBatchAffineEqual(
-      curve,
-      `msm_jac_pippenger_packed (window=${window})`,
-      jacPackedResults,
-      vectors.msm_cases.map((item) => item.expected_affine),
-    );
-    lines.push(`msm_jac_pippenger_packed (window=${window}): OK`);
-    writeLog(lines);
-
-    lines.push("");
-    lines.push(`PASS: ${curveDisplayName(config.curve)} G2 MSM browser smoke succeeded`);
-    writeLog(lines);
-    setStatus("Pass");
-    setPageState("pass");
-  } catch (error) {
-    lines.push(`FAIL: ${error instanceof Error ? error.message : String(error)}`);
-    writeLog(lines);
-    setStatus("Fail");
-    setPageState("fail");
-  } finally {
-    runButton.disabled = false;
   }
-}
+  expectAffineBatch("msm_naive_affine", naiveResults, vectors.msm_cases.map((item) => item.expected_affine));
+  log("msm_naive_affine: OK");
 
-runButton.addEventListener("click", () => {
-  void runSmoke(getConfig());
-});
+  const window = 4;
+  const pippengerResults = await module.g2msm.pippengerAffineBatch(
+    vectors.msm_cases.flatMap((item) => item.bases_affine.map(affineFromHex)),
+    vectors.msm_cases.flatMap((item) => item.scalars_bytes_le.map((value) => hexToBytes(value) as CurveGPUElementBytes)),
+    {
+      count: vectors.msm_cases.length,
+      termsPerInstance: vectors.terms_per_instance,
+      window,
+    },
+  );
+  await expectJacobianBatchAffineEqual(module, `msm_pippenger_affine (window=${window})`, pippengerResults, vectors.msm_cases.map((item) => item.expected_affine));
+  log(`msm_pippenger_affine (window=${window}): OK`);
 
-const config = getConfig();
-const params = new URLSearchParams(window.location.search);
-if (params.get("autorun") === "1") {
-  void runSmoke(config);
-} else {
-  writeLog([`=== ${config.title} ===`, "", `Press Run to execute the ${config.curve} G2 MSM smoke test in browser WebGPU.`]);
+  const oneMontC0 = await module.fp.montOne();
+  const packedBases = packAffinePointsWithOneZ(
+    vectors.msm_cases.flatMap((item) => item.bases_affine.map(affineFromHex)),
+    module.g2.componentBytes,
+    module.g2.pointBytes,
+    oneMontC0,
+  );
+  const packedScalars = packScalars(
+    vectors.msm_cases.flatMap((item) => item.scalars_bytes_le.map((value) => hexToBytes(value) as CurveGPUElementBytes)),
+  );
+
+  const packedResults = unpackJacobianPoints(
+    await optimizedMSM.pippengerPackedJacobianBases(packedBases, packedScalars, {
+      count: vectors.msm_cases.length,
+      termsPerInstance: vectors.terms_per_instance,
+      window,
+    }),
+    vectors.msm_cases.length,
+    module.g2.componentBytes,
+    module.g2.pointBytes,
+  );
+  await expectJacobianBatchAffineEqual(module, `msm_pippenger_packed (window=${window})`, packedResults, vectors.msm_cases.map((item) => item.expected_affine));
+  log(`msm_pippenger_packed (window=${window}): OK`);
+
+  const jacPackedResults = unpackJacobianPoints(
+    await module.g2msm.pippengerPackedJacobianBases(packedBases, packedScalars, {
+      count: vectors.msm_cases.length,
+      termsPerInstance: vectors.terms_per_instance,
+      window,
+    }),
+    vectors.msm_cases.length,
+    module.g2.componentBytes,
+    module.g2.pointBytes,
+  );
+  await expectJacobianBatchAffineEqual(module, `msm_jac_pippenger_packed (window=${window})`, jacPackedResults, vectors.msm_cases.map((item) => item.expected_affine));
+  log(`msm_jac_pippenger_packed (window=${window}): OK`);
+
+  log("");
+  log(`PASS: ${curveDisplayName(module.id)} G2 MSM browser smoke succeeded`);
+  return { passed: 1, failed: 0 };
 }

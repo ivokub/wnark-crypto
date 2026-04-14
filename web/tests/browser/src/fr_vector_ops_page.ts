@@ -1,12 +1,11 @@
 export {};
 
 import {
-  appendAdapterDiagnostics,
   bytesToHex,
-  createPageUI,
   fetchText,
   hexToBytes,
 } from "../../../src/curvegpu/browser_utils.js";
+import type { CurveModule } from "../../../src/index.js";
 
 type VectorConfig = {
   curve: string;
@@ -83,25 +82,6 @@ const CONFIGS: Record<string, VectorConfig> = {
     vectorLabel: "bls12-381-fr-vector",
   },
 };
-
-const runButton = document.getElementById("run") as HTMLButtonElement;
-const statusEl = document.getElementById("status") as HTMLSpanElement;
-const logEl = document.getElementById("log") as HTMLPreElement;
-const { setStatus, setPageState, writeLog } = createPageUI(statusEl, logEl);
-
-function getConfig(): VectorConfig {
-  const curve = new URLSearchParams(window.location.search).get("curve") ?? "bn254";
-  const config = CONFIGS[curve];
-  if (!config) {
-    throw new Error(`unsupported curve: ${curve}`);
-  }
-  return config;
-}
-
-async function fetchVectors(config: VectorConfig): Promise<FRVectorOpsVectors> {
-  const text = await fetchText(config.vectorPath);
-  return JSON.parse(text) as FRVectorOpsVectors;
-}
 
 function packHexBatch(hexValues: readonly string[]): Uint8Array {
   const out = new Uint8Array(hexValues.length * ELEMENT_BYTES);
@@ -219,73 +199,43 @@ function expectBatch(name: string, got: readonly string[], want: readonly string
   }
 }
 
-async function runSmoke(): Promise<void> {
-  const config = getConfig();
-  const lines = [`=== ${config.title} ===`, ""];
-  writeLog(lines);
-  setStatus("Running");
-  setPageState("running");
-  runButton.disabled = true;
+export async function runSuite(module: CurveModule, log: (msg: string) => void): Promise<{ passed: number; failed: number }> {
+  const config = CONFIGS[module.id];
+  const device = module.context.device;
+  log(`=== ${config.title} ===`);
+  log("");
 
-  try {
-    if (!navigator.gpu) {
-      throw new Error("WebGPU is not available in this browser");
-    }
-    const adapter = await navigator.gpu.requestAdapter();
-    if (!adapter) {
-      throw new Error("requestAdapter returned null");
-    }
-    lines.push("1. Requesting adapter... OK");
-    await appendAdapterDiagnostics(adapter, lines);
-    const device = await adapter.requestDevice();
-    lines.push("2. Requesting device... OK");
+  const [arithShader, vectorShader] = await Promise.all([
+    fetchText(config.arithShaderPath),
+    fetchText(config.vectorShaderPath),
+  ]);
+  const vectorsText = await fetchText(config.vectorPath);
+  const vectors = JSON.parse(vectorsText) as FRVectorOpsVectors;
+  log(`cases.vector = ${vectors.vector_cases.length}`);
 
-    const [arithShader, vectorShader, vectors] = await Promise.all([
-      fetchText(config.arithShaderPath),
-      fetchText(config.vectorShaderPath),
-      fetchVectors(config),
-    ]);
-    lines.push("3. Loading shaders and vectors... OK");
-    lines.push(`cases.vector = ${vectors.vector_cases.length}`);
+  const arithKernel = createKernel(device, config.arithLabel, arithShader, "fr_ops_main");
+  const vectorKernel = createKernel(device, config.vectorLabel, vectorShader, "fr_vector_main");
 
-    const arithKernel = createKernel(device, config.arithLabel, arithShader, "fr_ops_main");
-    const vectorKernel = createKernel(device, config.vectorLabel, vectorShader, "fr_vector_main");
-    lines.push("4. Creating pipelines... OK");
-
-    for (const vectorCase of vectors.vector_cases) {
-      const zeros = vectorCase.mont_inputs_le.map(() => "0000000000000000000000000000000000000000000000000000000000000000");
-      expectBatch(`${vectorCase.name}:add`, await runKernel(device, arithKernel, vectorCase.mont_inputs_le, vectorCase.mont_factors_le, FR_OP_ADD, 0), vectorCase.add_expected_le);
-      expectBatch(`${vectorCase.name}:sub`, await runKernel(device, arithKernel, vectorCase.mont_inputs_le, vectorCase.mont_factors_le, FR_OP_SUB, 0), vectorCase.sub_expected_le);
-      expectBatch(`${vectorCase.name}:mul`, await runKernel(device, arithKernel, vectorCase.mont_inputs_le, vectorCase.mont_factors_le, FR_OP_MUL, 0), vectorCase.mul_expected_le);
-      expectBatch(`${vectorCase.name}:to_mont`, await runKernel(device, arithKernel, vectorCase.regular_inputs_le, zeros, FR_OP_TO_MONT, 0), vectorCase.to_mont_expected_le);
-      expectBatch(`${vectorCase.name}:from_mont`, await runKernel(device, arithKernel, vectorCase.mont_inputs_le, zeros, FR_OP_FROM_MONT, 0), vectorCase.from_mont_expected_le);
-      expectBatch(`${vectorCase.name}:mul_factors`, await runKernel(device, vectorKernel, vectorCase.mont_inputs_le, vectorCase.mont_factors_le, FR_VECTOR_OP_MUL_FACTORS, 0), vectorCase.mul_expected_le);
-      const logCount = Math.round(Math.log2(vectorCase.mont_inputs_le.length));
-      expectBatch(`${vectorCase.name}:bit_reverse_copy`, await runKernel(device, vectorKernel, vectorCase.mont_inputs_le, zeros, FR_VECTOR_OP_BIT_REVERSE_COPY, logCount), vectorCase.bit_reverse_expected_le);
-    }
-
-    lines.push("add: OK");
-    lines.push("sub: OK");
-    lines.push("mul: OK");
-    lines.push("to_mont: OK");
-    lines.push("from_mont: OK");
-    lines.push("mul_factors: OK");
-    lines.push("bit_reverse_copy: OK");
-    lines.push("");
-    lines.push(`PASS: ${config.title} succeeded`);
-    writeLog(lines);
-    setStatus("Pass");
-    setPageState("pass");
-  } catch (error) {
-    lines.push(`FAIL: ${error instanceof Error ? error.message : String(error)}`);
-    writeLog(lines);
-    setStatus("Fail");
-    setPageState("fail");
-  } finally {
-    runButton.disabled = false;
+  for (const vectorCase of vectors.vector_cases) {
+    const zeros = vectorCase.mont_inputs_le.map(() => "0000000000000000000000000000000000000000000000000000000000000000");
+    expectBatch(`${vectorCase.name}:add`, await runKernel(device, arithKernel, vectorCase.mont_inputs_le, vectorCase.mont_factors_le, FR_OP_ADD, 0), vectorCase.add_expected_le);
+    expectBatch(`${vectorCase.name}:sub`, await runKernel(device, arithKernel, vectorCase.mont_inputs_le, vectorCase.mont_factors_le, FR_OP_SUB, 0), vectorCase.sub_expected_le);
+    expectBatch(`${vectorCase.name}:mul`, await runKernel(device, arithKernel, vectorCase.mont_inputs_le, vectorCase.mont_factors_le, FR_OP_MUL, 0), vectorCase.mul_expected_le);
+    expectBatch(`${vectorCase.name}:to_mont`, await runKernel(device, arithKernel, vectorCase.regular_inputs_le, zeros, FR_OP_TO_MONT, 0), vectorCase.to_mont_expected_le);
+    expectBatch(`${vectorCase.name}:from_mont`, await runKernel(device, arithKernel, vectorCase.mont_inputs_le, zeros, FR_OP_FROM_MONT, 0), vectorCase.from_mont_expected_le);
+    expectBatch(`${vectorCase.name}:mul_factors`, await runKernel(device, vectorKernel, vectorCase.mont_inputs_le, vectorCase.mont_factors_le, FR_VECTOR_OP_MUL_FACTORS, 0), vectorCase.mul_expected_le);
+    const logCount = Math.round(Math.log2(vectorCase.mont_inputs_le.length));
+    expectBatch(`${vectorCase.name}:bit_reverse_copy`, await runKernel(device, vectorKernel, vectorCase.mont_inputs_le, zeros, FR_VECTOR_OP_BIT_REVERSE_COPY, logCount), vectorCase.bit_reverse_expected_le);
   }
-}
 
-runButton.addEventListener("click", () => {
-  void runSmoke();
-});
+  log("add: OK");
+  log("sub: OK");
+  log("mul: OK");
+  log("to_mont: OK");
+  log("from_mont: OK");
+  log("mul_factors: OK");
+  log("bit_reverse_copy: OK");
+  log("");
+  log(`PASS: ${config.title} succeeded`);
+  return { passed: 1, failed: 0 };
+}

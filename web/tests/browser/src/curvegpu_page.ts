@@ -1,14 +1,16 @@
 export {};
 
+import type { CurveModule, SupportedCurveID } from "../../../src/index.js";
+import { createCurveGPUContext, createCurveModule } from "../../../src/index.js";
+import { appendContextDiagnostics } from "./shared/page_library.js";
+
 type SuiteKind = "smoke" | "bench";
 
 type SuiteConfig = {
-  curve: string;
+  curve: SupportedCurveID;
   id: string;
   label: string;
   kind: SuiteKind;
-  title: string;
-  description: string;
   script: string;
   defaultMinLog?: number;
   defaultMaxLog?: number;
@@ -16,259 +18,37 @@ type SuiteConfig = {
 };
 
 const SUITES: SuiteConfig[] = [
-  {
-    curve: "bn254",
-    id: "fr_ops",
-    label: "fr ops smoke",
-    kind: "smoke",
-    title: "BN254 fr WebGPU Smoke",
-    description: "Runs the BN254 scalar-field smoke suite against shared vectors.",
-    script: "/web/dist/tests/browser/src/fr_ops_page.js",
-  },
-  {
-    curve: "bn254",
-    id: "fp_ops",
-    label: "fp ops smoke",
-    kind: "smoke",
-    title: "BN254 fp WebGPU Smoke",
-    description: "Runs the BN254 base-field smoke suite against shared vectors.",
-    script: "/web/dist/tests/browser/src/fp_ops_page.js",
-  },
-  {
-    curve: "bn254",
-    id: "fr_vector_ops",
-    label: "fr vector smoke",
-    kind: "smoke",
-    title: "BN254 fr Vector WebGPU Smoke",
-    description: "Runs the BN254 vector-operation smoke suite.",
-    script: "/web/dist/tests/browser/src/fr_vector_ops_page.js",
-  },
-  {
-    curve: "bn254",
-    id: "fr_ntt",
-    label: "fr NTT smoke",
-    kind: "smoke",
-    title: "BN254 fr NTT Browser Smoke",
-    description: "Runs the BN254 NTT smoke suite.",
-    script: "/web/dist/tests/browser/src/fr_ntt_page.js",
-  },
-  {
-    curve: "bn254",
-    id: "g1_ops",
-    label: "G1 ops smoke",
-    kind: "smoke",
-    title: "BN254 G1 Ops Browser Smoke",
-    description: "Runs the BN254 G1 point-operation smoke suite.",
-    script: "/web/dist/tests/browser/src/g1_ops_page.js",
-  },
-  {
-    curve: "bn254",
-    id: "g2_ops",
-    label: "G2 ops smoke",
-    kind: "smoke",
-    title: "BN254 G2 Ops Browser Smoke",
-    description: "Runs the BN254 G2 point-operation smoke suite.",
-    script: "/web/dist/tests/browser/src/g2_ops_page.js",
-  },
-  {
-    curve: "bn254",
-    id: "g1_scalar_mul",
-    label: "G1 scalar mul smoke",
-    kind: "smoke",
-    title: "BN254 G1 Scalar Mul Browser Smoke",
-    description: "Runs the BN254 G1 scalar-multiplication smoke suite.",
-    script: "/web/dist/tests/browser/src/g1_scalar_mul_page.js",
-  },
-  {
-    curve: "bn254",
-    id: "g1_msm",
-    label: "G1 MSM smoke",
-    kind: "smoke",
-    title: "BN254 G1 MSM Browser Smoke",
-    description: "Runs the BN254 G1 MSM smoke suite.",
-    script: "/web/dist/tests/browser/src/g1_msm_page.js",
-  },
-  {
-    curve: "bn254",
-    id: "g2_msm",
-    label: "G2 MSM smoke",
-    kind: "smoke",
-    title: "BN254 G2 MSM Browser Smoke",
-    description: "Runs the BN254 G2 MSM smoke suite.",
-    script: "/web/dist/tests/browser/src/g2_msm_page.js",
-  },
-  {
-    curve: "bn254",
-    id: "g2_msm_bench",
-    label: "G2 MSM benchmark",
-    kind: "bench",
-    title: "BN254 G2 MSM Browser Benchmark",
-    description: "Benchmarks BN254 G2 MSM in browser WebGPU.",
-    script: "/web/dist/tests/browser/src/g2_msm_bench_page.js",
-  },
-  {
-    curve: "bn254",
-    id: "fr_vector_bench",
-    label: "fr vector benchmark",
-    kind: "bench",
-    title: "BN254 fr Vector WebGPU Benchmark",
-    description: "Measures BN254 vector operations end-to-end in browser WebGPU.",
-    script: "/web/dist/tests/browser/src/fr_vector_bench_page.js",
-    defaultMinLog: 10,
-    defaultMaxLog: 20,
-    defaultIters: 3,
-  },
-  {
-    curve: "bn254",
-    id: "fr_ntt_bench",
-    label: "fr NTT benchmark",
-    kind: "bench",
-    title: "BN254 fr NTT Browser Benchmark",
-    description: "Measures BN254 NTT end-to-end in browser WebGPU.",
-    script: "/web/dist/tests/browser/src/fr_ntt_bench_page.js",
-    defaultMinLog: 10,
-    defaultMaxLog: 14,
-    defaultIters: 1,
-  },
-  {
-    curve: "bn254",
-    id: "g1_msm_bench",
-    label: "G1 MSM benchmark",
-    kind: "bench",
-    title: "BN254 G1 MSM Browser Benchmark",
-    description: "Measures BN254 MSM end-to-end in browser WebGPU.",
-    script: "/web/dist/tests/browser/src/g1_msm_bench_page.js",
-    defaultMinLog: 10,
-    defaultMaxLog: 20,
-    defaultIters: 1,
-  },
-  {
-    curve: "bls12_381",
-    id: "fr_ops",
-    label: "fr ops smoke",
-    kind: "smoke",
-    title: "BLS12-381 fr Ops Browser Smoke",
-    description: "Runs the BLS12-381 scalar-field smoke suite against shared vectors.",
-    script: "/web/dist/tests/browser/src/fr_ops_page.js",
-  },
-  {
-    curve: "bls12_381",
-    id: "fr_vector_ops",
-    label: "fr vector smoke",
-    kind: "smoke",
-    title: "BLS12-381 fr Vector WebGPU Smoke",
-    description: "Runs the BLS12-381 vector-operation smoke suite.",
-    script: "/web/dist/tests/browser/src/fr_vector_ops_page.js",
-  },
-  {
-    curve: "bls12_381",
-    id: "fp_ops",
-    label: "fp ops smoke",
-    kind: "smoke",
-    title: "BLS12-381 fp Ops Browser Smoke",
-    description: "Runs the BLS12-381 base-field smoke suite against shared vectors.",
-    script: "/web/dist/tests/browser/src/fp_ops_page.js",
-  },
-  {
-    curve: "bls12_381",
-    id: "g1_ops",
-    label: "G1 ops smoke",
-    kind: "smoke",
-    title: "BLS12-381 G1 Ops Browser Smoke",
-    description: "Runs the BLS12-381 G1 point-operation smoke suite.",
-    script: "/web/dist/tests/browser/src/g1_ops_page.js",
-  },
-  {
-    curve: "bls12_381",
-    id: "g2_ops",
-    label: "G2 ops smoke",
-    kind: "smoke",
-    title: "BLS12-381 G2 Ops Browser Smoke",
-    description: "Runs the BLS12-381 G2 point-operation smoke suite.",
-    script: "/web/dist/tests/browser/src/g2_ops_page.js",
-  },
-  {
-    curve: "bls12_381",
-    id: "g1_scalar_mul",
-    label: "G1 scalar mul smoke",
-    kind: "smoke",
-    title: "BLS12-381 G1 Scalar Mul Browser Smoke",
-    description: "Runs the BLS12-381 G1 scalar-multiplication smoke suite.",
-    script: "/web/dist/tests/browser/src/g1_scalar_mul_page.js",
-  },
-  {
-    curve: "bls12_381",
-    id: "fr_ntt",
-    label: "fr NTT smoke",
-    kind: "smoke",
-    title: "BLS12-381 fr NTT Browser Smoke",
-    description: "Runs the BLS12-381 NTT smoke suite.",
-    script: "/web/dist/tests/browser/src/fr_ntt_page.js",
-  },
-  {
-    curve: "bls12_381",
-    id: "fr_vector_bench",
-    label: "fr vector benchmark",
-    kind: "bench",
-    title: "BLS12-381 fr Vector WebGPU Benchmark",
-    description: "Measures BLS12-381 vector operations end-to-end in browser WebGPU.",
-    script: "/web/dist/tests/browser/src/fr_vector_bench_page.js",
-    defaultMinLog: 10,
-    defaultMaxLog: 20,
-    defaultIters: 3,
-  },
-  {
-    curve: "bls12_381",
-    id: "fr_ntt_bench",
-    label: "fr NTT benchmark",
-    kind: "bench",
-    title: "BLS12-381 fr NTT Browser Benchmark",
-    description: "Measures BLS12-381 NTT end-to-end in browser WebGPU.",
-    script: "/web/dist/tests/browser/src/fr_ntt_bench_page.js",
-    defaultMinLog: 10,
-    defaultMaxLog: 14,
-    defaultIters: 1,
-  },
-  {
-    curve: "bls12_381",
-    id: "g1_msm",
-    label: "G1 MSM smoke",
-    kind: "smoke",
-    title: "BLS12-381 G1 MSM Browser Smoke",
-    description: "Runs the BLS12-381 G1 MSM smoke suite.",
-    script: "/web/dist/tests/browser/src/g1_msm_page.js",
-  },
-  {
-    curve: "bls12_381",
-    id: "g2_msm",
-    label: "G2 MSM smoke",
-    kind: "smoke",
-    title: "BLS12-381 G2 MSM Browser Smoke",
-    description: "Runs the BLS12-381 G2 MSM smoke suite.",
-    script: "/web/dist/tests/browser/src/g2_msm_page.js",
-  },
-  {
-    curve: "bls12_381",
-    id: "g2_msm_bench",
-    label: "G2 MSM benchmark",
-    kind: "bench",
-    title: "BLS12-381 G2 MSM Browser Benchmark",
-    description: "Benchmarks BLS12-381 G2 MSM in browser WebGPU.",
-    script: "/web/dist/tests/browser/src/g2_msm_bench_page.js",
-  },
-  {
-    curve: "bls12_381",
-    id: "g1_msm_bench",
-    label: "G1 MSM benchmark",
-    kind: "bench",
-    title: "BLS12-381 G1 MSM Browser Benchmark",
-    description: "Measures BLS12-381 MSM end-to-end in browser WebGPU.",
-    script: "/web/dist/tests/browser/src/g1_msm_bench_page.js",
-    defaultMinLog: 10,
-    defaultMaxLog: 19,
-    defaultIters: 1,
-  },
+  { curve: "bn254", id: "fr_ops", label: "fr ops", kind: "smoke", script: "/web/dist/tests/browser/src/fr_ops_page.js" },
+  { curve: "bn254", id: "fp_ops", label: "fp ops", kind: "smoke", script: "/web/dist/tests/browser/src/fp_ops_page.js" },
+  { curve: "bn254", id: "fr_vector_ops", label: "fr vector ops", kind: "smoke", script: "/web/dist/tests/browser/src/fr_vector_ops_page.js" },
+  { curve: "bn254", id: "fr_ntt", label: "fr NTT", kind: "smoke", script: "/web/dist/tests/browser/src/fr_ntt_page.js" },
+  { curve: "bn254", id: "g1_ops", label: "G1 ops", kind: "smoke", script: "/web/dist/tests/browser/src/g1_ops_page.js" },
+  { curve: "bn254", id: "g2_ops", label: "G2 ops", kind: "smoke", script: "/web/dist/tests/browser/src/g2_ops_page.js" },
+  { curve: "bn254", id: "g1_scalar_mul", label: "G1 scalar mul", kind: "smoke", script: "/web/dist/tests/browser/src/g1_scalar_mul_page.js" },
+  { curve: "bn254", id: "g1_msm", label: "G1 MSM", kind: "smoke", script: "/web/dist/tests/browser/src/g1_msm_page.js" },
+  { curve: "bn254", id: "g2_msm", label: "G2 MSM", kind: "smoke", script: "/web/dist/tests/browser/src/g2_msm_page.js" },
+  { curve: "bn254", id: "g2_msm_bench", label: "G2 MSM bench", kind: "bench", script: "/web/dist/tests/browser/src/g2_msm_bench_page.js", defaultMinLog: 10, defaultMaxLog: 14, defaultIters: 1 },
+  { curve: "bn254", id: "fr_vector_bench", label: "fr vector bench", kind: "bench", script: "/web/dist/tests/browser/src/fr_vector_bench_page.js", defaultMinLog: 10, defaultMaxLog: 20, defaultIters: 3 },
+  { curve: "bn254", id: "fr_ntt_bench", label: "fr NTT bench", kind: "bench", script: "/web/dist/tests/browser/src/fr_ntt_bench_page.js", defaultMinLog: 10, defaultMaxLog: 14, defaultIters: 1 },
+  { curve: "bn254", id: "g1_msm_bench", label: "G1 MSM bench", kind: "bench", script: "/web/dist/tests/browser/src/g1_msm_bench_page.js", defaultMinLog: 10, defaultMaxLog: 20, defaultIters: 1 },
+  { curve: "bls12_381", id: "fr_ops", label: "fr ops", kind: "smoke", script: "/web/dist/tests/browser/src/fr_ops_page.js" },
+  { curve: "bls12_381", id: "fp_ops", label: "fp ops", kind: "smoke", script: "/web/dist/tests/browser/src/fp_ops_page.js" },
+  { curve: "bls12_381", id: "fr_vector_ops", label: "fr vector ops", kind: "smoke", script: "/web/dist/tests/browser/src/fr_vector_ops_page.js" },
+  { curve: "bls12_381", id: "fr_ntt", label: "fr NTT", kind: "smoke", script: "/web/dist/tests/browser/src/fr_ntt_page.js" },
+  { curve: "bls12_381", id: "g1_ops", label: "G1 ops", kind: "smoke", script: "/web/dist/tests/browser/src/g1_ops_page.js" },
+  { curve: "bls12_381", id: "g2_ops", label: "G2 ops", kind: "smoke", script: "/web/dist/tests/browser/src/g2_ops_page.js" },
+  { curve: "bls12_381", id: "g1_scalar_mul", label: "G1 scalar mul", kind: "smoke", script: "/web/dist/tests/browser/src/g1_scalar_mul_page.js" },
+  { curve: "bls12_381", id: "g1_msm", label: "G1 MSM", kind: "smoke", script: "/web/dist/tests/browser/src/g1_msm_page.js" },
+  { curve: "bls12_381", id: "g2_msm", label: "G2 MSM", kind: "smoke", script: "/web/dist/tests/browser/src/g2_msm_page.js" },
+  { curve: "bls12_381", id: "fr_vector_bench", label: "fr vector bench", kind: "bench", script: "/web/dist/tests/browser/src/fr_vector_bench_page.js", defaultMinLog: 10, defaultMaxLog: 20, defaultIters: 3 },
+  { curve: "bls12_381", id: "fr_ntt_bench", label: "fr NTT bench", kind: "bench", script: "/web/dist/tests/browser/src/fr_ntt_bench_page.js", defaultMinLog: 10, defaultMaxLog: 14, defaultIters: 1 },
+  { curve: "bls12_381", id: "g1_msm_bench", label: "G1 MSM bench", kind: "bench", script: "/web/dist/tests/browser/src/g1_msm_bench_page.js", defaultMinLog: 10, defaultMaxLog: 19, defaultIters: 1 },
+  { curve: "bls12_381", id: "g2_msm_bench", label: "G2 MSM bench", kind: "bench", script: "/web/dist/tests/browser/src/g2_msm_bench_page.js", defaultMinLog: 10, defaultMaxLog: 14, defaultIters: 1 },
 ];
+
+type SuiteRunner = {
+  runSuite: (module: CurveModule, log: (msg: string) => void) => Promise<{ passed: number; failed: number }>;
+};
 
 function getById<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -278,124 +58,197 @@ function getById<T extends HTMLElement>(id: string): T {
   return el as T;
 }
 
-function suiteKey(curve: string, suiteId: string): string {
-  return `${curve}:${suiteId}`;
+function makeLogger(logEl: HTMLPreElement): (msg: string) => void {
+  const lines: string[] = [];
+  return (msg: string) => {
+    lines.push(msg);
+    logEl.textContent = lines.join("\n");
+  };
 }
 
-function suiteMap(): Map<string, SuiteConfig> {
-  const map = new Map<string, SuiteConfig>();
-  for (const suite of SUITES) {
-    map.set(suiteKey(suite.curve, suite.id), suite);
+async function buildModule(curve: SupportedCurveID, log: (msg: string) => void): Promise<CurveModule> {
+  const context = await createCurveGPUContext();
+  const diagLines: string[] = [];
+  appendContextDiagnostics(diagLines, context);
+  for (const line of diagLines) {
+    log(line);
   }
-  return map;
+  return createCurveModule(context, curve);
 }
 
-function readRequestedSuite(): SuiteConfig {
-  const params = new URLSearchParams(window.location.search);
-  const explicitSuite = params.get("suite");
-  const curve = params.get("curve") ?? "bn254";
-  const map = suiteMap();
-  if (explicitSuite) {
-    const exact = map.get(suiteKey(curve, explicitSuite));
-    if (exact) {
-      return exact;
-    }
-    const legacyDirect = SUITES.find((suite) => `${suite.curve}_${suite.id}` === explicitSuite);
-    if (legacyDirect) {
-      return legacyDirect;
+async function runAllSmoke(
+  module: CurveModule,
+  suites: SuiteConfig[],
+  log: (msg: string) => void,
+): Promise<{ passed: number; failed: number }> {
+  let passed = 0;
+  let failed = 0;
+  for (const suite of suites) {
+    try {
+      const mod = await import(suite.script) as SuiteRunner;
+      const result = await mod.runSuite(module, log);
+      passed += result.passed;
+      failed += result.failed;
+    } catch (error) {
+      log(`FAIL [${suite.id}]: ${error instanceof Error ? error.message : String(error)}`);
+      failed += 1;
     }
   }
-  return map.get(suiteKey("bn254", "fr_ops")) ?? SUITES[0];
+  return { passed, failed };
 }
 
-function populateSelectors(curveSelect: HTMLSelectElement, suiteSelect: HTMLSelectElement, selected: SuiteConfig): void {
-  const curves = [...new Set(SUITES.map((suite) => suite.curve))];
+function populateSelectors(
+  curveSelect: HTMLSelectElement,
+  suiteSelect: HTMLSelectElement,
+  curve: string,
+  suiteId: string,
+): void {
+  const curves = [...new Set(SUITES.map((s) => s.curve))];
   curveSelect.replaceChildren();
-  for (const curve of curves) {
-    const option = document.createElement("option");
-    option.value = curve;
-    option.textContent = curve;
-    if (curve === selected.curve) {
-      option.selected = true;
+  for (const c of curves) {
+    const opt = document.createElement("option");
+    opt.value = c;
+    opt.textContent = c;
+    if (c === curve) {
+      opt.selected = true;
     }
-    curveSelect.appendChild(option);
+    curveSelect.appendChild(opt);
   }
 
-  const selectedCurveSuites = SUITES.filter((suite) => suite.curve === selected.curve);
-  suiteSelect.replaceChildren();
-  for (const suite of selectedCurveSuites) {
-    const option = document.createElement("option");
-    option.value = suite.id;
-    option.textContent = `${suite.label}`;
-    if (suite.id === selected.id) {
-      option.selected = true;
+  function updateSuiteOptions(selectedCurve: string): void {
+    suiteSelect.replaceChildren();
+    const addOpt = (value: string, text: string, selected: boolean): void => {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = text;
+      if (selected) {
+        opt.selected = true;
+      }
+      suiteSelect.appendChild(opt);
+    };
+    addOpt("all", "all smoke", suiteId === "all");
+    for (const s of SUITES.filter((entry) => entry.curve === selectedCurve)) {
+      addOpt(s.id, s.label, s.id === suiteId);
     }
-    suiteSelect.appendChild(option);
   }
-}
 
-function updateSuiteOptions(suiteSelect: HTMLSelectElement, curve: string, selectedSuiteId: string | null): void {
-  suiteSelect.replaceChildren();
-  for (const suite of SUITES.filter((entry) => entry.curve === curve)) {
-    const option = document.createElement("option");
-    option.value = suite.id;
-    option.textContent = suite.label;
-    if (suite.id === selectedSuiteId || (!selectedSuiteId && suiteSelect.options.length === 0)) {
-      option.selected = true;
-    }
-    suiteSelect.appendChild(option);
-  }
-}
-
-function applyPageConfig(selected: SuiteConfig): void {
-  document.title = selected.title;
-  getById<HTMLElement>("heading").textContent = selected.title;
-  getById<HTMLElement>("description").textContent = selected.description;
-  getById<HTMLElement>("suite-kind").textContent = selected.kind === "bench" ? "Benchmark" : "Smoke";
-
-  const benchControls = getById<HTMLElement>("bench-controls");
-  if (selected.kind === "bench") {
-    benchControls.hidden = false;
-    const minLogEl = getById<HTMLInputElement>("min-log");
-    const maxLogEl = getById<HTMLInputElement>("max-log");
-    const itersEl = getById<HTMLInputElement>("iters");
-    if (selected.defaultMinLog !== undefined) {
-      minLogEl.value = `${selected.defaultMinLog}`;
-    }
-    if (selected.defaultMaxLog !== undefined) {
-      maxLogEl.value = `${selected.defaultMaxLog}`;
-    }
-    if (selected.defaultIters !== undefined) {
-      itersEl.value = `${selected.defaultIters}`;
-    }
-  } else {
-    benchControls.hidden = true;
-  }
-}
-
-function wireSuiteSelector(selected: SuiteConfig): void {
-  const curveSelect = getById<HTMLSelectElement>("curve-select");
-  const suiteSelect = getById<HTMLSelectElement>("suite-select");
-  const openButton = getById<HTMLButtonElement>("open-suite");
-  populateSelectors(curveSelect, suiteSelect, selected);
-
+  updateSuiteOptions(curve);
   curveSelect.addEventListener("change", () => {
-    updateSuiteOptions(suiteSelect, curveSelect.value, null);
-  });
-
-  openButton.addEventListener("click", () => {
-    const params = new URLSearchParams(window.location.search);
-    params.set("curve", curveSelect.value);
-    params.set("suite", suiteSelect.value);
-    window.location.search = params.toString();
+    updateSuiteOptions(curveSelect.value);
   });
 }
 
 async function main(): Promise<void> {
-  const selected = readRequestedSuite();
-  applyPageConfig(selected);
-  wireSuiteSelector(selected);
-  await import(`${selected.script}?v=1`);
+  const params = new URLSearchParams(window.location.search);
+  const curve = (params.get("curve") ?? "bn254") as SupportedCurveID;
+  const suiteId = params.get("suite") ?? "fr_ops";
+
+  const logEl = getById<HTMLPreElement>("log");
+  const statusEl = getById<HTMLSpanElement>("status");
+  const runButton = getById<HTMLButtonElement>("run");
+  const curveSelect = getById<HTMLSelectElement>("curve-select");
+  const suiteSelect = getById<HTMLSelectElement>("suite-select");
+  const openButton = getById<HTMLButtonElement>("open-suite");
+  const benchControls = getById<HTMLElement>("bench-controls");
+
+  populateSelectors(curveSelect, suiteSelect, curve, suiteId);
+
+  openButton.addEventListener("click", () => {
+    const newParams = new URLSearchParams(window.location.search);
+    newParams.set("curve", curveSelect.value);
+    newParams.set("suite", suiteSelect.value);
+    window.location.search = newParams.toString();
+  });
+
+  function setStatus(s: string): void {
+    statusEl.textContent = s;
+  }
+  function setPageState(s: "idle" | "running" | "pass" | "fail"): void {
+    document.body.setAttribute("data-status", s);
+  }
+
+  if (suiteId === "all") {
+    const smokeSuites = SUITES.filter((s) => s.curve === curve && s.kind === "smoke");
+
+    const runAll = async (): Promise<void> => {
+      runButton.disabled = true;
+      setStatus("Running");
+      setPageState("running");
+      const log = makeLogger(logEl);
+      try {
+        const module = await buildModule(curve, log);
+        const result = await runAllSmoke(module, smokeSuites, log);
+        log("");
+        log(`Total: ${result.passed} passed, ${result.failed} failed`);
+        setStatus(result.failed === 0 ? "Pass" : "Fail");
+        setPageState(result.failed === 0 ? "pass" : "fail");
+      } catch (error) {
+        log(`FAIL: ${error instanceof Error ? error.message : String(error)}`);
+        setStatus("Fail");
+        setPageState("fail");
+      } finally {
+        runButton.disabled = false;
+      }
+    };
+
+    runButton.addEventListener("click", () => void runAll());
+    if (params.get("autorun") === "1") {
+      void runAll();
+    } else {
+      logEl.textContent = `Press Run to execute all ${curve} smoke suites.`;
+    }
+    return;
+  }
+
+  const selected = SUITES.find((s) => s.curve === curve && s.id === suiteId);
+  if (!selected) {
+    logEl.textContent = `Unknown suite: ${curve}:${suiteId}`;
+    return;
+  }
+
+  if (selected.kind === "bench") {
+    benchControls.hidden = false;
+    if (selected.defaultMinLog !== undefined) {
+      getById<HTMLInputElement>("min-log").value = `${selected.defaultMinLog}`;
+    }
+    if (selected.defaultMaxLog !== undefined) {
+      getById<HTMLInputElement>("max-log").value = `${selected.defaultMaxLog}`;
+    }
+    if (selected.defaultIters !== undefined) {
+      getById<HTMLInputElement>("iters").value = `${selected.defaultIters}`;
+    }
+    // Bench page registers its own Run button listener on import
+    await import(`${selected.script}?v=1`);
+    return;
+  }
+
+  // Smoke suite: orchestrator owns the Run button
+  const run = async (): Promise<void> => {
+    runButton.disabled = true;
+    setStatus("Running");
+    setPageState("running");
+    const log = makeLogger(logEl);
+    try {
+      const module = await buildModule(curve, log);
+      const mod = await import(selected.script) as SuiteRunner;
+      await mod.runSuite(module, log);
+      setStatus("Pass");
+      setPageState("pass");
+    } catch (error) {
+      log(`FAIL: ${error instanceof Error ? error.message : String(error)}`);
+      setStatus("Fail");
+      setPageState("fail");
+    } finally {
+      runButton.disabled = false;
+    }
+  };
+
+  runButton.addEventListener("click", () => void run());
+  if (params.get("autorun") === "1") {
+    void run();
+  } else {
+    logEl.textContent = `Press Run to execute the ${curve} ${selected.id} suite.`;
+  }
 }
 
 void main();

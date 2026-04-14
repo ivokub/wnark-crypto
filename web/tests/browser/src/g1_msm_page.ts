@@ -1,6 +1,6 @@
 export {};
 
-import { bytesToHex, createPageUI, fetchJSON, hexToBytes } from "../../../src/curvegpu/browser_utils.js";
+import { bytesToHex, fetchJSON, hexToBytes } from "../../../src/curvegpu/browser_utils.js";
 import type {
   CurveGPUAffinePoint,
   CurveGPUElementBytes,
@@ -8,7 +8,7 @@ import type {
   CurveModule,
   SupportedCurveID,
 } from "../../../src/index.js";
-import { appendContextDiagnostics, createRequestedCurveModule, curveDisplayName, getRequestedCurveId } from "./shared/page_library.js";
+import { curveDisplayName } from "./shared/page_library.js";
 
 type AffinePoint = {
   x_bytes_le: string;
@@ -53,15 +53,6 @@ const CONFIGS: Record<SupportedCurveID, G1MSMConfig> = {
   },
 };
 
-const runButton = document.getElementById("run") as HTMLButtonElement;
-const statusEl = document.getElementById("status") as HTMLSpanElement;
-const logEl = document.getElementById("log") as HTMLPreElement;
-const { setStatus, setPageState, writeLog } = createPageUI(statusEl, logEl);
-
-function getConfig(): G1MSMConfig {
-  return CONFIGS[getRequestedCurveId()];
-}
-
 function affineFromHex(point: AffinePoint): CurveGPUAffinePoint {
   return { x: hexToBytes(point.x_bytes_le), y: hexToBytes(point.y_bytes_le) };
 }
@@ -98,22 +89,6 @@ function expectPointBatch(name: string, got: readonly CurveGPUJacobianPoint[], w
   }
 }
 
-async function naiveMSMAffine(
-  curve: CurveModule,
-  bases: readonly CurveGPUAffinePoint[],
-  scalars: readonly CurveGPUElementBytes[],
-): Promise<CurveGPUAffinePoint> {
-  const scaled = await curve.g1.scalarMulAffineBatch(bases, scalars);
-  if (scaled.length === 0) {
-    return curve.g1.affineInfinity();
-  }
-  let accJacobian = await curve.g1.affineToJacobian(toAffinePoint(scaled[0]));
-  for (let i = 1; i < scaled.length; i += 1) {
-    accJacobian = await curve.g1.addMixed(accJacobian, toAffinePoint(scaled[i]));
-  }
-  return curve.g1.jacobianToAffine(accJacobian);
-}
-
 function expectAffineBatch(name: string, got: readonly CurveGPUAffinePoint[], want: readonly JacobianPoint[]): void {
   if (got.length !== want.length) {
     throw new Error(`${name}: length mismatch got=${got.length} want=${want.length}`);
@@ -133,77 +108,57 @@ function expectAffineBatch(name: string, got: readonly CurveGPUAffinePoint[], wa
   }
 }
 
-async function runSmoke(config: G1MSMConfig): Promise<void> {
-  const lines = [`=== ${config.title} ===`, ""];
-  writeLog(lines);
-  setStatus("Running");
-  setPageState("running");
-  runButton.disabled = true;
-
-  try {
-    const curve = await createRequestedCurveModule(config.curve);
-    const vectors = await fetchJSON<G1MSMVectors>(config.vectorPath);
-
-    lines.push("1. Requesting adapter... OK");
-    appendContextDiagnostics(lines, curve.context);
-    lines.push("2. Requesting device... OK");
-    lines.push("3. Loading vectors... OK");
-    lines.push(`terms_per_instance = ${vectors.terms_per_instance}`);
-    lines.push(`cases.msm = ${vectors.msm_cases.length}`);
-    lines.push("4. Initializing curve module... OK");
-    writeLog(lines);
-
-    const naiveResults: CurveGPUAffinePoint[] = [];
-    for (const msmCase of vectors.msm_cases) {
-      naiveResults.push(
-        await naiveMSMAffine(
-          curve,
-          msmCase.bases_affine.map(affineFromHex),
-          msmCase.scalars_bytes_le.map((value) => hexToBytes(value) as CurveGPUElementBytes),
-        ),
-      );
-    }
-    expectAffineBatch("msm_naive_affine", naiveResults, vectors.msm_cases.map((item) => item.expected_affine));
-    lines.push("msm_naive_affine: OK");
-    writeLog(lines);
-
-    const window = 4;
-    const pippengerResults = await curve.msm.pippengerAffineBatch(
-      vectors.msm_cases.flatMap((item) => item.bases_affine.map(affineFromHex)),
-      vectors.msm_cases.flatMap((item) => item.scalars_bytes_le.map((value) => hexToBytes(value) as CurveGPUElementBytes)),
-      {
-        count: vectors.msm_cases.length,
-        termsPerInstance: vectors.terms_per_instance,
-        window,
-      },
-    );
-    expectPointBatch(`msm_pippenger_affine (window=${window})`, pippengerResults, vectors.msm_cases.map((item) => item.expected_affine));
-    lines.push(`msm_pippenger_affine (window=${window}): OK`);
-    writeLog(lines);
-
-    lines.push("");
-    lines.push(`PASS: ${curveDisplayName(config.curve)} G1 MSM browser smoke succeeded`);
-    writeLog(lines);
-    setStatus("Pass");
-    setPageState("pass");
-  } catch (error) {
-    lines.push(`FAIL: ${error instanceof Error ? error.message : String(error)}`);
-    writeLog(lines);
-    setStatus("Fail");
-    setPageState("fail");
-  } finally {
-    runButton.disabled = false;
+async function naiveMSMAffine(
+  curve: CurveModule,
+  bases: readonly CurveGPUAffinePoint[],
+  scalars: readonly CurveGPUElementBytes[],
+): Promise<CurveGPUAffinePoint> {
+  const scaled = await curve.g1.scalarMulAffineBatch(bases, scalars);
+  if (scaled.length === 0) {
+    return curve.g1.affineInfinity();
   }
+  let accJacobian = await curve.g1.affineToJacobian(toAffinePoint(scaled[0]));
+  for (let i = 1; i < scaled.length; i += 1) {
+    accJacobian = await curve.g1.addMixed(accJacobian, toAffinePoint(scaled[i]));
+  }
+  return curve.g1.jacobianToAffine(accJacobian);
 }
 
-runButton.addEventListener("click", () => {
-  void runSmoke(getConfig());
-});
+export async function runSuite(module: CurveModule, log: (msg: string) => void): Promise<{ passed: number; failed: number }> {
+  const config = CONFIGS[module.id];
+  log(`=== ${config.title} ===`);
+  log("");
+  const vectors = await fetchJSON<G1MSMVectors>(config.vectorPath);
+  log(`terms_per_instance = ${vectors.terms_per_instance}`);
+  log(`cases.msm = ${vectors.msm_cases.length}`);
 
-const config = getConfig();
-const params = new URLSearchParams(window.location.search);
-if (params.get("autorun") === "1") {
-  void runSmoke(config);
-} else {
-  writeLog([`=== ${config.title} ===`, "", `Press Run to execute the ${config.curve} G1 MSM smoke test in browser WebGPU.`]);
+  const naiveResults: CurveGPUAffinePoint[] = [];
+  for (const msmCase of vectors.msm_cases) {
+    naiveResults.push(
+      await naiveMSMAffine(
+        module,
+        msmCase.bases_affine.map(affineFromHex),
+        msmCase.scalars_bytes_le.map((value) => hexToBytes(value) as CurveGPUElementBytes),
+      ),
+    );
+  }
+  expectAffineBatch("msm_naive_affine", naiveResults, vectors.msm_cases.map((item) => item.expected_affine));
+  log("msm_naive_affine: OK");
+
+  const window = 4;
+  const pippengerResults = await module.msm.pippengerAffineBatch(
+    vectors.msm_cases.flatMap((item) => item.bases_affine.map(affineFromHex)),
+    vectors.msm_cases.flatMap((item) => item.scalars_bytes_le.map((value) => hexToBytes(value) as CurveGPUElementBytes)),
+    {
+      count: vectors.msm_cases.length,
+      termsPerInstance: vectors.terms_per_instance,
+      window,
+    },
+  );
+  expectPointBatch(`msm_pippenger_affine (window=${window})`, pippengerResults, vectors.msm_cases.map((item) => item.expected_affine));
+  log(`msm_pippenger_affine (window=${window}): OK`);
+
+  log("");
+  log(`PASS: ${curveDisplayName(module.id)} G1 MSM browser smoke succeeded`);
+  return { passed: 1, failed: 0 };
 }
