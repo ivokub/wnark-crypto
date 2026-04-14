@@ -1,4 +1,5 @@
 import type { FieldShape } from "./types.js";
+import type { BufferPool } from "./buffer_pool.js";
 
 export type { CurveGPUError, CurveGPUNotSupportedError, CurveGPUDeviceLostError, CurveGPUShaderError } from "./errors.js";
 
@@ -127,6 +128,8 @@ export interface CurveGPUContext {
   readonly debug: boolean;
   /** Maximum compute workgroup size supported by the device. */
   readonly maxWorkgroupSize: number;
+  /** GPU buffer pool shared across all operations on this context. */
+  readonly bufferPool: BufferPool;
   /**
    * Resolves when the GPU device is lost.
    *

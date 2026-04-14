@@ -140,6 +140,7 @@ export function createG2MSMModule(
     const scalarWords = packScalarWords(scalars as Uint8Array[]);
     const outputBytes = await runSparseSignedPippengerMSM({
       device: context.device,
+      pool: context.bufferPool,
       runtime,
       basesBytes,
       pointBytes,
@@ -205,6 +206,7 @@ export function createG2MSMModule(
       const window = msmOptions.window ?? bestPippengerWindow(termsPerInstance);
       return runSparseSignedPippengerMSM({
         device: context.device,
+        pool: context.bufferPool,
         runtime,
         basesBytes: basesPacked,
         pointBytes,

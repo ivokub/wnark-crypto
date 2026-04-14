@@ -143,6 +143,7 @@ export function createG1Module(
     }
     const output = await runSimpleKernel({
       device: context.device,
+      pool: context.bufferPool,
       kernel,
       label: `${label}-op-${opcode}`,
       inputA: packJacobianPoints(inputA, coordinateBytes, pointBytes, `${label}.inputA`),
@@ -169,6 +170,7 @@ export function createG1Module(
     const oneMontZ = await getOneMontgomery();
     const output = await runSimpleKernel({
       device: context.device,
+      pool: context.bufferPool,
       kernel,
       label: `${label}-op-${opcode}`,
       inputA: packJacobianPoints(inputA, coordinateBytes, pointBytes, `${label}.inputA`),
@@ -191,6 +193,7 @@ export function createG1Module(
     const oneMontZ = await getOneMontgomery();
     const output = await runSimpleKernel({
       device: context.device,
+      pool: context.bufferPool,
       kernel,
       label: `${label}-op-${opcode}`,
       inputA: packAffinePoints(inputA, coordinateBytes, pointBytes, oneMontZ, zeroCoordinate, `${label}.inputA`),

@@ -189,6 +189,7 @@ export function createMSMModule(
       const window = options.window ?? bestPippengerWindow(termsPerInstance);
       return runSparseSignedPippengerMSM({
         device: context.device,
+        pool: context.bufferPool,
         runtime,
         basesBytes: basesPacked,
         pointBytes,

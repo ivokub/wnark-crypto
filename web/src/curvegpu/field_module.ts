@@ -77,6 +77,7 @@ export function createFieldModule(
     }
     return runSimpleKernel({
       device: context.device,
+      pool: context.bufferPool,
       kernel,
       label: `${label}-packed-op-${opcode}`,
       inputA,

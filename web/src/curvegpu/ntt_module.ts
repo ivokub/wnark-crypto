@@ -172,6 +172,7 @@ export function createNTTModule(
     const kernel = await getVectorKernel();
     const output = await runSimpleKernel({
       device: context.device,
+      pool: context.bufferPool,
       kernel,
       label: `${label}-vector-${opcode}`,
       inputA: packElementBatch(values, elementBytes, `${label}.values`),
@@ -192,6 +193,7 @@ export function createNTTModule(
     }
     return runSimpleKernel({
       device: context.device,
+      pool: context.bufferPool,
       kernel,
       label: `${label}-vector-packed-${opcode}`,
       inputA: valuesPacked,
@@ -209,6 +211,7 @@ export function createNTTModule(
       const count = state.length;
       const output = await runSimpleKernel({
         device: context.device,
+        pool: context.bufferPool,
         kernel,
         label: `${label}-stage-${stage}-${inverse ? "inv" : "fwd"}`,
         inputA: packElementBatch(state, elementBytes, `${label}.state`),
@@ -229,6 +232,7 @@ export function createNTTModule(
     for (let stage = 0; stage < stages.length; stage += 1) {
       state = await runSimpleKernel({
         device: context.device,
+        pool: context.bufferPool,
         kernel,
         label: `${label}-stage-packed-${stage}-${inverse ? "inv" : "fwd"}`,
         inputA: state,

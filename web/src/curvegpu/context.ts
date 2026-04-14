@@ -5,6 +5,7 @@ import type {
   CurveGPUContextOptions,
   CurveGPURequestedLimits,
 } from "./api.js";
+import { BufferPool } from "./buffer_pool.js";
 import { CurveGPUNotSupportedError } from "./errors.js";
 
 type AdapterWithLimits = GPUAdapter & {
@@ -78,6 +79,7 @@ export async function createCurveGPUContext(options: CurveGPUContextOptions = {}
 
   const debug = options.debug ?? false;
   const maxWorkgroupSize = (device.limits as { maxComputeWorkgroupSizeX?: number }).maxComputeWorkgroupSizeX ?? 256;
+  const bufferPool = new BufferPool(device);
   let closed = false;
 
   const deviceLost: Promise<GPUDeviceLostInfo> = device.lost.then((info) => {
@@ -95,12 +97,14 @@ export async function createCurveGPUContext(options: CurveGPUContextOptions = {}
     requestedLimits,
     debug,
     maxWorkgroupSize,
+    bufferPool,
     deviceLost,
     close(): void {
       if (closed) {
         return;
       }
       closed = true;
+      bufferPool.destroy();
     },
   };
 }

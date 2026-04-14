@@ -1,5 +1,6 @@
 import { fetchText } from "./browser_utils.js";
 import { fetchShaderParts } from "./shaders.js";
+import type { BufferPool } from "./buffer_pool.js";
 
 declare const GPUShaderStage: { COMPUTE: number };
 declare const GPUBufferUsage: {
@@ -180,6 +181,7 @@ function createStorageBuffer(device: GPUDevice, label: string, size: number, usa
 
 export async function runSimpleKernel(options: {
   device: GPUDevice;
+  pool?: BufferPool;
   kernel: SimpleKernel;
   label: string;
   inputA: Uint8Array;
@@ -188,35 +190,49 @@ export async function runSimpleKernel(options: {
   uniformWords: Uint32Array;
   workgroups: number;
 }): Promise<Uint8Array> {
-  const { device, kernel, label, inputA, inputB, outputBytes, uniformWords, workgroups } = options;
-  const inputABuffer = createSimpleStorageBufferFromBytes(
-    device,
-    `${label}-input-a`,
-    inputA,
-    GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  );
-  const inputBBuffer = createSimpleStorageBufferFromBytes(
-    device,
-    `${label}-input-b`,
-    inputB,
-    GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  );
-  const outputBuffer = createSimpleStorageBuffer(
-    device,
-    `${label}-output`,
-    outputBytes,
-    GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-  );
-  const uniformBuffer = createSimpleUniformBuffer(device, `${label}-params`, uniformWords);
+  const { device, pool, kernel, label, inputA, inputB, outputBytes, uniformWords, workgroups } = options;
+  const storageInUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
+  const storageOutUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC;
+  const uniformUsage = GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST;
+
+  const inputABuffer = pool
+    ? pool.acquire(inputA.byteLength, storageInUsage, `${label}-input-a`)
+    : createSimpleStorageBuffer(device, `${label}-input-a`, inputA.byteLength, storageInUsage);
+  if (inputA.byteLength > 0) {
+    device.queue.writeBuffer(inputABuffer, 0, inputA.buffer, inputA.byteOffset, inputA.byteLength);
+  }
+
+  const inputBBuffer = pool
+    ? pool.acquire(inputB.byteLength, storageInUsage, `${label}-input-b`)
+    : createSimpleStorageBuffer(device, `${label}-input-b`, inputB.byteLength, storageInUsage);
+  if (inputB.byteLength > 0) {
+    device.queue.writeBuffer(inputBBuffer, 0, inputB.buffer, inputB.byteOffset, inputB.byteLength);
+  }
+
+  const outputBuffer = pool
+    ? pool.acquire(outputBytes, storageOutUsage, `${label}-output`)
+    : createSimpleStorageBuffer(device, `${label}-output`, outputBytes, storageOutUsage);
+
+  const uniformBuffer = pool
+    ? pool.acquire(uniformWords.byteLength, uniformUsage, `${label}-params`)
+    : createSimpleStorageBuffer(device, `${label}-params`, uniformWords.byteLength, uniformUsage);
+  device.queue.writeBuffer(uniformBuffer, 0, uniformWords.buffer, uniformWords.byteOffset, uniformWords.byteLength);
 
   try {
     const bindGroup = createSimpleBindGroup(device, kernel, `${label}-bg`, inputABuffer, inputBBuffer, outputBuffer, uniformBuffer);
     await submitSimpleKernel(device, kernel, bindGroup, workgroups, label);
     return await readbackSimpleBuffer(device, outputBuffer, outputBytes, label);
   } finally {
-    inputABuffer.destroy();
-    inputBBuffer.destroy();
-    outputBuffer.destroy();
-    uniformBuffer.destroy();
+    if (pool) {
+      pool.release(inputABuffer);
+      pool.release(inputBBuffer);
+      pool.release(outputBuffer);
+      pool.release(uniformBuffer);
+    } else {
+      inputABuffer.destroy();
+      inputBBuffer.destroy();
+      outputBuffer.destroy();
+      uniformBuffer.destroy();
+    }
   }
 }
