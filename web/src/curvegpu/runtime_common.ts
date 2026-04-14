@@ -16,7 +16,10 @@ export type SimpleKernel = {
   bindGroupLayout: GPUBindGroupLayout;
 };
 
-function logComputePipelineCreation(label: string, entryPoint: string): void {
+function logComputePipelineCreation(label: string, entryPoint: string, debug: boolean): void {
+  if (!debug) {
+    return;
+  }
   const key = "__curvegpuComputePipelineCreateCount";
   const state = globalThis as typeof globalThis & { [key: string]: number | undefined };
   const count = (state[key] ?? 0) + 1;
@@ -186,6 +189,7 @@ export function createSimpleKernel(
   label: string,
   shaderCode: string,
   entryPoint: string,
+  debug = false,
 ): SimpleKernel {
   const shaderModule = device.createShaderModule({
     label: `${label}-shader`,
@@ -204,7 +208,7 @@ export function createSimpleKernel(
     label: `${label}-pl`,
     bindGroupLayouts: [bindGroupLayout],
   });
-  logComputePipelineCreation(`${label}-${entryPoint}`, entryPoint);
+  logComputePipelineCreation(`${label}-${entryPoint}`, entryPoint, debug);
   const pipeline = device.createComputePipeline({
     label: `${label}-${entryPoint}`,
     layout: pipelineLayout,

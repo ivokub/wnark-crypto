@@ -72,7 +72,7 @@ export function createFieldModule(
 
   const getKernel = lazyAsync(async () => {
     const shaderCode = await loadShaderText(shaderPath);
-    return createSimpleKernel(context.device, label, shaderCode, entryPoint);
+    return createSimpleKernel(context.device, label, shaderCode, entryPoint, context.debug);
   });
 
   async function runPacked(opcode: FieldOpCode, inputA: Uint8Array, inputB?: Uint8Array): Promise<Uint8Array> {

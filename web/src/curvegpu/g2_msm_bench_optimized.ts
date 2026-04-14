@@ -70,19 +70,19 @@ function packScalarWordsPacked(scalarsPacked: Uint8Array): Uint32Array {
 function shaderPartsForCurve(curve: SupportedCurveID): readonly string[] {
   if (curve === "bn254") {
     return [
-      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-types",
-      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-consts",
-      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-core",
-      "/shaders/curves/bn254/g2_arith.wgsl?v=1",
-      "/shaders/common/g2_msm.wgsl?v=2",
+      "/shaders/curves/bn254/fp_arith.wgsl#section=fp-types",
+      "/shaders/curves/bn254/fp_arith.wgsl#section=fp-consts",
+      "/shaders/curves/bn254/fp_arith.wgsl#section=fp-core",
+      "/shaders/curves/bn254/g2_arith.wgsl",
+      "/shaders/common/g2_msm.wgsl",
     ];
   }
   return [
-    "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-types",
-    "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-consts",
-    "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-core",
-    "/shaders/curves/bls12_381/g2_arith.wgsl?v=1",
-    "/shaders/common/g2_msm.wgsl?v=2",
+    "/shaders/curves/bls12_381/fp_arith.wgsl#section=fp-types",
+    "/shaders/curves/bls12_381/fp_arith.wgsl#section=fp-consts",
+    "/shaders/curves/bls12_381/fp_arith.wgsl#section=fp-core",
+    "/shaders/curves/bls12_381/g2_arith.wgsl",
+    "/shaders/common/g2_msm.wgsl",
   ];
 }
 

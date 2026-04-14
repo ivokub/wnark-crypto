@@ -42,19 +42,19 @@ type WindowReductionResult = {
 function shaderPartsForCurve(curve: SupportedCurveID): readonly string[] {
   if (curve === "bn254") {
     return [
-      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-types",
-      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-consts",
-      "/shaders/curves/bn254/fp_arith.wgsl?v=3#section=fp-core",
-      "/shaders/curves/bn254/g2_arith.wgsl?v=2",
-      "/shaders/common/g2_msm_jac.wgsl?v=1",
+      "/shaders/curves/bn254/fp_arith.wgsl#section=fp-types",
+      "/shaders/curves/bn254/fp_arith.wgsl#section=fp-consts",
+      "/shaders/curves/bn254/fp_arith.wgsl#section=fp-core",
+      "/shaders/curves/bn254/g2_arith.wgsl",
+      "/shaders/common/g2_msm_jac.wgsl",
     ];
   }
   return [
-    "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-types",
-    "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-consts",
-    "/shaders/curves/bls12_381/fp_arith.wgsl?v=4#section=fp-core",
-    "/shaders/curves/bls12_381/g2_arith.wgsl?v=2",
-    "/shaders/common/g2_msm_jac.wgsl?v=1",
+    "/shaders/curves/bls12_381/fp_arith.wgsl#section=fp-types",
+    "/shaders/curves/bls12_381/fp_arith.wgsl#section=fp-consts",
+    "/shaders/curves/bls12_381/fp_arith.wgsl#section=fp-core",
+    "/shaders/curves/bls12_381/g2_arith.wgsl",
+    "/shaders/common/g2_msm_jac.wgsl",
   ];
 }
 
@@ -62,13 +62,14 @@ async function createJacG2PippengerRuntime(
   device: GPUDevice,
   shaderCode: string,
   labelPrefix: string,
+  debug = false,
 ): Promise<PippengerRuntime> {
   const kernels = await createMSMKernelSetAsync(device, shaderCode, labelPrefix, {
     bucket: "g2_msm_bucket_jac_main",
     weightJac: "g2_msm_weight_jac_main",
     subsumJac: "g2_msm_subsum_jac_main",
     combine: "g2_msm_combine_jac_main",
-  });
+  }, debug);
   return {
     bucket: kernels.bucket,
     bucketWorkgroupSize: 32,
@@ -115,6 +116,7 @@ async function createJacG2PippengerRuntime(
         bucketCountOut,
         `${labelPrefix}-jac-weight`,
         32,
+        debug,
       );
 
       const windowOutput = createEmptyPointStorageBuffer(
@@ -145,6 +147,7 @@ async function createJacG2PippengerRuntime(
         count * metadata.numWindows * 32,
         `${labelPrefix}-jac-window`,
         32,
+        debug,
       );
 
       return {
@@ -182,7 +185,7 @@ export function createJacG2MSMModule(
   const label = `${curve}-g2-jac-msm`;
   const getRuntime = lazyAsync(async (): Promise<PippengerRuntime> => {
     const shaderCode = await loadShaderParts(shaderPartsForCurve(curve));
-    return createJacG2PippengerRuntime(context.device, shaderCode, label);
+    return createJacG2PippengerRuntime(context.device, shaderCode, label, context.debug);
   });
 
   return {
@@ -226,6 +229,7 @@ export function createJacG2MSMModule(
         window,
         maxChunkSize: options.maxChunkSize,
         labelPrefix: label,
+        debug: context.debug,
       });
     },
   };

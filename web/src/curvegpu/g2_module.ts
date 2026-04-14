@@ -186,7 +186,7 @@ export function createG2Module(
 
   const getKernel = lazyAsync(async () => {
     const shaderCode = await loadShaderParts(shaderParts);
-    return createSimpleKernel(context.device, label, shaderCode, "g2_ops_main");
+    return createSimpleKernel(context.device, label, shaderCode, "g2_ops_main", context.debug);
   });
   const getOneMontgomery = lazyAsync(async () => {
     const c0 = await fp.montOne();

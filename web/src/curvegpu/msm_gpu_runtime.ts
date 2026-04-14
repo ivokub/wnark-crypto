@@ -3,7 +3,10 @@ export type Kernel = {
   bindGroupLayout: GPUBindGroupLayout;
 };
 
-function logComputePipelineCreation(label: string, entryPoint: string): void {
+function logComputePipelineCreation(label: string, entryPoint: string, debug: boolean): void {
+  if (!debug) {
+    return;
+  }
   const key = "__curvegpuComputePipelineCreateCount";
   const state = globalThis as typeof globalThis & { [key: string]: number | undefined };
   const count = (state[key] ?? 0) + 1;
@@ -26,6 +29,7 @@ export function createMSMKernel(
   shaderCode: string,
   labelPrefix: string,
   entryPoint = "g1_ops_main",
+  debug = false,
 ): Kernel {
   const shaderModule = device.createShaderModule({
     label: `${labelPrefix}-shader`,
@@ -47,7 +51,7 @@ export function createMSMKernel(
     label: `${labelPrefix}-pl`,
     bindGroupLayouts: [bindGroupLayout],
   });
-  logComputePipelineCreation(`${labelPrefix}-${entryPoint}`, entryPoint);
+  logComputePipelineCreation(`${labelPrefix}-${entryPoint}`, entryPoint, debug);
   const pipeline = device.createComputePipeline({
     label: `${labelPrefix}-${entryPoint}`,
     layout: pipelineLayout,
@@ -61,10 +65,11 @@ export function createMSMKernelSet<T extends Record<string, string>>(
   shaderCode: string,
   labelPrefix: string,
   entryPoints: T,
+  debug = false,
 ): { [K in keyof T]: Kernel } {
   const out = {} as { [K in keyof T]: Kernel };
   for (const [name, entryPoint] of Object.entries(entryPoints)) {
-    out[name as keyof T] = createMSMKernel(device, shaderCode, labelPrefix, entryPoint);
+    out[name as keyof T] = createMSMKernel(device, shaderCode, labelPrefix, entryPoint, debug);
   }
   return out;
 }
@@ -74,6 +79,7 @@ export async function createMSMKernelSetAsync<T extends Record<string, string>>(
   shaderCode: string,
   labelPrefix: string,
   entryPoints: T,
+  debug = false,
 ): Promise<{ [K in keyof T]: Kernel }> {
   const shaderModule = device.createShaderModule({
     label: `${labelPrefix}-shader`,
@@ -98,7 +104,7 @@ export async function createMSMKernelSetAsync<T extends Record<string, string>>(
   const out = {} as { [K in keyof T]: Kernel };
   await Promise.all(
     Object.entries(entryPoints).map(async ([name, entryPoint]) => {
-      logComputePipelineCreation(`${labelPrefix}-${entryPoint}`, entryPoint);
+      logComputePipelineCreation(`${labelPrefix}-${entryPoint}`, entryPoint, debug);
       const pipeline = await device.createComputePipelineAsync({
         label: `${labelPrefix}-${entryPoint}`,
         layout: pipelineLayout,
@@ -224,8 +230,11 @@ export async function submitKernel(
   count: number,
   label: string,
   workgroupSize = 64,
+  debug = false,
 ): Promise<void> {
-  console.debug(`[curvegpu] submitKernel start: ${label} count=${count}`);
+  if (debug) {
+    console.debug(`[curvegpu] submitKernel start: ${label} count=${count}`);
+  }
   const encoder = device.createCommandEncoder({ label: `${label}-encoder` });
   const pass = encoder.beginComputePass({ label: `${label}-pass` });
   pass.setPipeline(kernel.pipeline);
@@ -234,7 +243,9 @@ export async function submitKernel(
   pass.end();
   device.queue.submit([encoder.finish()]);
   await device.queue.onSubmittedWorkDone();
-  console.debug(`[curvegpu] submitKernel done: ${label}`);
+  if (debug) {
+    console.debug(`[curvegpu] submitKernel done: ${label}`);
+  }
 }
 
 export async function readbackBuffer(

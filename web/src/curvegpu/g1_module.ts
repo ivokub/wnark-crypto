@@ -130,7 +130,7 @@ export function createG1Module(
 
   const getKernel = lazyAsync(async () => {
     const shaderCode = await loadShaderParts(shaderParts);
-    return createSimpleKernel(context.device, label, shaderCode, "g1_ops_main");
+    return createSimpleKernel(context.device, label, shaderCode, "g1_ops_main", context.debug);
   });
   const getOneMontgomery = lazyAsync(async () => fp.montOne());
 

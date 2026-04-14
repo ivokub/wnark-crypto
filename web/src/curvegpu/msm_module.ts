@@ -97,7 +97,7 @@ export function createMSMModule(
   const getOneMontgomery = lazyAsync(async () => fp.montOne());
   const getRuntime = lazyAsync(async (): Promise<PippengerRuntime> => {
     const shaderCode = await loadShaderParts(shaderParts);
-    return strategy.createRuntime(context.device, shaderCode, label);
+    return strategy.createRuntime(context.device, shaderCode, label, context.debug);
   });
 
   async function runBatch(
@@ -136,6 +136,7 @@ export function createMSMModule(
       window,
       maxChunkSize: options.maxChunkSize,
       labelPrefix: label,
+      debug: context.debug,
     });
     return unpackJacobianPoints(output, count, coordinateBytes, pointBytes).map(clonePoint);
   }
@@ -197,6 +198,7 @@ export function createMSMModule(
         window,
         maxChunkSize: options.maxChunkSize,
         labelPrefix: label,
+        debug: context.debug,
       });
     },
   };

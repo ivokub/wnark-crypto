@@ -105,6 +105,8 @@ export type CurveGPUContextOptions = {
   powerPreference?: GPUPowerPreference;
   requireAdapterLimits?: boolean;
   requiredLimits?: CurveGPURequestedLimits;
+  /** Enable verbose debug logging from GPU operations. Defaults to `false`. */
+  debug?: boolean;
 };
 
 /**
@@ -119,6 +121,10 @@ export interface CurveGPUContext {
   readonly adapterInfo: GPUAdapterInfo | null;
   readonly diagnostics: CurveGPUAdapterDiagnostics;
   readonly requestedLimits: CurveGPURequestedLimits;
+  /** Whether verbose debug logging is enabled for GPU operations. */
+  readonly debug: boolean;
+  /** Maximum compute workgroup size supported by the device. */
+  readonly maxWorkgroupSize: number;
   /**
    * Release any library-owned resources associated with the context.
    *

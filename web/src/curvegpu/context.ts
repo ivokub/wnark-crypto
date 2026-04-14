@@ -66,6 +66,8 @@ export async function createCurveGPUContext(options: CurveGPUContextOptions = {}
     requiredLimits: Object.keys(requestedLimits).length > 0 ? requestedLimits : undefined,
   });
 
+  const debug = options.debug ?? false;
+  const maxWorkgroupSize = (device.limits as { maxComputeWorkgroupSizeX?: number }).maxComputeWorkgroupSizeX ?? 256;
   let closed = false;
   return {
     adapter,
@@ -73,6 +75,8 @@ export async function createCurveGPUContext(options: CurveGPUContextOptions = {}
     adapterInfo,
     diagnostics: buildDiagnostics(adapter, adapterInfo),
     requestedLimits,
+    debug,
+    maxWorkgroupSize,
     close(): void {
       if (closed) {
         return;

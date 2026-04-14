@@ -128,15 +128,15 @@ export function createNTTModule(
 
   const getVectorKernel = lazyAsync(async () => {
     const shaderCode = await loadShaderText(vectorShaderPath);
-    return createSimpleKernel(context.device, `${label}-vector`, shaderCode, "fr_vector_main");
+    return createSimpleKernel(context.device, `${label}-vector`, shaderCode, "fr_vector_main", context.debug);
   });
   const getFieldKernel = lazyAsync(async () => {
     const shaderCode = await loadShaderText(arithmeticShaderPath);
-    return createSimpleKernel(context.device, `${label}-field`, shaderCode, "fr_ops_main");
+    return createSimpleKernel(context.device, `${label}-field`, shaderCode, "fr_ops_main", context.debug);
   });
   const getNTTKernel = lazyAsync(async () => {
     const shaderCode = await loadShaderText(nttShaderPath);
-    return createSimpleKernel(context.device, `${label}-stage`, shaderCode, "fr_ntt_stage_main");
+    return createSimpleKernel(context.device, `${label}-stage`, shaderCode, "fr_ntt_stage_main", context.debug);
   });
   const getDomains = lazyAsync(async () => fetchJSON<DomainMetadataFile>(domainPath));
   const domainCache = new Map<number, Promise<PreparedDomain>>();
