@@ -1,3 +1,5 @@
+//go:build js && wasm
+
 package main
 
 import (
@@ -30,28 +32,47 @@ func run() error {
 	}
 
 	nttSize := 1 << cfg.NTTLog
-	msmSize := 1 << cfg.MSMLog
+	g1MSMSize := 1 << cfg.G1MSMLog
+	g2MSMSize := 1 << cfg.G2MSMLog
 
 	pocutil.Logf("=== Go Wasm -> gnark-crypto (%s) ===", cfg.Curve)
 	pocutil.Logf("ntt_size = %d", nttSize)
 	pocutil.Logf("ntt_runs = %d", cfg.NTTRuns)
-	pocutil.Logf("msm_size = %d", msmSize)
-	pocutil.Logf("msm_runs = %d", cfg.MSMRuns)
+	pocutil.Logf("g1_msm_size = %d", g1MSMSize)
+	pocutil.Logf("g1_msm_runs = %d", cfg.G1MSMRuns)
+	pocutil.Logf("g2_msm_size = %d", g2MSMSize)
+	pocutil.Logf("g2_msm_runs = %d", cfg.G2MSMRuns)
 
-	var fixtureBytes []byte
-	fixtureLoadMs := 0.0
-	if cfg.FixtureBinPath != "" {
-		pocutil.SetStatus("Loading fixture")
+	overallStart := pocutil.NowMS()
+
+	var g1FixtureBytes []byte
+	var g2FixtureBytes []byte
+	g1FixtureLoadMs := 0.0
+	g2FixtureLoadMs := 0.0
+	if cfg.G1FixtureBinPath != "" {
+		pocutil.SetStatus("Loading G1 fixture")
 		start := pocutil.NowMS()
-		fixtureBytes, err = pocutil.FetchBytes(cfg.FixtureBinPath)
+		g1FixtureBytes, err = pocutil.FetchBytes(cfg.G1FixtureBinPath)
 		if err != nil {
 			return err
 		}
-		fixtureLoadMs = pocutil.NowMS() - start
-		pocutil.Logf("fixture_load_ms = %.3f", fixtureLoadMs)
+		g1FixtureLoadMs = pocutil.NowMS() - start
+		pocutil.Logf("g1_fixture_load_ms = %.3f", g1FixtureLoadMs)
 	}
+	if cfg.G2FixtureBinPath != "" {
+		pocutil.SetStatus("Loading G2 fixture")
+		start := pocutil.NowMS()
+		g2FixtureBytes, err = pocutil.FetchBytes(cfg.G2FixtureBinPath)
+		if err != nil {
+			return err
+		}
+		g2FixtureLoadMs = pocutil.NowMS() - start
+		pocutil.Logf("g2_fixture_load_ms = %.3f", g2FixtureLoadMs)
+	}
+	fixtureLoadMs := g1FixtureLoadMs + g2FixtureLoadMs
+	pocutil.Logf("startup_ms = %.3f", fixtureLoadMs)
 
-	totalStart := pocutil.NowMS()
+	steadyStateStart := pocutil.NowMS()
 	pocutil.SetStatus("Running NTT")
 
 	var nttDigest string
@@ -71,40 +92,69 @@ func run() error {
 	pocutil.Logf("ntt_avg_ms = %.3f", nttDuration/float64(cfg.NTTRuns))
 	pocutil.Logf("ntt_batch_digest = %s", nttDigest)
 
-	pocutil.SetStatus("Running MSM batch")
-	var msmDigest string
-	var msmDuration float64
+	pocutil.SetStatus("Running G1 MSM batch")
+	var g1MSMDigest string
+	var g1MSMDuration float64
 	switch cfg.Curve {
 	case "bn254":
-		msmDigest, msmDuration, err = runBN254MSMBatch(msmSize, cfg.MSMRuns, fixtureBytes)
+		g1MSMDigest, g1MSMDuration, err = runBN254G1MSMBatch(g1MSMSize, cfg.G1MSMRuns, g1FixtureBytes)
 	case "bls12_381":
-		msmDigest, msmDuration, err = runBLS12381MSMBatch(msmSize, cfg.MSMRuns, fixtureBytes)
+		g1MSMDigest, g1MSMDuration, err = runBLS12381G1MSMBatch(g1MSMSize, cfg.G1MSMRuns, g1FixtureBytes)
 	default:
 		err = fmt.Errorf("unsupported curve %q", cfg.Curve)
 	}
 	if err != nil {
 		return err
 	}
-	pocutil.Logf("msm_total_ms = %.3f", msmDuration)
-	pocutil.Logf("msm_avg_ms = %.3f", msmDuration/float64(cfg.MSMRuns))
-	pocutil.Logf("msm_batch_digest = %s", msmDigest)
+	pocutil.Logf("g1_msm_total_ms = %.3f", g1MSMDuration)
+	pocutil.Logf("g1_msm_avg_ms = %.3f", g1MSMDuration/float64(cfg.G1MSMRuns))
+	pocutil.Logf("g1_msm_batch_digest = %s", g1MSMDigest)
 
-	totalDuration := pocutil.NowMS() - totalStart
-	pocutil.Logf("total_ms = %.3f", totalDuration)
+	pocutil.SetStatus("Running G2 MSM batch")
+	var g2MSMDigest string
+	var g2MSMDuration float64
+	switch cfg.Curve {
+	case "bn254":
+		g2MSMDigest, g2MSMDuration, err = runBN254G2MSMBatch(g2MSMSize, cfg.G2MSMRuns, g2FixtureBytes)
+	case "bls12_381":
+		g2MSMDigest, g2MSMDuration, err = runBLS12381G2MSMBatch(g2MSMSize, cfg.G2MSMRuns, g2FixtureBytes)
+	default:
+		err = fmt.Errorf("unsupported curve %q", cfg.Curve)
+	}
+	if err != nil {
+		return err
+	}
+	pocutil.Logf("g2_msm_total_ms = %.3f", g2MSMDuration)
+	pocutil.Logf("g2_msm_avg_ms = %.3f", g2MSMDuration/float64(cfg.G2MSMRuns))
+	pocutil.Logf("g2_msm_batch_digest = %s", g2MSMDigest)
+
+	steadyStateDuration := pocutil.NowMS() - steadyStateStart
+	overallDuration := pocutil.NowMS() - overallStart
+	pocutil.Logf("steady_state_total_ms = %.3f", steadyStateDuration)
+	pocutil.Logf("overall_total_ms = %.3f", overallDuration)
 
 	pocutil.Complete(map[string]any{
-		"impl":              "gnark-go",
-		"curve":             cfg.Curve,
-		"fixture_load_ms":   fixtureLoadMs,
-		"ntt_size":          nttSize,
-		"ntt_runs":          cfg.NTTRuns,
-		"ntt_duration_ms":   nttDuration,
-		"ntt_digest_hex":    nttDigest,
-		"msm_size":          msmSize,
-		"msm_runs":          cfg.MSMRuns,
-		"msm_duration_ms":   msmDuration,
-		"msm_digest_hex":    msmDigest,
-		"total_duration_ms": totalDuration,
+		"impl":                     "gnark-go",
+		"curve":                    cfg.Curve,
+		"fixture_load_ms":          fixtureLoadMs,
+		"g1_fixture_load_ms":       g1FixtureLoadMs,
+		"g2_fixture_load_ms":       g2FixtureLoadMs,
+		"startup_duration_ms":      fixtureLoadMs,
+		"steady_state_duration_ms": steadyStateDuration,
+		"overall_duration_ms":      overallDuration,
+		"ntt_size":                 nttSize,
+		"ntt_runs":                 cfg.NTTRuns,
+		"ntt_duration_ms":          nttDuration,
+		"ntt_digest_hex":           nttDigest,
+		"g1_msm_size":              g1MSMSize,
+		"g1_msm_runs":              cfg.G1MSMRuns,
+		"g1_msm_duration_ms":       g1MSMDuration,
+		"g1_msm_digest_hex":        g1MSMDigest,
+		"g2_msm_size":              g2MSMSize,
+		"g2_msm_runs":              cfg.G2MSMRuns,
+		"g2_msm_duration_ms":       g2MSMDuration,
+		"g2_msm_digest_hex":        g2MSMDigest,
+		"total_duration_ms":        overallDuration,
 	})
 	return nil
 }
@@ -161,7 +211,7 @@ func runBLS12381NTTBatch(size int, runs int) (string, float64, error) {
 	return pocutil.SHA256Hex(digests), total, nil
 }
 
-func runBN254MSMBatch(size int, runs int, fixture []byte) (string, float64, error) {
+func runBN254G1MSMBatch(size int, runs int, fixture []byte) (string, float64, error) {
 	pointBytes := 96
 	if len(fixture) < size*pointBytes {
 		return "", 0, fmt.Errorf("fixture has %d points, need %d", len(fixture)/pointBytes, size)
@@ -186,12 +236,12 @@ func runBN254MSMBatch(size int, runs int, fixture []byte) (string, float64, erro
 		digests = append(digests, []byte(pocutil.SHA256Hex(digestBytes))...)
 		roundDuration := pocutil.NowMS() - roundStart
 		total += roundDuration
-		pocutil.Logf("msm_round_%d_ms = %.3f", run, roundDuration)
+		pocutil.Logf("g1_msm_round_%d_ms = %.3f", run, roundDuration)
 	}
 	return pocutil.SHA256Hex(digests), total, nil
 }
 
-func runBLS12381MSMBatch(size int, runs int, fixture []byte) (string, float64, error) {
+func runBLS12381G1MSMBatch(size int, runs int, fixture []byte) (string, float64, error) {
 	pointBytes := 144
 	if len(fixture) < size*pointBytes {
 		return "", 0, fmt.Errorf("fixture has %d points, need %d", len(fixture)/pointBytes, size)
@@ -216,7 +266,7 @@ func runBLS12381MSMBatch(size int, runs int, fixture []byte) (string, float64, e
 		digests = append(digests, []byte(pocutil.SHA256Hex(digestBytes))...)
 		roundDuration := pocutil.NowMS() - roundStart
 		total += roundDuration
-		pocutil.Logf("msm_round_%d_ms = %.3f", run, roundDuration)
+		pocutil.Logf("g1_msm_round_%d_ms = %.3f", run, roundDuration)
 	}
 	return pocutil.SHA256Hex(digests), total, nil
 }
@@ -245,6 +295,98 @@ func decodeBLS12381Bases(fixture []byte, count int) []gnarkbls12381.G1Affine {
 			X: readBLS12381FPMontLE(fixture[base : base+coordinateBytes]),
 			Y: readBLS12381FPMontLE(fixture[base+coordinateBytes : base+2*coordinateBytes]),
 		}
+	}
+	return out
+}
+
+func runBN254G2MSMBatch(size int, runs int, fixture []byte) (string, float64, error) {
+	pointBytes := 192
+	if len(fixture) < size*pointBytes {
+		return "", 0, fmt.Errorf("g2 fixture has %d points, need %d", len(fixture)/pointBytes, size)
+	}
+	bases := decodeBN254G2Bases(fixture, size)
+	digests := make([]byte, 0, runs*64)
+	total := 0.0
+	for run := 0; run < runs; run++ {
+		roundStart := pocutil.NowMS()
+		scalars := make([]gnarkbn254fr.Element, size)
+		offset := uint64(run*size + 1)
+		for i := range scalars {
+			scalars[i].SetUint64(offset + uint64(i))
+		}
+		result, err := new(gnarkbn254.G2Affine).MultiExp(bases, scalars, ecc.MultiExpConfig{NbTasks: 1})
+		if err != nil {
+			return "", 0, err
+		}
+		digestBytes := make([]byte, 0, 128)
+		digestBytes = append(digestBytes, bn254FpMontLE(result.X.A0)...)
+		digestBytes = append(digestBytes, bn254FpMontLE(result.X.A1)...)
+		digestBytes = append(digestBytes, bn254FpMontLE(result.Y.A0)...)
+		digestBytes = append(digestBytes, bn254FpMontLE(result.Y.A1)...)
+		digests = append(digests, []byte(pocutil.SHA256Hex(digestBytes))...)
+		roundDuration := pocutil.NowMS() - roundStart
+		total += roundDuration
+		pocutil.Logf("g2_msm_round_%d_ms = %.3f", run, roundDuration)
+	}
+	return pocutil.SHA256Hex(digests), total, nil
+}
+
+func runBLS12381G2MSMBatch(size int, runs int, fixture []byte) (string, float64, error) {
+	pointBytes := 288
+	if len(fixture) < size*pointBytes {
+		return "", 0, fmt.Errorf("g2 fixture has %d points, need %d", len(fixture)/pointBytes, size)
+	}
+	bases := decodeBLS12381G2Bases(fixture, size)
+	digests := make([]byte, 0, runs*64)
+	total := 0.0
+	for run := 0; run < runs; run++ {
+		roundStart := pocutil.NowMS()
+		scalars := make([]gnarkbls12381fr.Element, size)
+		offset := uint64(run*size + 1)
+		for i := range scalars {
+			scalars[i].SetUint64(offset + uint64(i))
+		}
+		result, err := new(gnarkbls12381.G2Affine).MultiExp(bases, scalars, ecc.MultiExpConfig{NbTasks: 1})
+		if err != nil {
+			return "", 0, err
+		}
+		digestBytes := make([]byte, 0, 192)
+		digestBytes = append(digestBytes, bls12381FpMontLE(result.X.A0)...)
+		digestBytes = append(digestBytes, bls12381FpMontLE(result.X.A1)...)
+		digestBytes = append(digestBytes, bls12381FpMontLE(result.Y.A0)...)
+		digestBytes = append(digestBytes, bls12381FpMontLE(result.Y.A1)...)
+		digests = append(digests, []byte(pocutil.SHA256Hex(digestBytes))...)
+		roundDuration := pocutil.NowMS() - roundStart
+		total += roundDuration
+		pocutil.Logf("g2_msm_round_%d_ms = %.3f", run, roundDuration)
+	}
+	return pocutil.SHA256Hex(digests), total, nil
+}
+
+func decodeBN254G2Bases(fixture []byte, count int) []gnarkbn254.G2Affine {
+	const componentBytes = 32
+	const pointBytes = 192
+	out := make([]gnarkbn254.G2Affine, count)
+	for i := 0; i < count; i++ {
+		base := i * pointBytes
+		out[i].X.A0 = readBN254FPMontLE(fixture[base : base+componentBytes])
+		out[i].X.A1 = readBN254FPMontLE(fixture[base+componentBytes : base+2*componentBytes])
+		out[i].Y.A0 = readBN254FPMontLE(fixture[base+2*componentBytes : base+3*componentBytes])
+		out[i].Y.A1 = readBN254FPMontLE(fixture[base+3*componentBytes : base+4*componentBytes])
+	}
+	return out
+}
+
+func decodeBLS12381G2Bases(fixture []byte, count int) []gnarkbls12381.G2Affine {
+	const componentBytes = 48
+	const pointBytes = 288
+	out := make([]gnarkbls12381.G2Affine, count)
+	for i := 0; i < count; i++ {
+		base := i * pointBytes
+		out[i].X.A0 = readBLS12381FPMontLE(fixture[base : base+componentBytes])
+		out[i].X.A1 = readBLS12381FPMontLE(fixture[base+componentBytes : base+2*componentBytes])
+		out[i].Y.A0 = readBLS12381FPMontLE(fixture[base+2*componentBytes : base+3*componentBytes])
+		out[i].Y.A1 = readBLS12381FPMontLE(fixture[base+3*componentBytes : base+4*componentBytes])
 	}
 	return out
 }

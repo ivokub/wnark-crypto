@@ -1,3 +1,5 @@
+//go:build js && wasm
+
 package pocutil
 
 import (
@@ -9,14 +11,15 @@ import (
 )
 
 type Config struct {
-	Curve           string
-	NTTLog          int
-	NTTRuns         int
-	MSMLog          int
-	MSMRuns         int
-	FixtureBinPath  string
-	CoordinateBytes int
-	PointBytes      int
+	Curve            string
+	NTTLog           int
+	NTTRuns          int
+	G1MSMLog         int
+	G1MSMRuns        int
+	G2MSMLog         int
+	G2MSMRuns        int
+	G1FixtureBinPath string
+	G2FixtureBinPath string
 }
 
 func ParseConfig() (Config, error) {
@@ -29,22 +32,27 @@ func ParseConfig() (Config, error) {
 		return Config{}, fmt.Errorf("unsupported curve %q", curve)
 	}
 	nttRuns := cfg.Get("nttRuns").Int()
-	msmRuns := cfg.Get("msmRuns").Int()
+	g1MSMRuns := cfg.Get("g1MsmRuns").Int()
+	g2MSMRuns := cfg.Get("g2MsmRuns").Int()
 	if nttRuns <= 0 {
 		return Config{}, fmt.Errorf("invalid nttRuns %d", nttRuns)
 	}
-	if msmRuns <= 0 {
-		return Config{}, fmt.Errorf("invalid msmRuns %d", msmRuns)
+	if g1MSMRuns <= 0 {
+		return Config{}, fmt.Errorf("invalid g1MsmRuns %d", g1MSMRuns)
+	}
+	if g2MSMRuns <= 0 {
+		return Config{}, fmt.Errorf("invalid g2MsmRuns %d", g2MSMRuns)
 	}
 	return Config{
-		Curve:           curve,
-		NTTLog:          cfg.Get("nttLog").Int(),
-		NTTRuns:         nttRuns,
-		MSMLog:          cfg.Get("msmLog").Int(),
-		MSMRuns:         msmRuns,
-		FixtureBinPath:  cfg.Get("fixtureBinPath").String(),
-		CoordinateBytes: cfg.Get("coordinateBytes").Int(),
-		PointBytes:      cfg.Get("pointBytes").Int(),
+		Curve:            curve,
+		NTTLog:           cfg.Get("nttLog").Int(),
+		NTTRuns:          nttRuns,
+		G1MSMLog:         cfg.Get("g1MsmLog").Int(),
+		G1MSMRuns:        g1MSMRuns,
+		G2MSMLog:         cfg.Get("g2MsmLog").Int(),
+		G2MSMRuns:        g2MSMRuns,
+		G1FixtureBinPath: cfg.Get("g1FixtureBinPath").String(),
+		G2FixtureBinPath: cfg.Get("g2FixtureBinPath").String(),
 	}, nil
 }
 

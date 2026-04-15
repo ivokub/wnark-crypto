@@ -11,7 +11,7 @@ The scope is intentionally small. It is only meant to validate that:
 
 - Go wasm can drive the browser WebGPU library cleanly
 - the same pattern works for both `bn254` and `bls12_381`
-- FFT/NTT and MSM can be compared against a pure Go wasm baseline
+- FFT/NTT, G1 MSM, and G2 MSM can be compared against a pure Go wasm baseline
 
 ## Build
 
@@ -44,7 +44,7 @@ http://localhost:8000/poc-wasm/index.html
 The page supports query-driven autorun, for example:
 
 ```text
-http://localhost:8000/poc-wasm/index.html?autorun=1&impl=both&curve=bn254&ntt-log=12&ntt-runs=4&msm-log=12&msm-runs=4
+http://localhost:8000/poc-wasm/index.html?autorun=1&impl=both&curve=bn254&ntt-log=12&ntt-runs=4&g1-msm-log=12&g1-msm-runs=4&g2-msm-log=11&g2-msm-runs=2
 ```
 
 Parameters:
@@ -53,9 +53,14 @@ Parameters:
 - `curve=bn254|bls12_381`
 - `ntt-log=<power-of-two log size>`
 - `ntt-runs=<repeat count>`
-- `msm-log=<power-of-two log size>`
-- `msm-runs=<repeat count>`
+- `g1-msm-log=<power-of-two log size>`
+- `g1-msm-runs=<repeat count>`
+- `g2-msm-log=<power-of-two log size>`
+- `g2-msm-runs=<repeat count>`
 - `fixture-rev=<cache bust token>`
+
+Legacy `msm-log` / `msm-runs` query parameters are still accepted and applied to
+both G1 and G2 MSM when the new per-group parameters are omitted.
 
 ## Larger MSM runs
 
@@ -84,14 +89,14 @@ After regenerating a fixture, bump `fixture-rev` in the page URL so the browser
 does not reuse the older cached file:
 
 ```text
-http://localhost:8000/poc-wasm/index.html?autorun=1&impl=both&curve=bn254&ntt-log=12&ntt-runs=4&msm-log=17&msm-runs=4&fixture-rev=2
+http://localhost:8000/poc-wasm/index.html?autorun=1&impl=both&curve=bn254&ntt-log=12&ntt-runs=4&g1-msm-log=17&g1-msm-runs=4&g2-msm-log=15&g2-msm-runs=2&fixture-rev=2
 ```
 
 Suggested `2^18` runs:
 
 ```text
-http://localhost:8000/poc-wasm/index.html?autorun=1&impl=both&curve=bn254&ntt-log=18&ntt-runs=4&msm-log=18&msm-runs=4&fixture-rev=3
-http://localhost:8000/poc-wasm/index.html?autorun=1&impl=both&curve=bls12_381&ntt-log=18&ntt-runs=4&msm-log=18&msm-runs=4&fixture-rev=3
+http://localhost:8000/poc-wasm/index.html?autorun=1&impl=both&curve=bn254&ntt-log=18&ntt-runs=4&g1-msm-log=18&g1-msm-runs=4&g2-msm-log=16&g2-msm-runs=2&fixture-rev=3
+http://localhost:8000/poc-wasm/index.html?autorun=1&impl=both&curve=bls12_381&ntt-log=18&ntt-runs=4&g1-msm-log=18&g1-msm-runs=4&g2-msm-log=16&g2-msm-runs=2&fixture-rev=3
 ```
 
 Notes:
@@ -99,3 +104,5 @@ Notes:
 - The pure-Go baseline uses local `gnark-crypto` through the repo `replace`.
 - This is a POC harness, not part of the library public API.
 - The batch mode reuses one WebGPU context and one loaded fixture across all runs.
+- The WebGPU path performs one untimed prewarm pass before measured runs, then
+  reports `startup`, `steady-state`, and `overall` timings separately.

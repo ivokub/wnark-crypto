@@ -95,7 +95,9 @@
       <p>
         This page compares two browser-side wasm paths on the same deterministic BN254 or
         BLS12-381 workloads: Go wasm calling the TS/WebGPU library via <code>syscall/js</code>,
-        and pure Go wasm using <code>gnark-crypto</code>.
+        and pure Go wasm using <code>gnark-crypto</code>. The workload includes Fr NTT,
+        G1 MSM, and G2 MSM to better approximate Groth16 prover hot paths. The WebGPU
+        side performs one untimed prewarm pass before measured runs.
       </p>
       <div class="toolbar">
         <label>
@@ -122,12 +124,20 @@
           <input id="ntt-runs" type="number" min="1" max="32" value="1" />
         </label>
         <label>
-          msm log2
-          <input id="msm-log" type="number" min="1" max="20" value="12" />
+          g1 msm log2
+          <input id="g1-msm-log" type="number" min="1" max="20" value="12" />
         </label>
         <label>
-          msm runs
-          <input id="msm-runs" type="number" min="1" max="32" value="1" />
+          g1 msm runs
+          <input id="g1-msm-runs" type="number" min="1" max="32" value="1" />
+        </label>
+        <label>
+          g2 msm log2
+          <input id="g2-msm-log" type="number" min="1" max="20" value="12" />
+        </label>
+        <label>
+          g2 msm runs
+          <input id="g2-msm-runs" type="number" min="1" max="32" value="1" />
         </label>
         <button id="run" type="button">Run</button>
         <span id="status">Idle</span>

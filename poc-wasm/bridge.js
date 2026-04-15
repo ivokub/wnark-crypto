@@ -1,4 +1,4 @@
-import { createCurveGPUContext, createCurveModule } from "/web/dist/index.js";
+import { createBLS12381, createBN254, createCurveGPUContext } from "/web/dist/index.js";
 
 const query = new URLSearchParams(window.location.search);
 const fixtureRev = query.get("fixture-rev") ?? query.get("fixtureRev") ?? "1";
@@ -6,17 +6,25 @@ const fixtureRev = query.get("fixture-rev") ?? query.get("fixtureRev") ?? "1";
 const CURVE_CONFIG = {
   bn254: {
     frBytes: 32,
-    coordinateBytes: 32,
-    pointBytes: 96,
-    fixtureBinPath: `/testdata/fixtures/g1/bn254_bases_jacobian.bin?v=${encodeURIComponent(fixtureRev)}`,
-    fixtureJSONPath: `/testdata/fixtures/g1/bn254_bases_jacobian.json?v=${encodeURIComponent(fixtureRev)}`,
+    g1CoordinateBytes: 32,
+    g1PointBytes: 96,
+    g2ComponentBytes: 32,
+    g2PointBytes: 192,
+    g1FixtureBinPath: `/testdata/fixtures/g1/bn254_bases_jacobian.bin?v=${encodeURIComponent(fixtureRev)}`,
+    g1FixtureJSONPath: `/testdata/fixtures/g1/bn254_bases_jacobian.json?v=${encodeURIComponent(fixtureRev)}`,
+    g2FixtureBinPath: `/testdata/fixtures/g2/bn254_bases_jacobian.bin?v=${encodeURIComponent(fixtureRev)}`,
+    g2FixtureJSONPath: `/testdata/fixtures/g2/bn254_bases_jacobian.json?v=${encodeURIComponent(fixtureRev)}`,
   },
   bls12_381: {
     frBytes: 32,
-    coordinateBytes: 48,
-    pointBytes: 144,
-    fixtureBinPath: `/testdata/fixtures/g1/bls12_381_bases_jacobian.bin?v=${encodeURIComponent(fixtureRev)}`,
-    fixtureJSONPath: `/testdata/fixtures/g1/bls12_381_bases_jacobian.json?v=${encodeURIComponent(fixtureRev)}`,
+    g1CoordinateBytes: 48,
+    g1PointBytes: 144,
+    g2ComponentBytes: 48,
+    g2PointBytes: 288,
+    g1FixtureBinPath: `/testdata/fixtures/g1/bls12_381_bases_jacobian.bin?v=${encodeURIComponent(fixtureRev)}`,
+    g1FixtureJSONPath: `/testdata/fixtures/g1/bls12_381_bases_jacobian.json?v=${encodeURIComponent(fixtureRev)}`,
+    g2FixtureBinPath: `/testdata/fixtures/g2/bls12_381_bases_jacobian.bin?v=${encodeURIComponent(fixtureRev)}`,
+    g2FixtureJSONPath: `/testdata/fixtures/g2/bls12_381_bases_jacobian.json?v=${encodeURIComponent(fixtureRev)}`,
   },
 };
 
@@ -74,22 +82,25 @@ async function getCurveModule(curve) {
       curve,
       (async () => {
         const context = await getContext();
-        return createCurveModule(context, curve);
+        return curve === "bn254" ? createBN254(context) : createBLS12381(context);
       })(),
     );
   }
   return modulePromises.get(curve);
 }
 
-async function getFixture(curve) {
-  if (!fixturePromises.has(curve)) {
+async function getFixture(curve, group) {
+  const key = `${curve}:${group}`;
+  if (!fixturePromises.has(key)) {
     const config = CURVE_CONFIG[curve];
+    const jsonPath = group === "g1" ? config.g1FixtureJSONPath : config.g2FixtureJSONPath;
+    const binPath = group === "g1" ? config.g1FixtureBinPath : config.g2FixtureBinPath;
     fixturePromises.set(
-      curve,
+      key,
       (async () => {
         const [metaResp, binResp] = await Promise.all([
-          fetch(config.fixtureJSONPath),
-          fetch(config.fixtureBinPath),
+          fetch(jsonPath),
+          fetch(binPath),
         ]);
         if (!metaResp.ok) {
           throw new Error(`failed to fetch fixture metadata: ${metaResp.status}`);
@@ -103,15 +114,16 @@ async function getFixture(curve) {
       })(),
     );
   }
-  return fixturePromises.get(curve);
+  return fixturePromises.get(key);
 }
 
 async function init(curve) {
   const started = performance.now();
-  const [context, module, fixture] = await Promise.all([
+  const [context, module, g1Fixture, g2Fixture] = await Promise.all([
     getContext(),
     getCurveModule(curve),
-    getFixture(curve),
+    getFixture(curve, "g1"),
+    getFixture(curve, "g2"),
   ]);
   return {
     curve,
@@ -121,17 +133,37 @@ async function init(curve) {
       architecture: context.diagnostics.architecture ?? "",
       description: context.diagnostics.description ?? "",
     },
-    fixturePoints: fixture.meta.count,
-    strategy: module.msm.bestWindow(1 << 12),
+    g1FixturePoints: g1Fixture.meta.count,
+    g2FixturePoints: g2Fixture.meta.count,
+    g1Window: module.msm.bestWindow(1 << 12),
+    g2Window: module.g2msm.bestWindow(1 << 12),
   };
 }
 
-function unpackJacobianPoint(curve, packedPoint) {
-  const coordinateBytes = CURVE_CONFIG[curve].coordinateBytes;
+function unpackG1JacobianPoint(curve, packedPoint) {
+  const coordinateBytes = CURVE_CONFIG[curve].g1CoordinateBytes;
   return {
     x: cloneBytes(packedPoint.slice(0, coordinateBytes)),
     y: cloneBytes(packedPoint.slice(coordinateBytes, 2 * coordinateBytes)),
     z: cloneBytes(packedPoint.slice(2 * coordinateBytes, 3 * coordinateBytes)),
+  };
+}
+
+function unpackG2JacobianPoint(curve, packedPoint) {
+  const componentBytes = CURVE_CONFIG[curve].g2ComponentBytes;
+  return {
+    x: {
+      c0: cloneBytes(packedPoint.slice(0, componentBytes)),
+      c1: cloneBytes(packedPoint.slice(componentBytes, 2 * componentBytes)),
+    },
+    y: {
+      c0: cloneBytes(packedPoint.slice(2 * componentBytes, 3 * componentBytes)),
+      c1: cloneBytes(packedPoint.slice(3 * componentBytes, 4 * componentBytes)),
+    },
+    z: {
+      c0: cloneBytes(packedPoint.slice(4 * componentBytes, 5 * componentBytes)),
+      c1: cloneBytes(packedPoint.slice(5 * componentBytes, 6 * componentBytes)),
+    },
   };
 }
 
@@ -152,14 +184,14 @@ async function runNtt(curve, size, start = 1) {
   };
 }
 
-async function runMsm(curve, size, start = 1) {
+async function runG1Msm(curve, size, start = 1) {
   const config = CURVE_CONFIG[curve];
   const module = await getCurveModule(curve);
-  const fixture = await getFixture(curve);
+  const fixture = await getFixture(curve, "g1");
   if (fixture.meta.count < size) {
     throw new Error(`fixture has ${fixture.meta.count} points, need ${size}`);
   }
-  const basesPacked = fixture.bytes.slice(0, size * config.pointBytes);
+  const basesPacked = fixture.bytes.slice(0, size * config.g1PointBytes);
   const scalarsPacked = generateRegularLEPacked(size, config.frBytes, start);
   const started = performance.now();
   const jacobianPacked = await module.msm.pippengerPackedJacobianBases(basesPacked, scalarsPacked, {
@@ -167,7 +199,7 @@ async function runMsm(curve, size, start = 1) {
     termsPerInstance: size,
     window: module.msm.bestWindow(size),
   });
-  const jacobian = unpackJacobianPoint(curve, jacobianPacked.slice(0, config.pointBytes));
+  const jacobian = unpackG1JacobianPoint(curve, jacobianPacked.slice(0, config.g1PointBytes));
   const affine = await module.g1.jacobianToAffine(jacobian);
   const durationMs = performance.now() - started;
   const digestHex = await sha256Hex(concatBytes([affine.x, affine.y]));
@@ -181,6 +213,51 @@ async function runMsm(curve, size, start = 1) {
   };
 }
 
-export const curvegpuPocBridge = { init, runNtt, runMsm };
+async function runG2Msm(curve, size, start = 1) {
+  const config = CURVE_CONFIG[curve];
+  const module = await getCurveModule(curve);
+  const fixture = await getFixture(curve, "g2");
+  if (fixture.meta.count < size) {
+    throw new Error(`g2 fixture has ${fixture.meta.count} points, need ${size}`);
+  }
+  const basesPacked = fixture.bytes.slice(0, size * config.g2PointBytes);
+  const scalarsPacked = generateRegularLEPacked(size, config.frBytes, start);
+  const started = performance.now();
+  const jacobianPacked = await module.g2msm.pippengerPackedJacobianBases(basesPacked, scalarsPacked, {
+    count: 1,
+    termsPerInstance: size,
+    window: module.g2msm.bestWindow(size),
+  });
+  const jacobian = unpackG2JacobianPoint(curve, jacobianPacked.slice(0, config.g2PointBytes));
+  const affine = await module.g2.jacobianToAffine(jacobian);
+  const durationMs = performance.now() - started;
+  const digestHex = await sha256Hex(concatBytes([affine.x.c0, affine.x.c1, affine.y.c0, affine.y.c1]));
+  return {
+    curve,
+    size,
+    durationMs,
+    digestHex,
+    xC0Hex: hex(affine.x.c0),
+    xC1Hex: hex(affine.x.c1),
+    yC0Hex: hex(affine.y.c0),
+    yC1Hex: hex(affine.y.c1),
+  };
+}
+
+async function prewarm(curve, nttSize, g1MsmSize, g2MsmSize) {
+  const started = performance.now();
+  const ntt = await runNtt(curve, nttSize, 1);
+  const g1 = await runG1Msm(curve, g1MsmSize, 1);
+  const g2 = await runG2Msm(curve, g2MsmSize, 1);
+  return {
+    curve,
+    totalMs: performance.now() - started,
+    nttMs: ntt.durationMs,
+    g1MsmMs: g1.durationMs,
+    g2MsmMs: g2.durationMs,
+  };
+}
+
+export const curvegpuPocBridge = { init, prewarm, runNtt, runG1Msm, runG2Msm };
 
 window.curvegpuPocBridge = curvegpuPocBridge;
