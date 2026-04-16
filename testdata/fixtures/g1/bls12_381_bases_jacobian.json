@@ -1,5 +1,5 @@
 {
-  "count": 32768,
+  "count": 524288,
   "point_bytes": 144,
   "format": "jacobian_x_y_z_le"
 }
