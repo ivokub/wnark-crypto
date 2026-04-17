@@ -1,10 +1,12 @@
-.PHONY: web-build web-bundle-shaders testdata fixture-bn254-g1 fixture-bls12_381-g1 fixture-bn254-g2 fixture-bls12_381-g2 metal-bench-fr-ntt-range poc-wasm-build poc-wasm-fixture-bn254 poc-wasm-fixture-bls12_381 poc-wasm-fixture-bn254-2pow18 poc-wasm-fixture-bls12_381-2pow18
+.PHONY: web-build web-bundle-shaders testdata fixture-bn254-g1 fixture-bls12_381-g1 fixture-bn254-g2 fixture-bls12_381-g2 metal-bench-fr-ntt-range poc-wasm-build poc-wasm-fixture-bn254 poc-wasm-fixture-bls12_381 poc-wasm-fixture-bn254-2pow18 poc-wasm-fixture-bls12_381-2pow18 poc-gnark-groth16-build poc-gnark-groth16-fixtures
 
 COUNT ?= 524288
 G2_COUNT ?= 524288
 MIN_LOG ?= 10
 MAX_LOG ?= 20
 ITERS ?= 1
+FIXTURE_CURVE ?= all
+FIXTURE_LOGS ?= 12,15,18
 
 web-bundle-shaders:
 	cd web && npm run build:shaders
@@ -49,3 +51,12 @@ poc-wasm-fixture-bn254-2pow18:
 
 poc-wasm-fixture-bls12_381-2pow18:
 	$(MAKE) poc-wasm-fixture-bls12_381 COUNT=262144
+
+poc-gnark-groth16-build: web-build
+	mkdir -p poc-gnark-groth16/dist
+	cp "$$(go env GOROOT)/lib/wasm/wasm_exec.js" poc-gnark-groth16/dist/wasm_exec.js
+	GOMODCACHE=$$(pwd)/.gomodcache GOCACHE=$$(pwd)/.gocache GOFLAGS='-buildvcs=false' GOOS=js GOARCH=wasm go build -o poc-gnark-groth16/dist/go-webgpu.wasm ./poc-gnark-groth16/go-webgpu
+	GOMODCACHE=$$(pwd)/.gomodcache GOCACHE=$$(pwd)/.gocache GOFLAGS='-buildvcs=false' GOOS=js GOARCH=wasm go build -o poc-gnark-groth16/dist/go-native.wasm ./poc-gnark-groth16/go-native
+
+poc-gnark-groth16-fixtures:
+	GOMODCACHE=$$(pwd)/.gomodcache GOCACHE=$$(pwd)/.gocache GOFLAGS='-buildvcs=false' go run ./cmd/poc-gnark-groth16-fixtures -curve $(FIXTURE_CURVE) -logs $(FIXTURE_LOGS)
