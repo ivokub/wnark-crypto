@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Groth16 Go WASM POC</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        background: #f6f4ef;
+        color: #1f1f1f;
+      }
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at top left, rgba(214, 188, 154, 0.45), transparent 35%),
+          linear-gradient(180deg, #f7f1e8 0%, #f2eee7 100%);
+      }
+      main {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 32px 20px 48px;
+      }
+      h1 {
+        margin: 0 0 12px;
+        font-size: 28px;
+        letter-spacing: -0.02em;
+      }
+      p {
+        margin: 0 0 18px;
+        line-height: 1.5;
+      }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        margin: 0 0 16px;
+        padding: 14px;
+        border: 1px solid #cdbca8;
+        border-radius: 14px;
+        background: rgba(255, 251, 245, 0.88);
+        box-shadow: 0 12px 30px rgba(88, 60, 28, 0.08);
+      }
+      label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+      }
+      select,
+      input,
+      button {
+        font: inherit;
+      }
+      select,
+      input {
+        padding: 6px 8px;
+        border: 1px solid #b49774;
+        border-radius: 8px;
+        background: #fffdfa;
+      }
+      button {
+        padding: 8px 12px;
+        border: 1px solid #6d4c2f;
+        border-radius: 999px;
+        background: #6d4c2f;
+        color: #fff7ef;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.55;
+        cursor: default;
+      }
+      #status {
+        font-weight: 700;
+      }
+      pre {
+        overflow: auto;
+        white-space: pre-wrap;
+        margin: 0;
+        padding: 16px;
+        border-radius: 14px;
+        border: 1px solid #cdbca8;
+        background: #fffdfa;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+        min-height: 260px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Groth16 Go WASM POC</h1>
+      <p>
+        This page compares an end-to-end Groth16 proof flow in the browser for fixed
+        no-commitment circuit fixtures on BN254 or BLS12-381. One path uses the local
+        WebGPU-accelerated prover package in this repo; the other uses native gnark Groth16
+        compiled to wasm. The benchmark loads a serialized circuit and proving/verification
+        keys, builds the witness, proves, serializes the proof, deserializes it, and verifies it.
+        Proof bytes are intentionally not compared because Groth16 proving is randomized.
+      </p>
+      <div class="toolbar">
+        <label>
+          implementation
+          <select id="impl">
+            <option value="both">both</option>
+            <option value="webgpu-go">webgpu-go</option>
+            <option value="native-go">native-go</option>
+          </select>
+        </label>
+        <label>
+          curve
+          <select id="curve">
+            <option value="bn254">bn254</option>
+            <option value="bls12_381">bls12_381</option>
+          </select>
+        </label>
+        <label>
+          fixture size
+          <select id="size-log">
+            <option value="12">2^12</option>
+            <option value="15">2^15</option>
+            <option value="18">2^18</option>
+          </select>
+        </label>
+        <label>
+          prove runs
+          <input id="prove-runs" type="number" min="1" max="16" value="1" />
+        </label>
+        <button id="run" type="button">Run</button>
+        <span id="status">Idle</span>
+      </div>
+      <pre id="log"></pre>
+    </main>
+    <script type="module" src="/poc-gnark-groth16/main.js"></script>
+  </body>
+</html>
