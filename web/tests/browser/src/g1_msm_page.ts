@@ -1,4 +1,4 @@
-export {};
+export { };
 
 import { bytesToHex, fetchJSON, hexToBytes } from "../../../src/curvegpu/browser_utils.js";
 import type {
@@ -54,7 +54,7 @@ const CONFIGS: Partial<Record<SupportedCurveID, G1MSMConfig>> = {
   bls12_381: {
     curve: "bls12_381",
     title: "BLS12-381 G1 MSM Browser Smoke",
-    vectorPath: "/testdata/vectors/g1/bls12_381_g1_msm.json?v=1",
+    vectorPath: "/testdata/vectors/g1/bls12_381_g1_msm.json",
   },
 };
 
@@ -87,8 +87,8 @@ function expectPointBatch(name: string, got: readonly CurveGPUJacobianPoint[], w
     ) {
       throw new Error(
         `${name}: mismatch at index ${i}` +
-          ` got=(${gotHex.x_bytes_le},${gotHex.y_bytes_le},${gotHex.z_bytes_le})` +
-          ` want=(${want[i].x_bytes_le},${want[i].y_bytes_le},${want[i].z_bytes_le})`,
+        ` got=(${gotHex.x_bytes_le},${gotHex.y_bytes_le},${gotHex.z_bytes_le})` +
+        ` want=(${want[i].x_bytes_le},${want[i].y_bytes_le},${want[i].z_bytes_le})`,
       );
     }
   }
@@ -106,8 +106,8 @@ function expectAffineBatch(name: string, got: readonly CurveGPUAffinePoint[], wa
     if (gotHex.x_bytes_le !== want[i].x_bytes_le || gotHex.y_bytes_le !== want[i].y_bytes_le) {
       throw new Error(
         `${name}: mismatch at index ${i}` +
-          ` got=(${gotHex.x_bytes_le},${gotHex.y_bytes_le})` +
-          ` want=(${want[i].x_bytes_le},${want[i].y_bytes_le})`,
+        ` got=(${gotHex.x_bytes_le},${gotHex.y_bytes_le})` +
+        ` want=(${want[i].x_bytes_le},${want[i].y_bytes_le})`,
       );
     }
   }

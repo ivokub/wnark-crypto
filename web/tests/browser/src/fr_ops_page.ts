@@ -1,4 +1,4 @@
-export {};
+export { };
 
 import { bytesToHex, fetchJSON, hexToBytes } from "../../../src/curvegpu/browser_utils.js";
 import type { CurveGPUElementBytes, CurveModule, FieldModule, SupportedCurveID } from "../../../src/index.js";
@@ -57,7 +57,7 @@ const CONFIGS: Partial<Record<SupportedCurveID, FrOpsConfig>> = {
   bls12_381: {
     curve: "bls12_381",
     title: "BLS12-381 fr Ops Browser Smoke",
-    vectorPath: "/testdata/vectors/fr/bls12_381_fr_ops.json?v=2",
+    vectorPath: "/testdata/vectors/fr/bls12_381_fr_ops.json",
   },
 };
 

@@ -1,8 +1,5 @@
 import { createBLS12381, createBN254, createCurveGPUContext } from "/web/dist/index.js";
 
-const query = new URLSearchParams(window.location.search);
-const fixtureRev = query.get("fixture-rev") ?? query.get("fixtureRev") ?? "1";
-
 const CURVE_CONFIG = {
   bn254: {
     frBytes: 32,
@@ -10,10 +7,10 @@ const CURVE_CONFIG = {
     g1PointBytes: 96,
     g2ComponentBytes: 32,
     g2PointBytes: 192,
-    g1FixtureBinPath: `/testdata/fixtures/g1/bn254_bases_jacobian.bin?v=${encodeURIComponent(fixtureRev)}`,
-    g1FixtureJSONPath: `/testdata/fixtures/g1/bn254_bases_jacobian.json?v=${encodeURIComponent(fixtureRev)}`,
-    g2FixtureBinPath: `/testdata/fixtures/g2/bn254_bases_jacobian.bin?v=${encodeURIComponent(fixtureRev)}`,
-    g2FixtureJSONPath: `/testdata/fixtures/g2/bn254_bases_jacobian.json?v=${encodeURIComponent(fixtureRev)}`,
+    g1FixtureBinPath: `/testdata/fixtures/g1/bn254_bases_jacobian.bin`,
+    g1FixtureJSONPath: `/testdata/fixtures/g1/bn254_bases_jacobian.json`,
+    g2FixtureBinPath: `/testdata/fixtures/g2/bn254_bases_jacobian.bin`,
+    g2FixtureJSONPath: `/testdata/fixtures/g2/bn254_bases_jacobian.json`,
   },
   bls12_381: {
     frBytes: 32,
@@ -21,10 +18,10 @@ const CURVE_CONFIG = {
     g1PointBytes: 144,
     g2ComponentBytes: 48,
     g2PointBytes: 288,
-    g1FixtureBinPath: `/testdata/fixtures/g1/bls12_381_bases_jacobian.bin?v=${encodeURIComponent(fixtureRev)}`,
-    g1FixtureJSONPath: `/testdata/fixtures/g1/bls12_381_bases_jacobian.json?v=${encodeURIComponent(fixtureRev)}`,
-    g2FixtureBinPath: `/testdata/fixtures/g2/bls12_381_bases_jacobian.bin?v=${encodeURIComponent(fixtureRev)}`,
-    g2FixtureJSONPath: `/testdata/fixtures/g2/bls12_381_bases_jacobian.json?v=${encodeURIComponent(fixtureRev)}`,
+    g1FixtureBinPath: `/testdata/fixtures/g1/bls12_381_bases_jacobian.bin`,
+    g1FixtureJSONPath: `/testdata/fixtures/g1/bls12_381_bases_jacobian.json`,
+    g2FixtureBinPath: `/testdata/fixtures/g2/bls12_381_bases_jacobian.bin`,
+    g2FixtureJSONPath: `/testdata/fixtures/g2/bls12_381_bases_jacobian.json`,
   },
 };
 

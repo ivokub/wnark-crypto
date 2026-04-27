@@ -1,4 +1,4 @@
-export {};
+export { };
 
 import {
   bytesToHex,
@@ -58,9 +58,9 @@ const CURVE_CONFIGS: Partial<Record<SupportedCurveID, CurveBenchConfig>> = {
     successMessage: "BN254 G2 MSM browser benchmark completed",
     componentBytes: 32,
     pointBytes: 192,
-    opsVectorsPath: "/testdata/vectors/g2/bn254_g2_ops.json?v=1",
-    fixtureJSONPath: "/testdata/fixtures/g2/bn254_bases_jacobian.json?v=1",
-    fixtureBinPath: "/testdata/fixtures/g2/bn254_bases_jacobian.bin?v=1",
+    opsVectorsPath: "/testdata/vectors/g2/bn254_g2_ops.json",
+    fixtureJSONPath: "/testdata/fixtures/g2/bn254_bases_jacobian.json",
+    fixtureBinPath: "/testdata/fixtures/g2/bn254_bases_jacobian.bin",
   },
   bls12_377: {
     curve: "bls12_377",
@@ -69,8 +69,8 @@ const CURVE_CONFIGS: Partial<Record<SupportedCurveID, CurveBenchConfig>> = {
     componentBytes: 48,
     pointBytes: 288,
     opsVectorsPath: "/testdata/vectors/g2/bls12_377_g2_ops.json",
-    fixtureJSONPath: "/testdata/fixtures/g2/bls12_377_bases_jacobian.json?v=1",
-    fixtureBinPath: "/testdata/fixtures/g2/bls12_377_bases_jacobian.bin?v=1",
+    fixtureJSONPath: "/testdata/fixtures/g2/bls12_377_bases_jacobian.json",
+    fixtureBinPath: "/testdata/fixtures/g2/bls12_377_bases_jacobian.bin",
   },
   bls12_381: {
     curve: "bls12_381",
@@ -78,9 +78,9 @@ const CURVE_CONFIGS: Partial<Record<SupportedCurveID, CurveBenchConfig>> = {
     successMessage: "BLS12-381 G2 MSM browser benchmark completed",
     componentBytes: 48,
     pointBytes: 288,
-    opsVectorsPath: "/testdata/vectors/g2/bls12_381_g2_ops.json?v=1",
-    fixtureJSONPath: "/testdata/fixtures/g2/bls12_381_bases_jacobian.json?v=1",
-    fixtureBinPath: "/testdata/fixtures/g2/bls12_381_bases_jacobian.bin?v=1",
+    opsVectorsPath: "/testdata/vectors/g2/bls12_381_g2_ops.json",
+    fixtureJSONPath: "/testdata/fixtures/g2/bls12_381_bases_jacobian.json",
+    fixtureBinPath: "/testdata/fixtures/g2/bls12_381_bases_jacobian.bin",
   },
 };
 

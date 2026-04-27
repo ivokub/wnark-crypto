@@ -1,4 +1,4 @@
-export {};
+export { };
 
 import { bytesToHex, fetchJSON, hexToBytes } from "../../../src/curvegpu/browser_utils.js";
 import type {
@@ -53,7 +53,7 @@ const CONFIGS: Partial<Record<SupportedCurveID, G2OpsConfig>> = {
   bn254: {
     curve: "bn254",
     title: "BN254 G2 Ops Browser Smoke",
-    vectorPath: "/testdata/vectors/g2/bn254_g2_ops.json?v=1",
+    vectorPath: "/testdata/vectors/g2/bn254_g2_ops.json",
   },
   bls12_377: {
     curve: "bls12_377",
@@ -63,7 +63,7 @@ const CONFIGS: Partial<Record<SupportedCurveID, G2OpsConfig>> = {
   bls12_381: {
     curve: "bls12_381",
     title: "BLS12-381 G2 Ops Browser Smoke",
-    vectorPath: "/testdata/vectors/g2/bls12_381_g2_ops.json?v=1",
+    vectorPath: "/testdata/vectors/g2/bls12_381_g2_ops.json",
   },
 };
 

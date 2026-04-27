@@ -44,7 +44,6 @@ function readConfig() {
   const g2MsmLog = Number.parseInt(g2MsmLogInput.value, 10);
   const g2MsmRuns = Number.parseInt(g2MsmRunsInput.value, 10);
   const params = new URLSearchParams(window.location.search);
-  const fixtureRev = params.get("fixture-rev") ?? params.get("fixtureRev") ?? "1";
   return {
     curve,
     nttLog,
@@ -53,8 +52,8 @@ function readConfig() {
     g1MsmRuns,
     g2MsmLog,
     g2MsmRuns,
-    g1FixtureBinPath: `${CURVE_CONFIG[curve].g1FixtureBinPath}?v=${encodeURIComponent(fixtureRev)}`,
-    g2FixtureBinPath: `${CURVE_CONFIG[curve].g2FixtureBinPath}?v=${encodeURIComponent(fixtureRev)}`,
+    g1FixtureBinPath: `${CURVE_CONFIG[curve].g1FixtureBinPath}`,
+    g2FixtureBinPath: `${CURVE_CONFIG[curve].g2FixtureBinPath}`,
   };
 }
 

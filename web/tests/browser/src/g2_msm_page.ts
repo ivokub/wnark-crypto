@@ -1,4 +1,4 @@
-export {};
+export { };
 
 import { bytesToHex, fetchJSON, hexToBytes } from "../../../src/curvegpu/browser_utils.js";
 import type {
@@ -49,7 +49,7 @@ const CONFIGS: Partial<Record<SupportedCurveID, G2MSMConfig>> = {
   bn254: {
     curve: "bn254",
     title: "BN254 G2 MSM Browser Smoke",
-    vectorPath: "/testdata/vectors/g2/bn254_g2_msm.json?v=1",
+    vectorPath: "/testdata/vectors/g2/bn254_g2_msm.json",
   },
   bls12_377: {
     curve: "bls12_377",
@@ -59,7 +59,7 @@ const CONFIGS: Partial<Record<SupportedCurveID, G2MSMConfig>> = {
   bls12_381: {
     curve: "bls12_381",
     title: "BLS12-381 G2 MSM Browser Smoke",
-    vectorPath: "/testdata/vectors/g2/bls12_381_g2_msm.json?v=1",
+    vectorPath: "/testdata/vectors/g2/bls12_381_g2_msm.json",
   },
 };
 
@@ -103,8 +103,8 @@ function expectPointBatch(name: string, got: readonly CurveGPUG2JacobianPoint[],
     if (!equalFp2(gotHex.x, want[i].x) || !equalFp2(gotHex.y, want[i].y) || !equalFp2(gotHex.z, want[i].z)) {
       throw new Error(
         `${name}: mismatch at index ${i}` +
-          ` got=(${gotHex.x.c0_bytes_le}/${gotHex.x.c1_bytes_le},${gotHex.y.c0_bytes_le}/${gotHex.y.c1_bytes_le},${gotHex.z.c0_bytes_le}/${gotHex.z.c1_bytes_le})` +
-          ` want=(${want[i].x.c0_bytes_le}/${want[i].x.c1_bytes_le},${want[i].y.c0_bytes_le}/${want[i].y.c1_bytes_le},${want[i].z.c0_bytes_le}/${want[i].z.c1_bytes_le})`,
+        ` got=(${gotHex.x.c0_bytes_le}/${gotHex.x.c1_bytes_le},${gotHex.y.c0_bytes_le}/${gotHex.y.c1_bytes_le},${gotHex.z.c0_bytes_le}/${gotHex.z.c1_bytes_le})` +
+        ` want=(${want[i].x.c0_bytes_le}/${want[i].x.c1_bytes_le},${want[i].y.c0_bytes_le}/${want[i].y.c1_bytes_le},${want[i].z.c0_bytes_le}/${want[i].z.c1_bytes_le})`,
       );
     }
   }
@@ -119,8 +119,8 @@ function expectAffineBatch(name: string, got: readonly CurveGPUG2AffinePoint[], 
     if (!equalFp2(gotHex.x, want[i].x) || !equalFp2(gotHex.y, want[i].y)) {
       throw new Error(
         `${name}: mismatch at index ${i}` +
-          ` got=(${gotHex.x.c0_bytes_le}/${gotHex.x.c1_bytes_le},${gotHex.y.c0_bytes_le}/${gotHex.y.c1_bytes_le})` +
-          ` want=(${want[i].x.c0_bytes_le}/${want[i].x.c1_bytes_le},${want[i].y.c0_bytes_le}/${want[i].y.c1_bytes_le})`,
+        ` got=(${gotHex.x.c0_bytes_le}/${gotHex.x.c1_bytes_le},${gotHex.y.c0_bytes_le}/${gotHex.y.c1_bytes_le})` +
+        ` want=(${want[i].x.c0_bytes_le}/${want[i].x.c1_bytes_le},${want[i].y.c0_bytes_le}/${want[i].y.c1_bytes_le})`,
       );
     }
   }

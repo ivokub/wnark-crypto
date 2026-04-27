@@ -1,4 +1,4 @@
-export {};
+export { };
 
 import type { CurveModule, SupportedCurveID } from "../../../src/index.js";
 import { createCurveGPUContext, createCurveModule } from "../../../src/index.js";
@@ -231,7 +231,7 @@ async function main(): Promise<void> {
       getById<HTMLInputElement>("iters").value = `${selected.defaultIters}`;
     }
     // Bench page registers its own Run button listener on import
-    await import(`${selected.script}?v=1`);
+    await import(`${selected.script}`);
     return;
   }
 
