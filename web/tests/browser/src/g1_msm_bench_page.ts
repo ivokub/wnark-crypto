@@ -210,9 +210,9 @@ async function runBenchmark(): Promise<void> {
       const bases = unpackAffineBases(baseBytes, size, config.coordinateBytes, config.pointBytes);
       const scalars = makeMSMScalars(size);
       const prepMs = performance.now() - prepStart;
-      const window = curve.msm.bestWindow(size);
+      const window = curve.g1msm.bestWindow(size);
       const benchmark = await benchmarkTotalDuration(iters, async () => {
-        await curve.msm.pippengerAffine(bases, scalars, {
+        await curve.g1msm.pippengerAffine(bases, scalars, {
           termsPerInstance: size,
           window,
         });
@@ -220,7 +220,7 @@ async function runBenchmark(): Promise<void> {
       lines.push(
         [
           `${size}`,
-          "msm_pippenger_affine",
+          "msm_jac_pippenger_affine_input",
           `${window}`,
           initMs.toFixed(3),
           prepMs.toFixed(3),

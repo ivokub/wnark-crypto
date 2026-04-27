@@ -142,10 +142,10 @@ async function msmG1(handle, vectorName, scalarsPacked) {
   if (!(basesPacked instanceof Uint8Array) || typeof count !== "number") {
     throw new Error(`missing cached G1 vector ${vectorName}`);
   }
-  const resultPacked = await module.msm.pippengerPackedJacobianBases(basesPacked, cloneBytes(scalarsPacked), {
+  const resultPacked = await module.g1msm.pippengerPackedJacobianBases(basesPacked, cloneBytes(scalarsPacked), {
     count: 1,
     termsPerInstance: count,
-    window: module.msm.bestWindow(count),
+    window: module.g1msm.bestWindow(count),
   });
   const jacobian = unpackG1JacobianPoint(entry.curve, resultPacked.slice(0, config.g1PointBytes));
   const affine = await module.g1.jacobianToAffine(jacobian);

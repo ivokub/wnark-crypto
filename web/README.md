@@ -10,7 +10,7 @@ The intended usage model is:
 
 1. create one shared WebGPU context
 2. create one curve module from that context
-3. run `fr`, `fp`, `g1`, `ntt`, and `msm` operations through that module
+3. run `fr`, `fp`, `g1`, `ntt`, `g1msm`, and `g2msm` operations through that module
 4. keep smoke tests, benchmarks, and examples outside the package-facing API surface
 
 ## Public surface
@@ -67,7 +67,7 @@ const base: CurveGPUAffinePoint = {
 };
 
 const doubled = await curve.g1.scalarMulAffine(base, scalarLE(2));
-const msm = await curve.msm.pippengerAffine([base, base], [scalarLE(1), scalarLE(1)]);
+const msm = await curve.g1msm.pippengerAffine([base, base], [scalarLE(1), scalarLE(1)]);
 
 context.close();
 ```

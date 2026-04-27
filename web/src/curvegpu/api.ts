@@ -416,7 +416,7 @@ export interface NTTModule {
 /**
  * Multi-scalar multiplication module over G1 affine bases.
  */
-export interface MSMModule {
+export interface G1MSMModule {
   readonly context: CurveGPUContext;
   readonly curve: SupportedCurveID;
   readonly group: "g1";
@@ -467,7 +467,7 @@ export interface MSMModule {
 /**
  * Multi-scalar multiplication module over G2 affine bases.
  *
- * The API mirrors `MSMModule` but operates on G2 points over the quadratic
+ * The API mirrors `G1MSMModule` but operates on G2 points over the quadratic
  * extension field. Bases are supplied in affine form; results are returned in
  * Jacobian form unless an `AffineResult` variant is used.
  */
@@ -544,7 +544,7 @@ export interface CurveModule {
   /** Scalar-field NTT. */
   readonly ntt: NTTModule;
   /** Multi-scalar multiplication over G1. */
-  readonly msm: MSMModule;
+  readonly g1msm: G1MSMModule;
   /** Multi-scalar multiplication over G2. */
   readonly g2msm: G2MSMModule;
 }

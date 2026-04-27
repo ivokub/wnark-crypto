@@ -17,47 +17,39 @@ type SuiteConfig = {
   defaultIters?: number;
 };
 
-const SUITES: SuiteConfig[] = [
-  { curve: "bn254", id: "fr_ops", label: "fr ops", kind: "smoke", script: "/web/dist/tests/browser/src/fr_ops_page.js" },
-  { curve: "bn254", id: "fp_ops", label: "fp ops", kind: "smoke", script: "/web/dist/tests/browser/src/fp_ops_page.js" },
-  { curve: "bn254", id: "fr_vector_ops", label: "fr vector ops", kind: "smoke", script: "/web/dist/tests/browser/src/fr_vector_ops_page.js" },
-  { curve: "bn254", id: "fr_ntt", label: "fr NTT", kind: "smoke", script: "/web/dist/tests/browser/src/fr_ntt_page.js" },
-  { curve: "bn254", id: "g1_ops", label: "G1 ops", kind: "smoke", script: "/web/dist/tests/browser/src/g1_ops_page.js" },
-  { curve: "bn254", id: "g2_ops", label: "G2 ops", kind: "smoke", script: "/web/dist/tests/browser/src/g2_ops_page.js" },
-  { curve: "bn254", id: "g1_scalar_mul", label: "G1 scalar mul", kind: "smoke", script: "/web/dist/tests/browser/src/g1_scalar_mul_page.js" },
-  { curve: "bn254", id: "g1_msm", label: "G1 MSM", kind: "smoke", script: "/web/dist/tests/browser/src/g1_msm_page.js" },
-  { curve: "bn254", id: "g2_msm", label: "G2 MSM", kind: "smoke", script: "/web/dist/tests/browser/src/g2_msm_page.js" },
-  { curve: "bn254", id: "g2_msm_bench", label: "G2 MSM bench", kind: "bench", script: "/web/dist/tests/browser/src/g2_msm_bench_page.js", defaultMinLog: 10, defaultMaxLog: 14, defaultIters: 1 },
-  { curve: "bn254", id: "fr_vector_bench", label: "fr vector bench", kind: "bench", script: "/web/dist/tests/browser/src/fr_vector_bench_page.js", defaultMinLog: 10, defaultMaxLog: 20, defaultIters: 3 },
-  { curve: "bn254", id: "fr_ntt_bench", label: "fr NTT bench", kind: "bench", script: "/web/dist/tests/browser/src/fr_ntt_bench_page.js", defaultMinLog: 10, defaultMaxLog: 14, defaultIters: 1 },
-  { curve: "bn254", id: "g1_msm_bench", label: "G1 MSM bench", kind: "bench", script: "/web/dist/tests/browser/src/g1_msm_bench_page.js", defaultMinLog: 10, defaultMaxLog: 20, defaultIters: 1 },
-  { curve: "bls12_377", id: "fr_ops", label: "fr ops", kind: "smoke", script: "/web/dist/tests/browser/src/fr_ops_page.js" },
-  { curve: "bls12_377", id: "fp_ops", label: "fp ops", kind: "smoke", script: "/web/dist/tests/browser/src/fp_ops_page.js" },
-  { curve: "bls12_377", id: "fr_vector_ops", label: "fr vector ops", kind: "smoke", script: "/web/dist/tests/browser/src/fr_vector_ops_page.js" },
-  { curve: "bls12_377", id: "fr_ntt", label: "fr NTT", kind: "smoke", script: "/web/dist/tests/browser/src/fr_ntt_page.js" },
-  { curve: "bls12_377", id: "g1_ops", label: "G1 ops", kind: "smoke", script: "/web/dist/tests/browser/src/g1_ops_page.js" },
-  { curve: "bls12_377", id: "g2_ops", label: "G2 ops", kind: "smoke", script: "/web/dist/tests/browser/src/g2_ops_page.js" },
-  { curve: "bls12_377", id: "g1_scalar_mul", label: "G1 scalar mul", kind: "smoke", script: "/web/dist/tests/browser/src/g1_scalar_mul_page.js" },
-  { curve: "bls12_377", id: "g1_msm", label: "G1 MSM", kind: "smoke", script: "/web/dist/tests/browser/src/g1_msm_page.js" },
-  { curve: "bls12_377", id: "g2_msm", label: "G2 MSM", kind: "smoke", script: "/web/dist/tests/browser/src/g2_msm_page.js" },
-  { curve: "bls12_377", id: "fr_vector_bench", label: "fr vector bench", kind: "bench", script: "/web/dist/tests/browser/src/fr_vector_bench_page.js", defaultMinLog: 10, defaultMaxLog: 20, defaultIters: 3 },
-  { curve: "bls12_377", id: "fr_ntt_bench", label: "fr NTT bench", kind: "bench", script: "/web/dist/tests/browser/src/fr_ntt_bench_page.js", defaultMinLog: 10, defaultMaxLog: 14, defaultIters: 1 },
-  { curve: "bls12_377", id: "g1_msm_bench", label: "G1 MSM bench", kind: "bench", script: "/web/dist/tests/browser/src/g1_msm_bench_page.js", defaultMinLog: 10, defaultMaxLog: 19, defaultIters: 1 },
-  { curve: "bls12_377", id: "g2_msm_bench", label: "G2 MSM bench", kind: "bench", script: "/web/dist/tests/browser/src/g2_msm_bench_page.js", defaultMinLog: 10, defaultMaxLog: 14, defaultIters: 1 },
-  { curve: "bls12_381", id: "fr_ops", label: "fr ops", kind: "smoke", script: "/web/dist/tests/browser/src/fr_ops_page.js" },
-  { curve: "bls12_381", id: "fp_ops", label: "fp ops", kind: "smoke", script: "/web/dist/tests/browser/src/fp_ops_page.js" },
-  { curve: "bls12_381", id: "fr_vector_ops", label: "fr vector ops", kind: "smoke", script: "/web/dist/tests/browser/src/fr_vector_ops_page.js" },
-  { curve: "bls12_381", id: "fr_ntt", label: "fr NTT", kind: "smoke", script: "/web/dist/tests/browser/src/fr_ntt_page.js" },
-  { curve: "bls12_381", id: "g1_ops", label: "G1 ops", kind: "smoke", script: "/web/dist/tests/browser/src/g1_ops_page.js" },
-  { curve: "bls12_381", id: "g2_ops", label: "G2 ops", kind: "smoke", script: "/web/dist/tests/browser/src/g2_ops_page.js" },
-  { curve: "bls12_381", id: "g1_scalar_mul", label: "G1 scalar mul", kind: "smoke", script: "/web/dist/tests/browser/src/g1_scalar_mul_page.js" },
-  { curve: "bls12_381", id: "g1_msm", label: "G1 MSM", kind: "smoke", script: "/web/dist/tests/browser/src/g1_msm_page.js" },
-  { curve: "bls12_381", id: "g2_msm", label: "G2 MSM", kind: "smoke", script: "/web/dist/tests/browser/src/g2_msm_page.js" },
-  { curve: "bls12_381", id: "fr_vector_bench", label: "fr vector bench", kind: "bench", script: "/web/dist/tests/browser/src/fr_vector_bench_page.js", defaultMinLog: 10, defaultMaxLog: 20, defaultIters: 3 },
-  { curve: "bls12_381", id: "fr_ntt_bench", label: "fr NTT bench", kind: "bench", script: "/web/dist/tests/browser/src/fr_ntt_bench_page.js", defaultMinLog: 10, defaultMaxLog: 14, defaultIters: 1 },
-  { curve: "bls12_381", id: "g1_msm_bench", label: "G1 MSM bench", kind: "bench", script: "/web/dist/tests/browser/src/g1_msm_bench_page.js", defaultMinLog: 10, defaultMaxLog: 19, defaultIters: 1 },
-  { curve: "bls12_381", id: "g2_msm_bench", label: "G2 MSM bench", kind: "bench", script: "/web/dist/tests/browser/src/g2_msm_bench_page.js", defaultMinLog: 10, defaultMaxLog: 14, defaultIters: 1 },
-];
+const BENCH_MIN_LOG = 10;
+const BENCH_MAX_LOG = 20;
+
+const CURVES: SupportedCurveID[] = ["bn254", "bls12_377", "bls12_381"];
+
+const SMOKE_SUITES = [
+  { id: "fr_ops", label: "fr ops", kind: "smoke", script: "/web/dist/tests/browser/src/fr_ops_page.js" },
+  { id: "fp_ops", label: "fp ops", kind: "smoke", script: "/web/dist/tests/browser/src/fp_ops_page.js" },
+  { id: "fr_vector_ops", label: "fr vector ops", kind: "smoke", script: "/web/dist/tests/browser/src/fr_vector_ops_page.js" },
+  { id: "fr_ntt", label: "fr NTT", kind: "smoke", script: "/web/dist/tests/browser/src/fr_ntt_page.js" },
+  { id: "g1_ops", label: "G1 ops", kind: "smoke", script: "/web/dist/tests/browser/src/g1_ops_page.js" },
+  { id: "g2_ops", label: "G2 ops", kind: "smoke", script: "/web/dist/tests/browser/src/g2_ops_page.js" },
+  { id: "g1_scalar_mul", label: "G1 scalar mul", kind: "smoke", script: "/web/dist/tests/browser/src/g1_scalar_mul_page.js" },
+  { id: "g1_msm", label: "G1 MSM", kind: "smoke", script: "/web/dist/tests/browser/src/g1_msm_page.js" },
+  { id: "g2_msm", label: "G2 MSM", kind: "smoke", script: "/web/dist/tests/browser/src/g2_msm_page.js" },
+] as const;
+
+const BENCH_SUITES = [
+  { id: "fr_vector_bench", label: "fr vector bench", kind: "bench", script: "/web/dist/tests/browser/src/fr_vector_bench_page.js", defaultIters: 3 },
+  { id: "fr_ntt_bench", label: "fr NTT bench", kind: "bench", script: "/web/dist/tests/browser/src/fr_ntt_bench_page.js", defaultIters: 1 },
+  { id: "g1_msm_bench", label: "G1 MSM bench", kind: "bench", script: "/web/dist/tests/browser/src/g1_msm_bench_page.js", defaultIters: 1 },
+  { id: "g2_msm_bench", label: "G2 MSM bench", kind: "bench", script: "/web/dist/tests/browser/src/g2_msm_bench_page.js", defaultIters: 1 },
+] as const;
+
+const SUITES: SuiteConfig[] = CURVES.flatMap((curve) => [
+  ...SMOKE_SUITES.map((suite) => ({ curve, ...suite })),
+  ...BENCH_SUITES.map((suite) => ({
+    curve,
+    ...suite,
+    defaultMinLog: BENCH_MIN_LOG,
+    defaultMaxLog: BENCH_MAX_LOG,
+  })),
+]);
 
 type SuiteRunner = {
   runSuite: (module: CurveModule, log: (msg: string) => void) => Promise<{ passed: number; failed: number }>;

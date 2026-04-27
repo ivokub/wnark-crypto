@@ -13,7 +13,7 @@
  * const result = await curve.g1.scalarMul(base, scalar);
  *
  * // Multi-scalar multiplication (Pippenger)
- * const msm = await curve.msm.pippengerPackedJacobianBases(bases, scalars, opts);
+ * const msm = await curve.g1msm.pippengerPackedJacobianBases(bases, scalars, opts);
  *
  * ctx.close(); // release GPU resources
  * ```
@@ -30,7 +30,7 @@
  * Use `createBN254`, `createBLS12381`, or `createBLS12377` (or the lower-level `createCurveModule`) to
  * create a {@link CurveModule}.  Each module contains sub-modules for field arithmetic
  * ({@link FieldModule} `fr`, `fp`), curve arithmetic ({@link G1Module}, {@link G2Module}),
- * NTT ({@link NTTModule}), and MSM ({@link MSMModule}, {@link G2MSMModule}).
+ * NTT ({@link NTTModule}), and MSM ({@link G1MSMModule}, {@link G2MSMModule}).
  *
  * ## Coordinate conventions
  *
@@ -82,8 +82,8 @@ export type {
   FieldModule,
   G1Module,
   G2Module,
+  G1MSMModule,
   G2MSMModule,
-  MSMModule,
   NTTModule,
   SupportedCurveID,
 } from "./curvegpu/api.js";

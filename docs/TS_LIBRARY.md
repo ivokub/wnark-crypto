@@ -43,7 +43,7 @@ const base: CurveGPUAffinePoint = {
 };
 
 const doubled = await curve.g1.scalarMulAffine(base, scalarLE(2));
-const msm = await curve.msm.pippengerAffine([base, base], [scalarLE(1), scalarLE(1)]);
+const msm = await curve.g1msm.pippengerAffine([base, base], [scalarLE(1), scalarLE(1)]);
 
 context.close();
 ```

@@ -145,7 +145,7 @@ async function runExample(curveId: SupportedCurveID, log: (lines: string[]) => v
   }
   const base2 = await curve.g1.jacobianToAffine(await curve.g1.scalarMulAffine(base, scalarLE(2)));
   const tripleByScalarMul = await curve.g1.jacobianToAffine(await curve.g1.scalarMulAffine(base, scalarLE(3)));
-  const tripleByMSM = await curve.g1.jacobianToAffine(await curve.msm.pippengerAffine([base, base2], [scalarLE(1), scalarLE(1)]));
+  const tripleByMSM = await curve.g1.jacobianToAffine(await curve.g1msm.pippengerAffine([base, base2], [scalarLE(1), scalarLE(1)]));
   lines.push("4. G1 scalar mul + MSM... OK");
   lines.push(`g1_scalar_msm_equal = ${String(equalAffine(tripleByScalarMul, tripleByMSM))}`);
   lines.push(`g1_result.x = 0x${shortHex(tripleByScalarMul.x)}`);

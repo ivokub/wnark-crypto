@@ -154,7 +154,7 @@ export async function runSuite(module: CurveModule, log: (msg: string) => void):
   log("msm_naive_affine: OK");
 
   const window = 4;
-  const pippengerResults = await module.msm.pippengerAffineBatch(
+  const pippengerResults = await module.g1msm.pippengerAffineBatch(
     vectors.msm_cases.flatMap((item) => item.bases_affine.map(affineFromHex)),
     vectors.msm_cases.flatMap((item) => item.scalars_bytes_le.map((value) => hexToBytes(value) as CurveGPUElementBytes)),
     {
@@ -163,8 +163,8 @@ export async function runSuite(module: CurveModule, log: (msg: string) => void):
       window,
     },
   );
-  expectPointBatch(`msm_pippenger_affine (window=${window})`, pippengerResults, vectors.msm_cases.map((item) => item.expected_affine));
-  log(`msm_pippenger_affine (window=${window}): OK`);
+  expectPointBatch(`msm_jac_pippenger_affine_input (window=${window})`, pippengerResults, vectors.msm_cases.map((item) => item.expected_affine));
+  log(`msm_jac_pippenger_affine_input (window=${window}): OK`);
 
   log("");
   log(`PASS: ${curveDisplayName(module.id)} G1 MSM browser smoke succeeded`);

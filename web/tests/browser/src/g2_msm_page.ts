@@ -246,8 +246,8 @@ export async function runSuite(module: CurveModule, log: (msg: string) => void):
       window,
     },
   );
-  await expectJacobianBatchAffineEqual(module, `msm_pippenger_affine (window=${window})`, pippengerResults, vectors.msm_cases.map((item) => item.expected_affine));
-  log(`msm_pippenger_affine (window=${window}): OK`);
+  await expectJacobianBatchAffineEqual(module, `msm_jac_pippenger_affine_input (window=${window})`, pippengerResults, vectors.msm_cases.map((item) => item.expected_affine));
+  log(`msm_jac_pippenger_affine_input (window=${window}): OK`);
 
   const oneMontC0 = await module.fp.montOne();
   const packedBases = packAffinePointsWithOneZ(

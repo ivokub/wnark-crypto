@@ -6,7 +6,7 @@ import type {
   CurveGPUPackedPointLayout,
   FieldModule,
   G1Module,
-  MSMModule,
+  G1MSMModule,
   SupportedCurveID,
   CurveGPUMSMOptions,
 } from "./api.js";
@@ -81,7 +81,7 @@ function packScalarWordsPacked(scalarsPacked: Uint8Array): Uint32Array {
   return out;
 }
 
-export function createMSMModule(
+export function createG1MSMModule(
   context: CurveGPUContext,
   options: {
     curve: SupportedCurveID;
@@ -91,7 +91,7 @@ export function createMSMModule(
   },
   fp: FieldModule,
   g1: G1Module,
-): MSMModule {
+): G1MSMModule {
   const { curve, coordinateBytes, pointBytes, runtime } = options;
   const label = `${curve}-g1-msm`;
 

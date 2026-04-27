@@ -3,7 +3,7 @@ import { createFieldModule } from "./field_module.js";
 import { createG1Module } from "./g1_module.js";
 import { createG2Module } from "./g2_module.js";
 import { createG2MSMModule } from "./g2_msm_module.js";
-import { createMSMModule } from "./msm_module.js";
+import { createG1MSMModule } from "./msm_module.js";
 import { buildJacPippengerRuntime } from "./msm_pippenger.js";
 import { createNTTModule } from "./ntt_module.js";
 import { buildPipelineRegistry } from "./pipeline_registry.js";
@@ -260,7 +260,7 @@ export async function createCurveModule(context: CurveGPUContext, curve: Support
       },
       fr,
     ),
-    msm: createMSMModule(
+    g1msm: createG1MSMModule(
       context,
       {
         curve: definition.id,
