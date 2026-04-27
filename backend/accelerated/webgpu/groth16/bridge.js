@@ -179,10 +179,16 @@ async function msmG2(handle, vectorName, scalarsPacked) {
   return out;
 }
 
+async function computeH(curve, aPacked, bPacked, cPacked) {
+  const module = await getCurveModule(curve);
+  return module.ntt.computeGroth16QuotientPackedRegular(cloneBytes(aPacked), cloneBytes(bPacked), cloneBytes(cPacked));
+}
+
 globalThis.wnarkGroth16WebGPU = {
   init,
   prepareKey,
   releaseKey,
   msmG1,
   msmG2,
+  computeH,
 };

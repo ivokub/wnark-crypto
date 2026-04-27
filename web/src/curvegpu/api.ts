@@ -411,6 +411,14 @@ export interface NTTModule {
   forwardPackedMont(values: Uint8Array): Promise<Uint8Array>;
   /** Run the inverse NTT over packed Montgomery-form field elements. */
   inversePackedMont(values: Uint8Array): Promise<Uint8Array>;
+  /**
+   * Compute the Groth16 quotient vector H from packed regular little-endian
+   * A, B, and C witness polynomials already padded to the FFT domain size.
+   *
+   * The returned packed vector is in regular little-endian coefficient form
+   * and has the same element count as the padded inputs.
+   */
+  computeGroth16QuotientPackedRegular(a: Uint8Array, b: Uint8Array, c: Uint8Array): Promise<Uint8Array>;
 }
 
 /**

@@ -11,7 +11,6 @@ import (
 	curve "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	bls12381fp "github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
 	bls12381fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
-	bls12381fft "github.com/consensys/gnark-crypto/ecc/bls12-381/fr/fft"
 	"github.com/consensys/gnark/backend"
 	native "github.com/consensys/gnark/backend/groth16/bls12-381"
 	"github.com/consensys/gnark/backend/witness"
@@ -57,7 +56,10 @@ func proveBLS12381(r1cs *cs.R1CS, pk *BLS12381ProvingKey, fullWitness witness.Wi
 	solution := _solution.(*cs.R1CSSolution)
 	wireValues := []bls12381fr.Element(solution.W)
 
-	h := computeHBLS12381(solution.A, solution.B, solution.C, &pk.Domain)
+	h, err := bridgeComputeHBLS12381(solution.A, solution.B, solution.C, int(pk.Domain.Cardinality))
+	if err != nil {
+		return nil, fmt.Errorf("webgpu groth16 bls12_381: quotient H: %w", err)
+	}
 	wireValuesA := filterWireValuesBLS12381(wireValues, pk.InfinityA)
 	wireValuesB := filterWireValuesBLS12381(wireValues, pk.InfinityB)
 	privateWireValues := append([]bls12381fr.Element(nil), wireValues[r1cs.GetNbPublicVariables():]...)
@@ -178,35 +180,11 @@ func filterWireValuesBLS12381(values []bls12381fr.Element, infinity []bool) []bl
 	return out
 }
 
-func computeHBLS12381(a, b, c []bls12381fr.Element, domain *bls12381fft.Domain) []bls12381fr.Element {
-	n := len(a)
-	padding := make([]bls12381fr.Element, int(domain.Cardinality)-n)
-	a = append(a, padding...)
-	b = append(b, padding...)
-	c = append(c, padding...)
-	n = len(a)
-
-	domain.FFTInverse(a, bls12381fft.DIF)
-	domain.FFTInverse(b, bls12381fft.DIF)
-	domain.FFTInverse(c, bls12381fft.DIF)
-
-	domain.FFT(a, bls12381fft.DIT, bls12381fft.OnCoset())
-	domain.FFT(b, bls12381fft.DIT, bls12381fft.OnCoset())
-	domain.FFT(c, bls12381fft.DIT, bls12381fft.OnCoset())
-
-	var den, one bls12381fr.Element
-	one.SetOne()
-	den.Exp(domain.FrMultiplicativeGen, big.NewInt(int64(domain.Cardinality)))
-	den.Sub(&den, &one).Inverse(&den)
-
-	for i := 0; i < n; i++ {
-		a[i].Mul(&a[i], &b[i]).
-			Sub(&a[i], &c[i]).
-			Mul(&a[i], &den)
-	}
-
-	domain.FFTInverse(a, bls12381fft.DIF, bls12381fft.OnCoset())
-	return a
+func bridgeComputeHBLS12381(a, b, c []bls12381fr.Element, domainSize int) ([]bls12381fr.Element, error) {
+	aPacked := packBLS12381FrVectorRegularLE(padBLS12381FrVector(a, domainSize))
+	bPacked := packBLS12381FrVectorRegularLE(padBLS12381FrVector(b, domainSize))
+	cPacked := packBLS12381FrVectorRegularLE(padBLS12381FrVector(c, domainSize))
+	return unpackBLS12381FrVectorRegularLE(bridgeComputeH("bls12_381", aPacked, bPacked, cPacked))
 }
 
 func packBLS12381FrVectorRegularLE(values []bls12381fr.Element) []byte {
@@ -216,6 +194,32 @@ func packBLS12381FrVectorRegularLE(values []bls12381fr.Element) []byte {
 		out = append(out, reverseBytes(be[:])...)
 	}
 	return out
+}
+
+func padBLS12381FrVector(values []bls12381fr.Element, size int) []bls12381fr.Element {
+	out := make([]bls12381fr.Element, size)
+	copy(out, values)
+	return out
+}
+
+func unpackBLS12381FrVectorRegularLE(packed []byte, err error) ([]bls12381fr.Element, error) {
+	if err != nil {
+		return nil, err
+	}
+	if len(packed)%bls12381FrBytes != 0 {
+		return nil, fmt.Errorf("webgpu groth16 bls12_381: expected a multiple of %d fr bytes, got %d", bls12381FrBytes, len(packed))
+	}
+	count := len(packed) / bls12381FrBytes
+	out := make([]bls12381fr.Element, count)
+	var canonical [bls12381FrBytes]byte
+	for i := 0; i < count; i++ {
+		src := packed[i*bls12381FrBytes : (i+1)*bls12381FrBytes]
+		for j := 0; j < bls12381FrBytes; j++ {
+			canonical[bls12381FrBytes-1-j] = src[j]
+		}
+		out[i].SetBytes(canonical[:])
+	}
+	return out, nil
 }
 
 func packBLS12381G1AffineJacobianBatch(points []curve.G1Affine) []byte {

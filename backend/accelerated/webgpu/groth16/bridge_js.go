@@ -140,3 +140,17 @@ func bridgeMSMG2(handle, vectorName string, scalarsPacked []byte) ([]byte, error
 	}
 	return goBytes(value)
 }
+
+func bridgeComputeH(curve string, aPacked, bPacked, cPacked []byte) ([]byte, error) {
+	value, err := callPromise(
+		"computeH",
+		curve,
+		jsUint8Array(aPacked),
+		jsUint8Array(bPacked),
+		jsUint8Array(cPacked),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return goBytes(value)
+}

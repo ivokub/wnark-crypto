@@ -24,6 +24,8 @@ declare const GPUBufferUsage: {
 
 const VECTOR_OP_MUL_FACTORS = 3;
 const VECTOR_OP_BIT_REVERSE_COPY = 4;
+const FIELD_OP_SUB = 4;
+const FIELD_OP_MUL = 9;
 const FIELD_OP_TO_MONT = 11;
 const FIELD_OP_FROM_MONT = 12;
 const UNIFORM_WORDS = 8;
@@ -33,6 +35,9 @@ type DomainMetadata = {
   omega_hex: string;
   omega_inv_hex: string;
   cardinality_inv_hex: string;
+  coset_gen_hex: string;
+  coset_gen_inv_hex: string;
+  coset_den_inv_hex: string;
 };
 
 type DomainMetadataFile = {
@@ -44,6 +49,10 @@ type PreparedDomain = {
   inverseStageMont: Uint8Array[];
   inverseScaleMont: Uint8Array;
   inverseScaleFactorsPackedMont: Uint8Array;
+  cosetPowersPackedMont: Uint8Array;
+  inverseCosetPowersPackedMont: Uint8Array;
+  cosetDenInvMont: Uint8Array;
+  cosetDenInvFactorsPackedMont: Uint8Array;
 };
 
 function hexToBigInt(hex: string): bigint {
@@ -85,6 +94,16 @@ function repeatPackedElement(value: Uint8Array, count: number): Uint8Array {
   const out = new Uint8Array(value.byteLength * count);
   for (let i = 0; i < count; i += 1) {
     out.set(value, i * value.byteLength);
+  }
+  return out;
+}
+
+function buildPowerVectorPackedRegular(base: bigint, count: number, modulus: bigint, elementBytes: number): Uint8Array {
+  const out = new Uint8Array(count * elementBytes);
+  let acc = 1n;
+  for (let i = 0; i < count; i += 1) {
+    out.set(bigIntToBytesLE(acc, elementBytes), i * elementBytes);
+    acc = (acc * base) % modulus;
   }
   return out;
 }
@@ -156,11 +175,22 @@ export function createNTTModule(
         ),
       );
       const inverseScaleMont = await fr.toMontgomery(bigIntToBytesLE(hexToBigInt(domain.cardinality_inv_hex), elementBytes));
+      const cosetPowersPackedMont = await fr.toMontgomeryPacked(
+        buildPowerVectorPackedRegular(hexToBigInt(domain.coset_gen_hex), size, modulus, elementBytes),
+      );
+      const inverseCosetPowersPackedMont = await fr.toMontgomeryPacked(
+        buildPowerVectorPackedRegular(hexToBigInt(domain.coset_gen_inv_hex), size, modulus, elementBytes),
+      );
+      const cosetDenInvMont = await fr.toMontgomery(bigIntToBytesLE(hexToBigInt(domain.coset_den_inv_hex), elementBytes));
       return {
         forwardStageMont,
         inverseStageMont,
         inverseScaleMont,
         inverseScaleFactorsPackedMont: repeatPackedElement(inverseScaleMont, size),
+        cosetPowersPackedMont,
+        inverseCosetPowersPackedMont,
+        cosetDenInvMont,
+        cosetDenInvFactorsPackedMont: repeatPackedElement(cosetDenInvMont, size),
       };
     })();
     domainCache.set(size, promise);
@@ -200,6 +230,25 @@ export function createNTTModule(
       inputB: factorBytes,
       outputBytes: count * elementBytes,
       uniformWords: Uint32Array.from([count, opcode, logCount, 0, 0, 0, 0, 0]),
+      workgroups: Math.ceil(count / kernel.workgroupSize),
+    });
+  }
+
+  async function runFieldOpPacked(opcode: number, inputA: Uint8Array, inputB: Uint8Array): Promise<Uint8Array> {
+    const count = ensurePackedElements(inputA, elementBytes, `${label}.fieldPackedA`);
+    if (inputB.byteLength !== inputA.byteLength) {
+      throw new Error(`${label}.fieldPackedB: expected ${inputA.byteLength} bytes, got ${inputB.byteLength}`);
+    }
+    const kernel = await getFieldKernel();
+    return runSimpleKernel({
+      device: context.device,
+      pool: context.bufferPool,
+      kernel,
+      label: `${label}-field-packed-${opcode}`,
+      inputA,
+      inputB,
+      outputBytes: count * elementBytes,
+      uniformWords: Uint32Array.from([count, opcode, 0, 0, 0, 0, 0, 0]),
       workgroups: Math.ceil(count / kernel.workgroupSize),
     });
   }
@@ -437,6 +486,57 @@ export function createNTTModule(
     },
     async inversePackedRegular(values: Uint8Array): Promise<Uint8Array> {
       return runPipelinePacked({ values, inverse: true, inputRegular: true, outputRegular: true });
+    },
+    async computeGroth16QuotientPackedRegular(a: Uint8Array, b: Uint8Array, c: Uint8Array): Promise<Uint8Array> {
+      const count = ensurePackedElements(a, elementBytes, `${label}.groth16.a`);
+      if (b.byteLength !== a.byteLength || c.byteLength !== a.byteLength) {
+        throw new Error(`${label}: Groth16 quotient inputs must have identical packed lengths`);
+      }
+      if (count === 0 || (count & (count - 1)) !== 0) {
+        throw new Error(`${label}: Groth16 quotient input length must be a non-zero power of two`);
+      }
+
+      const domain = await prepareDomain(count);
+      const [aMont, bMont, cMont] = await Promise.all([
+        fr.toMontgomeryPacked(a),
+        fr.toMontgomeryPacked(b),
+        fr.toMontgomeryPacked(c),
+      ]);
+      const [aCoeffMont, bCoeffMont, cCoeffMont] = await Promise.all([
+        runPipelinePacked({ values: aMont, inverse: true, inputRegular: false, outputRegular: false }),
+        runPipelinePacked({ values: bMont, inverse: true, inputRegular: false, outputRegular: false }),
+        runPipelinePacked({ values: cMont, inverse: true, inputRegular: false, outputRegular: false }),
+      ]);
+      const [aCosetInputMont, bCosetInputMont, cCosetInputMont] = await Promise.all([
+        runVectorOpPacked(VECTOR_OP_MUL_FACTORS, aCoeffMont, domain.cosetPowersPackedMont),
+        runVectorOpPacked(VECTOR_OP_MUL_FACTORS, bCoeffMont, domain.cosetPowersPackedMont),
+        runVectorOpPacked(VECTOR_OP_MUL_FACTORS, cCoeffMont, domain.cosetPowersPackedMont),
+      ]);
+      const [aCosetMont, bCosetMont, cCosetMont] = await Promise.all([
+        runPipelinePacked({ values: aCosetInputMont, inverse: false, inputRegular: false, outputRegular: false }),
+        runPipelinePacked({ values: bCosetInputMont, inverse: false, inputRegular: false, outputRegular: false }),
+        runPipelinePacked({ values: cCosetInputMont, inverse: false, inputRegular: false, outputRegular: false }),
+      ]);
+      const abCosetMont = await runFieldOpPacked(FIELD_OP_MUL, aCosetMont, bCosetMont);
+      const numeratorCosetMont = await runFieldOpPacked(FIELD_OP_SUB, abCosetMont, cCosetMont);
+      const scaledCosetMont = await runVectorOpPacked(
+        VECTOR_OP_MUL_FACTORS,
+        numeratorCosetMont,
+        domain.cosetDenInvFactorsPackedMont,
+      );
+      const hShiftedCoeffMont = await runPipelinePacked({
+        values: scaledCosetMont,
+        inverse: true,
+        inputRegular: false,
+        outputRegular: false,
+      });
+      const hCoeffMont = await runVectorOpPacked(
+        VECTOR_OP_MUL_FACTORS,
+        hShiftedCoeffMont,
+        domain.inverseCosetPowersPackedMont,
+      );
+      const hCoeffRegular = await fr.fromMontgomeryPacked(hCoeffMont);
+      return runVectorOpPacked(VECTOR_OP_BIT_REVERSE_COPY, hCoeffRegular, undefined, Math.round(Math.log2(count)));
     },
   };
 }

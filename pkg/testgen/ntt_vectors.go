@@ -22,6 +22,9 @@ type BN254NTTDomainJSON struct {
 	OmegaHex          string `json:"omega_hex"`
 	OmegaInvHex       string `json:"omega_inv_hex"`
 	CardinalityInvHex string `json:"cardinality_inv_hex"`
+	CosetGenHex       string `json:"coset_gen_hex"`
+	CosetGenInvHex    string `json:"coset_gen_inv_hex"`
+	CosetDenInvHex    string `json:"coset_den_inv_hex"`
 }
 
 type BN254NTTVectorsJSON struct {
@@ -46,12 +49,19 @@ func BuildBN254NTTDomainFile(minLog, maxLog int) BN254NTTDomainFileJSON {
 	for logN := minLog; logN <= maxLog; logN++ {
 		size := 1 << logN
 		domain := gnarkfft.NewDomain(uint64(size))
+		var cosetDenInv, one gnarkbn254fr.Element
+		one.SetOne()
+		cosetDenInv.Exp(domain.FrMultiplicativeGen, big.NewInt(int64(domain.Cardinality)))
+		cosetDenInv.Sub(&cosetDenInv, &one).Inverse(&cosetDenInv)
 		out.Domains = append(out.Domains, BN254NTTDomainJSON{
 			LogN:              logN,
 			Size:              size,
 			OmegaHex:          domain.Generator.BigInt(new(big.Int)).Text(16),
 			OmegaInvHex:       domain.GeneratorInv.BigInt(new(big.Int)).Text(16),
 			CardinalityInvHex: domain.CardinalityInv.BigInt(new(big.Int)).Text(16),
+			CosetGenHex:       domain.FrMultiplicativeGen.BigInt(new(big.Int)).Text(16),
+			CosetGenInvHex:    domain.FrMultiplicativeGenInv.BigInt(new(big.Int)).Text(16),
+			CosetDenInvHex:    cosetDenInv.BigInt(new(big.Int)).Text(16),
 		})
 	}
 	return out
@@ -73,12 +83,19 @@ func BuildBLS12381NTTDomainFile(minLog, maxLog int) BN254NTTDomainFileJSON {
 	for logN := minLog; logN <= maxLog; logN++ {
 		size := 1 << logN
 		domain := gnarkbls12381fft.NewDomain(uint64(size))
+		var cosetDenInv, one gnarkbls12381fr.Element
+		one.SetOne()
+		cosetDenInv.Exp(domain.FrMultiplicativeGen, big.NewInt(int64(domain.Cardinality)))
+		cosetDenInv.Sub(&cosetDenInv, &one).Inverse(&cosetDenInv)
 		out.Domains = append(out.Domains, BN254NTTDomainJSON{
 			LogN:              logN,
 			Size:              size,
 			OmegaHex:          domain.Generator.BigInt(new(big.Int)).Text(16),
 			OmegaInvHex:       domain.GeneratorInv.BigInt(new(big.Int)).Text(16),
 			CardinalityInvHex: domain.CardinalityInv.BigInt(new(big.Int)).Text(16),
+			CosetGenHex:       domain.FrMultiplicativeGen.BigInt(new(big.Int)).Text(16),
+			CosetGenInvHex:    domain.FrMultiplicativeGenInv.BigInt(new(big.Int)).Text(16),
+			CosetDenInvHex:    cosetDenInv.BigInt(new(big.Int)).Text(16),
 		})
 	}
 	return out

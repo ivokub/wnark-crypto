@@ -11,7 +11,6 @@ import (
 	curve "github.com/consensys/gnark-crypto/ecc/bn254"
 	bn254fp "github.com/consensys/gnark-crypto/ecc/bn254/fp"
 	bn254fr "github.com/consensys/gnark-crypto/ecc/bn254/fr"
-	bn254fft "github.com/consensys/gnark-crypto/ecc/bn254/fr/fft"
 	"github.com/consensys/gnark/backend"
 	native "github.com/consensys/gnark/backend/groth16/bn254"
 	"github.com/consensys/gnark/backend/witness"
@@ -57,7 +56,10 @@ func proveBN254(r1cs *cs.R1CS, pk *BN254ProvingKey, fullWitness witness.Witness,
 	solution := _solution.(*cs.R1CSSolution)
 	wireValues := []bn254fr.Element(solution.W)
 
-	h := computeHBN254(solution.A, solution.B, solution.C, &pk.Domain)
+	h, err := bridgeComputeHBN254(solution.A, solution.B, solution.C, int(pk.Domain.Cardinality))
+	if err != nil {
+		return nil, fmt.Errorf("webgpu groth16 bn254: quotient H: %w", err)
+	}
 	wireValuesA := filterWireValuesBN254(wireValues, pk.InfinityA)
 	wireValuesB := filterWireValuesBN254(wireValues, pk.InfinityB)
 	privateWireValues := append([]bn254fr.Element(nil), wireValues[r1cs.GetNbPublicVariables():]...)
@@ -178,35 +180,11 @@ func filterWireValuesBN254(values []bn254fr.Element, infinity []bool) []bn254fr.
 	return out
 }
 
-func computeHBN254(a, b, c []bn254fr.Element, domain *bn254fft.Domain) []bn254fr.Element {
-	n := len(a)
-	padding := make([]bn254fr.Element, int(domain.Cardinality)-n)
-	a = append(a, padding...)
-	b = append(b, padding...)
-	c = append(c, padding...)
-	n = len(a)
-
-	domain.FFTInverse(a, bn254fft.DIF)
-	domain.FFTInverse(b, bn254fft.DIF)
-	domain.FFTInverse(c, bn254fft.DIF)
-
-	domain.FFT(a, bn254fft.DIT, bn254fft.OnCoset())
-	domain.FFT(b, bn254fft.DIT, bn254fft.OnCoset())
-	domain.FFT(c, bn254fft.DIT, bn254fft.OnCoset())
-
-	var den, one bn254fr.Element
-	one.SetOne()
-	den.Exp(domain.FrMultiplicativeGen, big.NewInt(int64(domain.Cardinality)))
-	den.Sub(&den, &one).Inverse(&den)
-
-	for i := 0; i < n; i++ {
-		a[i].Mul(&a[i], &b[i]).
-			Sub(&a[i], &c[i]).
-			Mul(&a[i], &den)
-	}
-
-	domain.FFTInverse(a, bn254fft.DIF, bn254fft.OnCoset())
-	return a
+func bridgeComputeHBN254(a, b, c []bn254fr.Element, domainSize int) ([]bn254fr.Element, error) {
+	aPacked := packBN254FrVectorRegularLE(padBN254FrVector(a, domainSize))
+	bPacked := packBN254FrVectorRegularLE(padBN254FrVector(b, domainSize))
+	cPacked := packBN254FrVectorRegularLE(padBN254FrVector(c, domainSize))
+	return unpackBN254FrVectorRegularLE(bridgeComputeH("bn254", aPacked, bPacked, cPacked))
 }
 
 func packBN254FrVectorRegularLE(values []bn254fr.Element) []byte {
@@ -216,6 +194,32 @@ func packBN254FrVectorRegularLE(values []bn254fr.Element) []byte {
 		out = append(out, reverseBytes(be[:])...)
 	}
 	return out
+}
+
+func padBN254FrVector(values []bn254fr.Element, size int) []bn254fr.Element {
+	out := make([]bn254fr.Element, size)
+	copy(out, values)
+	return out
+}
+
+func unpackBN254FrVectorRegularLE(packed []byte, err error) ([]bn254fr.Element, error) {
+	if err != nil {
+		return nil, err
+	}
+	if len(packed)%bn254FrBytes != 0 {
+		return nil, fmt.Errorf("webgpu groth16 bn254: expected a multiple of %d fr bytes, got %d", bn254FrBytes, len(packed))
+	}
+	count := len(packed) / bn254FrBytes
+	out := make([]bn254fr.Element, count)
+	var canonical [bn254FrBytes]byte
+	for i := 0; i < count; i++ {
+		src := packed[i*bn254FrBytes : (i+1)*bn254FrBytes]
+		for j := 0; j < bn254FrBytes; j++ {
+			canonical[bn254FrBytes-1-j] = src[j]
+		}
+		out[i].SetBytes(canonical[:])
+	}
+	return out, nil
 }
 
 func packBN254G1AffineJacobianBatch(points []curve.G1Affine) []byte {

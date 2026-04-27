@@ -21,8 +21,8 @@ import (
 // Prove runs the Groth16 prover with browser/WebGPU acceleration on supported
 // wasm targets.
 //
-// The current implementation accelerates the heavy MSM stages and leaves
-// witness solving and H computation in Go. Commitment-carrying circuits are
+// The current implementation accelerates the heavy quotient-H and MSM stages
+// while leaving witness solving in Go. Commitment-carrying circuits are
 // rejected for now.
 func Prove(r1cs constraint.ConstraintSystem, pk gnarkgroth16.ProvingKey, fullWitness witness.Witness, opts ...backend.ProverOption) (gnarkgroth16.Proof, error) {
 	switch _r1cs := r1cs.(type) {

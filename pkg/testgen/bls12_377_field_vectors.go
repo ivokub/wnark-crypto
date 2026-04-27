@@ -112,12 +112,19 @@ func BuildBLS12377NTTDomainFile(minLog, maxLog int) BN254NTTDomainFileJSON {
 	for logN := minLog; logN <= maxLog; logN++ {
 		size := 1 << logN
 		domain := gnarkbls12377fft.NewDomain(uint64(size))
+		var cosetDenInv, one gnarkbls12377fr.Element
+		one.SetOne()
+		cosetDenInv.Exp(domain.FrMultiplicativeGen, big.NewInt(int64(domain.Cardinality)))
+		cosetDenInv.Sub(&cosetDenInv, &one).Inverse(&cosetDenInv)
 		out.Domains = append(out.Domains, BN254NTTDomainJSON{
 			LogN:              logN,
 			Size:              size,
 			OmegaHex:          domain.Generator.BigInt(new(big.Int)).Text(16),
 			OmegaInvHex:       domain.GeneratorInv.BigInt(new(big.Int)).Text(16),
 			CardinalityInvHex: domain.CardinalityInv.BigInt(new(big.Int)).Text(16),
+			CosetGenHex:       domain.FrMultiplicativeGen.BigInt(new(big.Int)).Text(16),
+			CosetGenInvHex:    domain.FrMultiplicativeGenInv.BigInt(new(big.Int)).Text(16),
+			CosetDenInvHex:    cosetDenInv.BigInt(new(big.Int)).Text(16),
 		})
 	}
 	return out
