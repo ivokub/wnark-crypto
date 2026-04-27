@@ -72,6 +72,15 @@ const CONFIGS: Record<string, VectorConfig> = {
     arithLabel: "bn254-fr",
     vectorLabel: "bn254-fr-vector",
   },
+  bls12_377: {
+    curve: "bls12_377",
+    title: "BLS12-377 fr Vector Ops Browser Smoke",
+    vectorPath: "/testdata/vectors/fr/bls12_377_fr_vector_ops.json",
+    arithShaderPath: "/shaders/curves/bls12_377/fr_arith.wgsl",
+    vectorShaderPath: "/shaders/curves/bls12_377/fr_vector.wgsl",
+    arithLabel: "bls12-377-fr",
+    vectorLabel: "bls12-377-fr-vector",
+  },
   bls12_381: {
     curve: "bls12_381",
     title: "BLS12-381 fr Vector Ops Browser Smoke",

@@ -94,7 +94,7 @@
       <h1>Groth16 Go WASM POC</h1>
       <p>
         This page compares an end-to-end Groth16 proof flow in the browser for fixed
-        no-commitment circuit fixtures on BN254 or BLS12-381. One path uses the local
+        no-commitment circuit fixtures on BN254, BLS12-377, or BLS12-381. One path uses the local
         WebGPU-accelerated prover package in this repo; the other uses native gnark Groth16
         compiled to wasm. The benchmark loads a serialized circuit and proving/verification
         keys, builds the witness, proves, serializes the proof, deserializes it, and verifies it.
@@ -113,6 +113,7 @@
           curve
           <select id="curve">
             <option value="bn254">bn254</option>
+            <option value="bls12_377">bls12_377</option>
             <option value="bls12_381">bls12_381</option>
           </select>
         </label>

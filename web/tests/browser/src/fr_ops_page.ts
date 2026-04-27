@@ -43,11 +43,16 @@ type FrOpsConfig = {
   vectorPath: string;
 };
 
-const CONFIGS: Record<SupportedCurveID, FrOpsConfig> = {
+const CONFIGS: Partial<Record<SupportedCurveID, FrOpsConfig>> = {
   bn254: {
     curve: "bn254",
     title: "BN254 fr Ops Browser Smoke",
     vectorPath: "/testdata/vectors/fr/bn254_fr_ops.json",
+  },
+  bls12_377: {
+    curve: "bls12_377",
+    title: "BLS12-377 fr Ops Browser Smoke",
+    vectorPath: "/testdata/vectors/fr/bls12_377_fr_ops.json",
   },
   bls12_381: {
     curve: "bls12_381",
@@ -107,6 +112,9 @@ function mustFindConvertCase(cases: readonly ConvertCase[], name: string): Conve
 
 export async function runSuite(module: CurveModule, log: (msg: string) => void): Promise<{ passed: number; failed: number }> {
   const config = CONFIGS[module.id];
+  if (!config) {
+    throw new Error(`fr ops vectors unavailable for curve ${module.id}`);
+  }
   log(`=== ${config.title} ===`);
   log("");
   const vectors = await fetchJSON<FROpsVectors>(config.vectorPath);

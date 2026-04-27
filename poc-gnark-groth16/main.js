@@ -49,7 +49,7 @@ function applyQueryDefaults() {
   if (impl && ["both", "webgpu-go", "native-go"].includes(impl)) {
     implSelect.value = impl;
   }
-  if (curve && ["bn254", "bls12_381"].includes(curve)) {
+  if (curve && ["bn254", "bls12_377", "bls12_381"].includes(curve)) {
     curveSelect.value = curve;
   }
   if (sizeLog && ["12", "15", "18"].includes(sizeLog)) {

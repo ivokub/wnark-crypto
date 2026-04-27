@@ -55,8 +55,8 @@ poc-wasm-fixture-bls12_381-2pow18:
 poc-gnark-groth16-build: web-build
 	mkdir -p poc-gnark-groth16/dist
 	cp "$$(go env GOROOT)/lib/wasm/wasm_exec.js" poc-gnark-groth16/dist/wasm_exec.js
-	GOMODCACHE=$$(pwd)/.gomodcache GOCACHE=$$(pwd)/.gocache GOFLAGS='-buildvcs=false' GOOS=js GOARCH=wasm go build -o poc-gnark-groth16/dist/go-webgpu.wasm ./poc-gnark-groth16/go-webgpu
-	GOMODCACHE=$$(pwd)/.gomodcache GOCACHE=$$(pwd)/.gocache GOFLAGS='-buildvcs=false' GOOS=js GOARCH=wasm go build -o poc-gnark-groth16/dist/go-native.wasm ./poc-gnark-groth16/go-native
+	GOCACHE=$$(pwd)/.gocache GOFLAGS='-buildvcs=false' GOOS=js GOARCH=wasm go build -o poc-gnark-groth16/dist/go-webgpu.wasm ./poc-gnark-groth16/go-webgpu
+	GOCACHE=$$(pwd)/.gocache GOFLAGS='-buildvcs=false' GOOS=js GOARCH=wasm go build -o poc-gnark-groth16/dist/go-native.wasm ./poc-gnark-groth16/go-native
 
 poc-gnark-groth16-fixtures:
-	GOMODCACHE=$$(pwd)/.gomodcache GOCACHE=$$(pwd)/.gocache GOFLAGS='-buildvcs=false' go run ./cmd/poc-gnark-groth16-fixtures -curve $(FIXTURE_CURVE) -logs $(FIXTURE_LOGS)
+	GOCACHE=$$(pwd)/.gocache GOFLAGS='-buildvcs=false' go run ./cmd/poc-gnark-groth16-fixtures -curve $(FIXTURE_CURVE) -logs $(FIXTURE_LOGS)

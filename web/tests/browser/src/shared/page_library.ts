@@ -8,14 +8,21 @@ import {
 
 export function getRequestedCurveId(search = window.location.search): SupportedCurveID {
   const curve = new URLSearchParams(search).get("curve") ?? "bn254";
-  if (curve !== "bn254" && curve !== "bls12_381") {
+  if (curve !== "bn254" && curve !== "bls12_377" && curve !== "bls12_381") {
     throw new Error(`unsupported curve: ${curve}`);
   }
   return curve;
 }
 
 export function curveDisplayName(curve: SupportedCurveID): string {
-  return curve === "bn254" ? "BN254" : "BLS12-381";
+  switch (curve) {
+    case "bn254":
+      return "BN254";
+    case "bls12_377":
+      return "BLS12-377";
+    case "bls12_381":
+      return "BLS12-381";
+  }
 }
 
 export function appendContextDiagnostics(lines: string[], context: CurveGPUContext): void {

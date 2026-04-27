@@ -21,7 +21,7 @@ func main() {
 	var logsCSV string
 	var outDir string
 
-	flag.StringVar(&curveName, "curve", "all", "curve to generate: bn254, bls12_381, or all")
+	flag.StringVar(&curveName, "curve", "all", "curve to generate: bn254, bls12_377, bls12_381, or all")
 	flag.StringVar(&logsCSV, "logs", "12,15,18", "comma-separated circuit size logs")
 	flag.StringVar(&outDir, "out", "poc-gnark-groth16/fixtures", "output fixture root")
 	flag.Parse()
@@ -128,9 +128,11 @@ func parseLogs(csv string) ([]int, error) {
 func selectCurves(curveName string) ([]ecc.ID, error) {
 	switch curveName {
 	case "all":
-		return []ecc.ID{ecc.BN254, ecc.BLS12_381}, nil
+		return []ecc.ID{ecc.BN254, ecc.BLS12_377, ecc.BLS12_381}, nil
 	case "bn254":
 		return []ecc.ID{ecc.BN254}, nil
+	case "bls12_377":
+		return []ecc.ID{ecc.BLS12_377}, nil
 	case "bls12_381":
 		return []ecc.ID{ecc.BLS12_381}, nil
 	default:
@@ -142,6 +144,8 @@ func curveKey(curveID ecc.ID) string {
 	switch curveID {
 	case ecc.BN254:
 		return "bn254"
+	case ecc.BLS12_377:
+		return "bls12_377"
 	case ecc.BLS12_381:
 		return "bls12_381"
 	default:

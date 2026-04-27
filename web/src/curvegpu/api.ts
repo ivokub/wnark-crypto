@@ -6,7 +6,7 @@ export type { CurveGPUError, CurveGPUNotSupportedError, CurveGPUDeviceLostError,
 /**
  * Curves currently exposed by the browser library surface.
  */
-export type SupportedCurveID = "bn254" | "bls12_381";
+export type SupportedCurveID = "bn254" | "bls12_381" | "bls12_377";
 
 /**
  * Canonical byte representation for field and scalar values.

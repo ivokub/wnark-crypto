@@ -8,10 +8,12 @@ import (
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/backend"
 	gnarkgroth16 "github.com/consensys/gnark/backend/groth16"
+	gnarkgroth16bls12377 "github.com/consensys/gnark/backend/groth16/bls12-377"
 	gnarkgroth16bls12381 "github.com/consensys/gnark/backend/groth16/bls12-381"
 	gnarkgroth16bn254 "github.com/consensys/gnark/backend/groth16/bn254"
 	"github.com/consensys/gnark/backend/witness"
 	"github.com/consensys/gnark/constraint"
+	csbls12377 "github.com/consensys/gnark/constraint/bls12-377"
 	csbls12381 "github.com/consensys/gnark/constraint/bls12-381"
 	csbn254 "github.com/consensys/gnark/constraint/bn254"
 )
@@ -30,6 +32,12 @@ func Prove(r1cs constraint.ConstraintSystem, pk gnarkgroth16.ProvingKey, fullWit
 			return nil, fmt.Errorf("webgpu groth16: expected *BN254ProvingKey, got %T", pk)
 		}
 		return proveBN254(_r1cs, _tpk, fullWitness, opts...)
+	case *csbls12377.R1CS:
+		_tpk, ok := pk.(*BLS12377ProvingKey)
+		if !ok {
+			return nil, fmt.Errorf("webgpu groth16: expected *BLS12377ProvingKey, got %T", pk)
+		}
+		return proveBLS12377(_r1cs, _tpk, fullWitness, opts...)
 	case *csbls12381.R1CS:
 		_tpk, ok := pk.(*BLS12381ProvingKey)
 		if !ok {
@@ -49,6 +57,13 @@ func Setup(r1cs constraint.ConstraintSystem) (gnarkgroth16.ProvingKey, gnarkgrot
 		var pk BN254ProvingKey
 		var vk gnarkgroth16bn254.VerifyingKey
 		if err := gnarkgroth16bn254.Setup(_r1cs, &pk.ProvingKey, &vk); err != nil {
+			return nil, nil, err
+		}
+		return &pk, &vk, nil
+	case *csbls12377.R1CS:
+		var pk BLS12377ProvingKey
+		var vk gnarkgroth16bls12377.VerifyingKey
+		if err := gnarkgroth16bls12377.Setup(_r1cs, &pk.ProvingKey, &vk); err != nil {
 			return nil, nil, err
 		}
 		return &pk, &vk, nil
@@ -74,6 +89,12 @@ func DummySetup(r1cs constraint.ConstraintSystem) (gnarkgroth16.ProvingKey, erro
 			return nil, err
 		}
 		return &pk, nil
+	case *csbls12377.R1CS:
+		var pk BLS12377ProvingKey
+		if err := gnarkgroth16bls12377.DummySetup(_r1cs, &pk.ProvingKey); err != nil {
+			return nil, err
+		}
+		return &pk, nil
 	case *csbls12381.R1CS:
 		var pk BLS12381ProvingKey
 		if err := gnarkgroth16bls12381.DummySetup(_r1cs, &pk.ProvingKey); err != nil {
@@ -90,6 +111,8 @@ func NewProvingKey(curveID ecc.ID) gnarkgroth16.ProvingKey {
 	switch curveID {
 	case ecc.BN254:
 		return &BN254ProvingKey{}
+	case ecc.BLS12_377:
+		return &BLS12377ProvingKey{}
 	case ecc.BLS12_381:
 		return &BLS12381ProvingKey{}
 	default:
@@ -102,6 +125,8 @@ func NewProvingKey(curveID ecc.ID) gnarkgroth16.ProvingKey {
 func Prepare(pk gnarkgroth16.ProvingKey) error {
 	switch typed := pk.(type) {
 	case *BN254ProvingKey:
+		return typed.ensurePrepared()
+	case *BLS12377ProvingKey:
 		return typed.ensurePrepared()
 	case *BLS12381ProvingKey:
 		return typed.ensurePrepared()

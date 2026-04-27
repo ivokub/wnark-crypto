@@ -45,11 +45,16 @@ type G2MSMConfig = {
   vectorPath: string;
 };
 
-const CONFIGS: Record<SupportedCurveID, G2MSMConfig> = {
+const CONFIGS: Partial<Record<SupportedCurveID, G2MSMConfig>> = {
   bn254: {
     curve: "bn254",
     title: "BN254 G2 MSM Browser Smoke",
     vectorPath: "/testdata/vectors/g2/bn254_g2_msm.json?v=1",
+  },
+  bls12_377: {
+    curve: "bls12_377",
+    title: "BLS12-377 G2 MSM Browser Smoke",
+    vectorPath: "/testdata/vectors/g2/bls12_377_g2_msm.json",
   },
   bls12_381: {
     curve: "bls12_381",
@@ -209,6 +214,9 @@ async function naiveMSMAffine(
 
 export async function runSuite(module: CurveModule, log: (msg: string) => void): Promise<{ passed: number; failed: number }> {
   const config = CONFIGS[module.id];
+  if (!config) {
+    throw new Error(`g2 MSM vectors unavailable for curve ${module.id}`);
+  }
   log(`=== ${config.title} ===`);
   log("");
   const vectors = await fetchJSON<G2MSMVectors>(config.vectorPath);

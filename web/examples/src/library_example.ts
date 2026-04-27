@@ -8,7 +8,7 @@ import {
   type SupportedCurveID,
 } from "../../src/index.js";
 
-const EXAMPLE_BASES: Record<SupportedCurveID, CurveGPUAffinePoint> = {
+const EXAMPLE_BASES: Partial<Record<SupportedCurveID, CurveGPUAffinePoint>> = {
   bn254: {
     x: hexToBytes("9d0d8fc58d435dd33d0bc7f528eb780a2c4679786fa36e662fdf079ac1770a0e"),
     y: hexToBytes("3a1b1e8b1b87baa67b168eeb51d6f114588cf2f0de46ddcc5ebe0f3483ef141c"),
@@ -16,6 +16,10 @@ const EXAMPLE_BASES: Record<SupportedCurveID, CurveGPUAffinePoint> = {
   bls12_381: {
     x: hexToBytes("160c53fd9087b35cf5ff769967fc1778c1a13b14c7954f1547e7d0f3cd6aaef040f4db21cc6eceed75fb0b9e41770112"),
     y: hexToBytes("7122e70cd593acba8efd18791a63228cce250757135f59dd945140502958ac51c05900ad3f8c1c0e6aa20850fc3ebc0b"),
+  },
+  bls12_377: {
+    x: hexToBytes("efe91bb26eb1b9ea4e39cdff121548d55ccb37bdc8828218bb419daa2c1e958554ff87bf2562fcc8670a74fede488800"),
+    y: hexToBytes("a68e9c5555de82fd1a59a934363dfec20523b84fd42a186dd9523eca48b37fbdc4eeaf305d4f671fff2e10c5694a9101"),
   },
 };
 
@@ -29,14 +33,21 @@ function mustElement<T extends HTMLElement>(id: string): T {
 
 function getCurveId(): SupportedCurveID {
   const curve = new URLSearchParams(window.location.search).get("curve") ?? "bn254";
-  if (curve !== "bn254" && curve !== "bls12_381") {
+  if (curve !== "bn254" && curve !== "bls12_377" && curve !== "bls12_381") {
     throw new Error(`unsupported curve: ${curve}`);
   }
   return curve;
 }
 
 function curveLabel(curve: SupportedCurveID): string {
-  return curve === "bn254" ? "BN254" : "BLS12-381";
+  switch (curve) {
+    case "bn254":
+      return "BN254";
+    case "bls12_377":
+      return "BLS12-377";
+    case "bls12_381":
+      return "BLS12-381";
+  }
 }
 
 function hexToBytes(hex: string): Uint8Array {
@@ -129,6 +140,9 @@ async function runExample(curveId: SupportedCurveID, log: (lines: string[]) => v
   log(lines);
 
   const base = EXAMPLE_BASES[curveId];
+  if (!base) {
+    throw new Error(`example fixture unavailable for curve: ${curveId}`);
+  }
   const base2 = await curve.g1.jacobianToAffine(await curve.g1.scalarMulAffine(base, scalarLE(2)));
   const tripleByScalarMul = await curve.g1.jacobianToAffine(await curve.g1.scalarMulAffine(base, scalarLE(3)));
   const tripleByMSM = await curve.g1.jacobianToAffine(await curve.msm.pippengerAffine([base, base2], [scalarLE(1), scalarLE(1)]));

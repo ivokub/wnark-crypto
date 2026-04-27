@@ -109,6 +109,38 @@ const CURVE_DEFINITIONS: Record<SupportedCurveID, CurveDefinition> = {
     zeroHex:
       "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
   },
+  bls12_377: {
+    id: "bls12_377",
+    frArithShaderPath: "/shaders/curves/bls12_377/fr_arith.wgsl",
+    frVectorShaderPath: "/shaders/curves/bls12_377/fr_vector.wgsl",
+    frNTTShaderPath: "/shaders/curves/bls12_377/fr_ntt.wgsl",
+    frNTTDomainPath: "/testdata/vectors/fr/bls12_377_ntt_domains.json",
+    frModulusHex: "0x12ab655e9a2ca55660b44d1e5c37b00159aa76fed00000010a11800000000001",
+    fpArithShaderPath: "/shaders/curves/bls12_377/fp_arith.wgsl",
+    g1ArithShaderParts: fieldShaderParts("/shaders/curves/bls12_377/fp_arith.wgsl", "/shaders/curves/bls12_377/g1_arith.wgsl"),
+    g1MSMShaderParts: [
+      "/shaders/curves/bls12_377/fp_arith.wgsl#section=fp-types",
+      "/shaders/curves/bls12_377/fp_arith.wgsl#section=fp-consts",
+      "/shaders/curves/bls12_377/fp_arith.wgsl#section=fp-core",
+      "/shaders/curves/bls12_377/g1_msm.wgsl",
+      "/shaders/common/g1_msm_jac.wgsl",
+    ],
+    g2ArithShaderParts: fieldShaderParts("/shaders/curves/bls12_377/fp_arith.wgsl", "/shaders/curves/bls12_377/g2_arith.wgsl"),
+    g2MSMShaderParts: [
+      "/shaders/curves/bls12_377/fp_arith.wgsl#section=fp-types",
+      "/shaders/curves/bls12_377/fp_arith.wgsl#section=fp-consts",
+      "/shaders/curves/bls12_377/fp_arith.wgsl#section=fp-core",
+      "/shaders/curves/bls12_377/g2_arith.wgsl",
+      "/shaders/common/g2_msm_jac.wgsl",
+    ],
+    coordinateBytes: 48,
+    pointBytes: 144,
+    g2CoordinateBytes: 96,
+    g2PointBytes: 288,
+    g1OpsWorkgroupOverride: true,
+    zeroHex:
+      "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+  },
 };
 
 /**
@@ -265,4 +297,11 @@ export function createBN254(context: CurveGPUContext): Promise<CurveModule> {
  */
 export function createBLS12381(context: CurveGPUContext): Promise<CurveModule> {
   return createCurveModule(context, "bls12_381");
+}
+
+/**
+ * Create the BLS12-377 module bound to an existing context.
+ */
+export function createBLS12377(context: CurveGPUContext): Promise<CurveModule> {
+  return createCurveModule(context, "bls12_377");
 }

@@ -33,7 +33,7 @@ func ParseConfig() (Config, error) {
 	}
 
 	curve := cfg.Get("curve").String()
-	if curve != "bn254" && curve != "bls12_381" {
+	if curve != "bn254" && curve != "bls12_377" && curve != "bls12_381" {
 		return Config{}, fmt.Errorf("unsupported curve %q", curve)
 	}
 
@@ -58,6 +58,8 @@ func CurveID(curve string) (ecc.ID, error) {
 	switch curve {
 	case "bn254":
 		return ecc.BN254, nil
+	case "bls12_377":
+		return ecc.BLS12_377, nil
 	case "bls12_381":
 		return ecc.BLS12_381, nil
 	default:

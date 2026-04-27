@@ -11,11 +11,16 @@ type NTTConfig = {
   successMessage: string;
 };
 
-const CONFIGS: Record<SupportedCurveID, NTTConfig> = {
+const CONFIGS: Partial<Record<SupportedCurveID, NTTConfig>> = {
   bn254: {
     curve: "bn254",
     title: "BN254 fr NTT Browser Benchmark",
     successMessage: "BN254 fr NTT browser benchmark completed",
+  },
+  bls12_377: {
+    curve: "bls12_377",
+    title: "BLS12-377 fr NTT Browser Benchmark",
+    successMessage: "BLS12-377 fr NTT browser benchmark completed",
   },
   bls12_381: {
     curve: "bls12_381",
@@ -35,7 +40,12 @@ const logEl = document.getElementById("log") as HTMLElement | null;
 const { setStatus, setPageState, writeLog } = createPageUI(statusEl, logEl);
 
 function getConfig(): NTTConfig {
-  return CONFIGS[getRequestedCurveId()];
+  const curve = getRequestedCurveId();
+  const config = CONFIGS[curve];
+  if (!config) {
+    throw new Error(`fr NTT benchmark unavailable for curve ${curve}`);
+  }
+  return config;
 }
 
 function makeRegularBatch(count: number, seed: number): CurveGPUElementBytes[] {

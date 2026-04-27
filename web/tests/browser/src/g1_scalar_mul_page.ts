@@ -46,11 +46,16 @@ type G1ScalarConfig = {
   vectorPath: string;
 };
 
-const CONFIGS: Record<SupportedCurveID, G1ScalarConfig> = {
+const CONFIGS: Partial<Record<SupportedCurveID, G1ScalarConfig>> = {
   bn254: {
     curve: "bn254",
     title: "BN254 G1 Scalar Mul Browser Smoke",
     vectorPath: "/testdata/vectors/g1/bn254_g1_scalar_mul.json",
+  },
+  bls12_377: {
+    curve: "bls12_377",
+    title: "BLS12-377 G1 Scalar Mul Browser Smoke",
+    vectorPath: "/testdata/vectors/g1/bls12_377_g1_scalar_mul.json",
   },
   bls12_381: {
     curve: "bls12_381",
@@ -90,6 +95,9 @@ function expectPointBatch(name: string, got: readonly CurveGPUJacobianPoint[], w
 
 export async function runSuite(module: CurveModule, log: (msg: string) => void): Promise<{ passed: number; failed: number }> {
   const config = CONFIGS[module.id];
+  if (!config) {
+    throw new Error(`g1 scalar-mul vectors unavailable for curve ${module.id}`);
+  }
   log(`=== ${config.title} ===`);
   log("");
   const vectors = await fetchJSON<G1ScalarMulVectors>(config.vectorPath);

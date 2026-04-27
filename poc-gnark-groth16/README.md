@@ -1,7 +1,7 @@
 # Groth16 Go WASM POC
 
 This POC compares two browser-side wasm Groth16 proof paths on the same fixed
-no-commitment circuit fixtures:
+no-commitment circuit fixtures for BN254, BLS12-377, and BLS12-381:
 
 - `webgpu-go`: the local WebGPU-accelerated prover package in this repo
 - `native-go`: native gnark Groth16 compiled to wasm
@@ -30,6 +30,9 @@ This creates:
 - `poc-gnark-groth16/fixtures/bn254/2pow12/`
 - `poc-gnark-groth16/fixtures/bn254/2pow15/`
 - `poc-gnark-groth16/fixtures/bn254/2pow18/`
+- `poc-gnark-groth16/fixtures/bls12_377/2pow12/`
+- `poc-gnark-groth16/fixtures/bls12_377/2pow15/`
+- `poc-gnark-groth16/fixtures/bls12_377/2pow18/`
 - `poc-gnark-groth16/fixtures/bls12_381/2pow12/`
 - `poc-gnark-groth16/fixtures/bls12_381/2pow15/`
 - `poc-gnark-groth16/fixtures/bls12_381/2pow18/`
@@ -46,7 +49,7 @@ falls back to legacy `pk.bin` fixtures if they already exist locally.
 You can scope generation, for example:
 
 ```sh
-make poc-gnark-groth16-fixtures FIXTURE_CURVE=bn254 FIXTURE_LOGS=12,15
+make poc-gnark-groth16-fixtures FIXTURE_CURVE=bls12_377 FIXTURE_LOGS=12,15
 ```
 
 ## Build
@@ -79,6 +82,7 @@ Example autorun URLs:
 
 ```text
 http://localhost:8000/poc-gnark-groth16/index.html?autorun=1&impl=both&curve=bn254&size-log=12&prove-runs=1
+http://localhost:8000/poc-gnark-groth16/index.html?autorun=1&impl=both&curve=bls12_377&size-log=15&prove-runs=1
 http://localhost:8000/poc-gnark-groth16/index.html?autorun=1&impl=both&curve=bls12_381&size-log=15&prove-runs=1
 ```
 

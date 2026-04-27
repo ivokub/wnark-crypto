@@ -1,4 +1,4 @@
-import { createBLS12381, createBN254, createCurveGPUContext } from "/web/dist/index.js";
+import { createBLS12377, createBLS12381, createBN254, createCurveGPUContext } from "/web/dist/index.js";
 
 const CURVE_CONFIG = {
   bn254: {
@@ -8,6 +8,12 @@ const CURVE_CONFIG = {
     g2PointBytes: 192,
   },
   bls12_381: {
+    g1CoordinateBytes: 48,
+    g1PointBytes: 144,
+    g2ComponentBytes: 48,
+    g2PointBytes: 288,
+  },
+  bls12_377: {
     g1CoordinateBytes: 48,
     g1PointBytes: 144,
     g2ComponentBytes: 48,
@@ -24,6 +30,19 @@ function cloneBytes(bytes) {
   return new Uint8Array(bytes);
 }
 
+function createCurveForID(curve, context) {
+  switch (curve) {
+    case "bn254":
+      return createBN254(context);
+    case "bls12_381":
+      return createBLS12381(context);
+    case "bls12_377":
+      return createBLS12377(context);
+    default:
+      throw new Error(`unsupported curve ${curve}`);
+  }
+}
+
 async function getContext() {
   if (!contextPromise) {
     contextPromise = createCurveGPUContext();
@@ -37,7 +56,7 @@ async function getCurveModule(curve) {
       curve,
       (async () => {
         const context = await getContext();
-        return curve === "bn254" ? createBN254(context) : createBLS12381(context);
+        return createCurveForID(curve, context);
       })(),
     );
   }

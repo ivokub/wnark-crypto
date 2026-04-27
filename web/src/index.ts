@@ -1,5 +1,5 @@
 /**
- * curvegpu-web — WebGPU-accelerated elliptic curve arithmetic for BN254 and BLS12-381.
+ * curvegpu-web — WebGPU-accelerated elliptic curve arithmetic for BN254, BLS12-381, and BLS12-377.
  *
  * ## Quick start
  *
@@ -27,7 +27,7 @@
  *
  * ## Curve modules
  *
- * Use `createBN254` or `createBLS12381` (or the lower-level `createCurveModule`) to
+ * Use `createBN254`, `createBLS12381`, or `createBLS12377` (or the lower-level `createCurveModule`) to
  * create a {@link CurveModule}.  Each module contains sub-modules for field arithmetic
  * ({@link FieldModule} `fr`, `fp`), curve arithmetic ({@link G1Module}, {@link G2Module}),
  * NTT ({@link NTTModule}), and MSM ({@link MSMModule}, {@link G2MSMModule}).
@@ -100,6 +100,7 @@ export { setBundledShaders } from "./curvegpu/shaders.js";
 export { createCurveGPUContext } from "./curvegpu/context.js";
 
 export {
+  createBLS12377,
   createBLS12381,
   createBN254,
   createCurveModule,

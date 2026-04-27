@@ -49,11 +49,16 @@ type G2OpsConfig = {
   vectorPath: string;
 };
 
-const CONFIGS: Record<SupportedCurveID, G2OpsConfig> = {
+const CONFIGS: Partial<Record<SupportedCurveID, G2OpsConfig>> = {
   bn254: {
     curve: "bn254",
     title: "BN254 G2 Ops Browser Smoke",
     vectorPath: "/testdata/vectors/g2/bn254_g2_ops.json?v=1",
+  },
+  bls12_377: {
+    curve: "bls12_377",
+    title: "BLS12-377 G2 Ops Browser Smoke",
+    vectorPath: "/testdata/vectors/g2/bls12_377_g2_ops.json",
   },
   bls12_381: {
     curve: "bls12_381",
@@ -127,6 +132,9 @@ function zeroFp2(componentBytes: number): Fp2Point {
 
 export async function runSuite(module: CurveModule, log: (msg: string) => void): Promise<{ passed: number; failed: number }> {
   const config = CONFIGS[module.id];
+  if (!config) {
+    throw new Error(`g2 ops vectors unavailable for curve ${module.id}`);
+  }
   log(`=== ${config.title} ===`);
   log("");
   const vectors = await fetchJSON<G2OpsVectors>(config.vectorPath);

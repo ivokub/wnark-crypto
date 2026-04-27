@@ -51,7 +51,7 @@ type CurveBenchConfig = {
   fixtureBinPath?: string;
 };
 
-const CURVE_CONFIGS: Record<SupportedCurveID, CurveBenchConfig> = {
+const CURVE_CONFIGS: Partial<Record<SupportedCurveID, CurveBenchConfig>> = {
   bn254: {
     curve: "bn254",
     title: "BN254 G2 MSM Browser Benchmark",
@@ -61,6 +61,16 @@ const CURVE_CONFIGS: Record<SupportedCurveID, CurveBenchConfig> = {
     opsVectorsPath: "/testdata/vectors/g2/bn254_g2_ops.json?v=1",
     fixtureJSONPath: "/testdata/fixtures/g2/bn254_bases_jacobian.json?v=1",
     fixtureBinPath: "/testdata/fixtures/g2/bn254_bases_jacobian.bin?v=1",
+  },
+  bls12_377: {
+    curve: "bls12_377",
+    title: "BLS12-377 G2 MSM Browser Benchmark",
+    successMessage: "BLS12-377 G2 MSM browser benchmark completed",
+    componentBytes: 48,
+    pointBytes: 288,
+    opsVectorsPath: "/testdata/vectors/g2/bls12_377_g2_ops.json",
+    fixtureJSONPath: "/testdata/fixtures/g2/bls12_377_bases_jacobian.json?v=1",
+    fixtureBinPath: "/testdata/fixtures/g2/bls12_377_bases_jacobian.bin?v=1",
   },
   bls12_381: {
     curve: "bls12_381",
@@ -83,7 +93,11 @@ const logEl = document.getElementById("log") as HTMLElement | null;
 const { setStatus, setPageState, writeLog } = createPageUI(statusEl, logEl);
 
 function getConfig(curve: SupportedCurveID): CurveBenchConfig {
-  return CURVE_CONFIGS[curve];
+  const config = CURVE_CONFIGS[curve];
+  if (!config) {
+    throw new Error(`g2 MSM benchmark unavailable for curve ${curve}`);
+  }
+  return config;
 }
 
 function fp2FromHex(point: Fp2Point): CurveGPUFp2Element {

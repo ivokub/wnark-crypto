@@ -30,6 +30,13 @@ const SHADER_PATHS = [
   "/shaders/curves/bls12_381/g1_arith.wgsl",
   "/shaders/curves/bls12_381/g1_msm.wgsl",
   "/shaders/curves/bls12_381/g2_arith.wgsl",
+  "/shaders/curves/bls12_377/fp_arith.wgsl",
+  "/shaders/curves/bls12_377/fr_arith.wgsl",
+  "/shaders/curves/bls12_377/fr_vector.wgsl",
+  "/shaders/curves/bls12_377/fr_ntt.wgsl",
+  "/shaders/curves/bls12_377/g1_arith.wgsl",
+  "/shaders/curves/bls12_377/g1_msm.wgsl",
+  "/shaders/curves/bls12_377/g2_arith.wgsl",
   "/shaders/common/g1_msm_jac.wgsl",
   "/shaders/common/g2_msm_jac.wgsl",
 ];

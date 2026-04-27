@@ -70,6 +70,14 @@ const CONFIGS: Record<string, BenchConfig> = {
     arithLabel: "bn254-fr",
     vectorLabel: "bn254-fr-vector",
   },
+  bls12_377: {
+    curve: "bls12_377",
+    title: "BLS12-377 fr Vector Browser Benchmark",
+    arithShaderPath: "/shaders/curves/bls12_377/fr_arith.wgsl",
+    vectorShaderPath: "/shaders/curves/bls12_377/fr_vector.wgsl",
+    arithLabel: "bls12-377-fr",
+    vectorLabel: "bls12-377-fr-vector",
+  },
   bls12_381: {
     curve: "bls12_381",
     title: "BLS12-381 fr Vector Browser Benchmark",
