@@ -167,7 +167,7 @@ function makeMSMScalarsPacked(count: number): Uint8Array {
 }
 
 function fixtureGenerationHint(curve: SupportedCurveID, size: number): string {
-  return `make fixture-${curve}-g2 G2_COUNT=${size}`;
+  return `make fixture-${curve}-g2 COUNT=${size}`;
 }
 
 async function buildGeneratedBases(
