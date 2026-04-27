@@ -32,8 +32,6 @@ export interface CurveDefinition {
   readonly g2CoordinateBytes: number;
   readonly g2PointBytes: number;
   readonly zeroHex: string;
-  /** Whether the g1_ops_main shader supports the WORKGROUP_SIZE override constant. BN254 g1_arith.wgsl also contains MSM kernels with fixed-size var<workgroup> arrays, so it cannot use the override. */
-  readonly g1OpsWorkgroupOverride: boolean;
 }
 
 function fieldShaderParts(fpArithShaderPath: string, curveShaderPath: string): readonly string[] {
@@ -42,6 +40,54 @@ function fieldShaderParts(fpArithShaderPath: string, curveShaderPath: string): r
     `${fpArithShaderPath}#section=fp-consts`,
     `${fpArithShaderPath}#section=fp-core`,
     curveShaderPath,
+  ];
+}
+
+function g1OpsShaderParts(fpArithShaderPath: string, g1IOPath: string): readonly string[] {
+  return [
+    `${fpArithShaderPath}#section=fp-types`,
+    `${fpArithShaderPath}#section=fp-consts`,
+    `${fpArithShaderPath}#section=fp-core`,
+    "/shaders/common/g1_core.wgsl",
+    "/shaders/common/g1_ops_bindings.wgsl",
+    g1IOPath,
+    "/shaders/common/g1_ops_main.wgsl",
+  ];
+}
+
+function g1MSMShaderParts(fpArithShaderPath: string, g1IOPath: string): readonly string[] {
+  return [
+    `${fpArithShaderPath}#section=fp-types`,
+    `${fpArithShaderPath}#section=fp-consts`,
+    `${fpArithShaderPath}#section=fp-core`,
+    "/shaders/common/g1_core.wgsl",
+    "/shaders/common/g1_msm_bindings.wgsl",
+    g1IOPath,
+    "/shaders/common/g1_msm_jac.wgsl",
+  ];
+}
+
+function g2OpsShaderParts(fpArithShaderPath: string, g2ArithPath: string, g2IOPath: string): readonly string[] {
+  return [
+    `${fpArithShaderPath}#section=fp-types`,
+    `${fpArithShaderPath}#section=fp-consts`,
+    `${fpArithShaderPath}#section=fp-core`,
+    "/shaders/common/g2_ops_bindings.wgsl",
+    g2ArithPath,
+    g2IOPath,
+    "/shaders/common/g2_ops_main.wgsl",
+  ];
+}
+
+function g2MSMShaderParts(fpArithShaderPath: string, g2ArithPath: string, g2IOPath: string): readonly string[] {
+  return [
+    `${fpArithShaderPath}#section=fp-types`,
+    `${fpArithShaderPath}#section=fp-consts`,
+    `${fpArithShaderPath}#section=fp-core`,
+    "/shaders/common/g2_msm_bindings.wgsl",
+    g2ArithPath,
+    g2IOPath,
+    "/shaders/common/g2_msm_jac.wgsl",
   ];
 }
 
@@ -54,28 +100,15 @@ const CURVE_DEFINITIONS: Record<SupportedCurveID, CurveDefinition> = {
     frNTTDomainPath: "/testdata/vectors/fr/bn254_ntt_domains.json",
     frModulusHex: "0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
     fpArithShaderPath: "/shaders/curves/bn254/fp_arith.wgsl",
-    g1ArithShaderParts: fieldShaderParts("/shaders/curves/bn254/fp_arith.wgsl", "/shaders/curves/bn254/g1_arith.wgsl"),
-    g1MSMShaderParts: [
-      "/shaders/curves/bn254/fp_arith.wgsl#section=fp-types",
-      "/shaders/curves/bn254/fp_arith.wgsl#section=fp-consts",
-      "/shaders/curves/bn254/fp_arith.wgsl#section=fp-core",
-      "/shaders/curves/bn254/g1_arith.wgsl",
-      "/shaders/common/g1_msm_jac.wgsl",
-    ],
-    g2ArithShaderParts: fieldShaderParts("/shaders/curves/bn254/fp_arith.wgsl", "/shaders/curves/bn254/g2_arith.wgsl"),
-    g2MSMShaderParts: [
-      "/shaders/curves/bn254/fp_arith.wgsl#section=fp-types",
-      "/shaders/curves/bn254/fp_arith.wgsl#section=fp-consts",
-      "/shaders/curves/bn254/fp_arith.wgsl#section=fp-core",
-      "/shaders/curves/bn254/g2_arith.wgsl",
-      "/shaders/common/g2_msm_jac.wgsl",
-    ],
+    g1ArithShaderParts: g1OpsShaderParts("/shaders/curves/bn254/fp_arith.wgsl", "/shaders/curves/bn254/g1_io.wgsl"),
+    g1MSMShaderParts: g1MSMShaderParts("/shaders/curves/bn254/fp_arith.wgsl", "/shaders/curves/bn254/g1_io.wgsl"),
+    g2ArithShaderParts: g2OpsShaderParts("/shaders/curves/bn254/fp_arith.wgsl", "/shaders/curves/bn254/g2_arith.wgsl", "/shaders/curves/bn254/g2_io.wgsl"),
+    g2MSMShaderParts: g2MSMShaderParts("/shaders/curves/bn254/fp_arith.wgsl", "/shaders/curves/bn254/g2_arith.wgsl", "/shaders/curves/bn254/g2_io.wgsl"),
     coordinateBytes: 32,
     pointBytes: 96,
     g2CoordinateBytes: 64,
     g2PointBytes: 192,
     zeroHex: "0000000000000000000000000000000000000000000000000000000000000000",
-    g1OpsWorkgroupOverride: false,
   },
   bls12_381: {
     id: "bls12_381",
@@ -85,27 +118,14 @@ const CURVE_DEFINITIONS: Record<SupportedCurveID, CurveDefinition> = {
     frNTTDomainPath: "/testdata/vectors/fr/bls12_381_ntt_domains.json",
     frModulusHex: "0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001",
     fpArithShaderPath: "/shaders/curves/bls12_381/fp_arith.wgsl",
-    g1ArithShaderParts: fieldShaderParts("/shaders/curves/bls12_381/fp_arith.wgsl", "/shaders/curves/bls12_381/g1_arith.wgsl"),
-    g1MSMShaderParts: [
-      "/shaders/curves/bls12_381/fp_arith.wgsl#section=fp-types",
-      "/shaders/curves/bls12_381/fp_arith.wgsl#section=fp-consts",
-      "/shaders/curves/bls12_381/fp_arith.wgsl#section=fp-core",
-      "/shaders/curves/bls12_381/g1_msm.wgsl",
-      "/shaders/common/g1_msm_jac.wgsl",
-    ],
-    g2ArithShaderParts: fieldShaderParts("/shaders/curves/bls12_381/fp_arith.wgsl", "/shaders/curves/bls12_381/g2_arith.wgsl"),
-    g2MSMShaderParts: [
-      "/shaders/curves/bls12_381/fp_arith.wgsl#section=fp-types",
-      "/shaders/curves/bls12_381/fp_arith.wgsl#section=fp-consts",
-      "/shaders/curves/bls12_381/fp_arith.wgsl#section=fp-core",
-      "/shaders/curves/bls12_381/g2_arith.wgsl",
-      "/shaders/common/g2_msm_jac.wgsl",
-    ],
+    g1ArithShaderParts: g1OpsShaderParts("/shaders/curves/bls12_381/fp_arith.wgsl", "/shaders/curves/bls12_381/g1_io.wgsl"),
+    g1MSMShaderParts: g1MSMShaderParts("/shaders/curves/bls12_381/fp_arith.wgsl", "/shaders/curves/bls12_381/g1_io.wgsl"),
+    g2ArithShaderParts: g2OpsShaderParts("/shaders/curves/bls12_381/fp_arith.wgsl", "/shaders/curves/bls12_381/g2_arith.wgsl", "/shaders/curves/bls12_381/g2_io.wgsl"),
+    g2MSMShaderParts: g2MSMShaderParts("/shaders/curves/bls12_381/fp_arith.wgsl", "/shaders/curves/bls12_381/g2_arith.wgsl", "/shaders/curves/bls12_381/g2_io.wgsl"),
     coordinateBytes: 48,
     pointBytes: 144,
     g2CoordinateBytes: 96,
     g2PointBytes: 288,
-    g1OpsWorkgroupOverride: true,
     zeroHex:
       "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
   },
@@ -117,27 +137,14 @@ const CURVE_DEFINITIONS: Record<SupportedCurveID, CurveDefinition> = {
     frNTTDomainPath: "/testdata/vectors/fr/bls12_377_ntt_domains.json",
     frModulusHex: "0x12ab655e9a2ca55660b44d1e5c37b00159aa76fed00000010a11800000000001",
     fpArithShaderPath: "/shaders/curves/bls12_377/fp_arith.wgsl",
-    g1ArithShaderParts: fieldShaderParts("/shaders/curves/bls12_377/fp_arith.wgsl", "/shaders/curves/bls12_377/g1_arith.wgsl"),
-    g1MSMShaderParts: [
-      "/shaders/curves/bls12_377/fp_arith.wgsl#section=fp-types",
-      "/shaders/curves/bls12_377/fp_arith.wgsl#section=fp-consts",
-      "/shaders/curves/bls12_377/fp_arith.wgsl#section=fp-core",
-      "/shaders/curves/bls12_377/g1_msm.wgsl",
-      "/shaders/common/g1_msm_jac.wgsl",
-    ],
-    g2ArithShaderParts: fieldShaderParts("/shaders/curves/bls12_377/fp_arith.wgsl", "/shaders/curves/bls12_377/g2_arith.wgsl"),
-    g2MSMShaderParts: [
-      "/shaders/curves/bls12_377/fp_arith.wgsl#section=fp-types",
-      "/shaders/curves/bls12_377/fp_arith.wgsl#section=fp-consts",
-      "/shaders/curves/bls12_377/fp_arith.wgsl#section=fp-core",
-      "/shaders/curves/bls12_377/g2_arith.wgsl",
-      "/shaders/common/g2_msm_jac.wgsl",
-    ],
+    g1ArithShaderParts: g1OpsShaderParts("/shaders/curves/bls12_377/fp_arith.wgsl", "/shaders/curves/bls12_377/g1_io.wgsl"),
+    g1MSMShaderParts: g1MSMShaderParts("/shaders/curves/bls12_377/fp_arith.wgsl", "/shaders/curves/bls12_377/g1_io.wgsl"),
+    g2ArithShaderParts: g2OpsShaderParts("/shaders/curves/bls12_377/fp_arith.wgsl", "/shaders/curves/bls12_377/g2_arith.wgsl", "/shaders/curves/bls12_377/g2_io.wgsl"),
+    g2MSMShaderParts: g2MSMShaderParts("/shaders/curves/bls12_377/fp_arith.wgsl", "/shaders/curves/bls12_377/g2_arith.wgsl", "/shaders/curves/bls12_377/g2_io.wgsl"),
     coordinateBytes: 48,
     pointBytes: 144,
     g2CoordinateBytes: 96,
     g2PointBytes: 288,
-    g1OpsWorkgroupOverride: true,
     zeroHex:
       "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
   },
@@ -173,7 +180,7 @@ export async function createCurveModule(context: CurveGPUContext, curve: Support
     opsShaders: [
       { shaderParts: [definition.frArithShaderPath], entryPoint: "fr_ops_main", useWorkgroupOverride: true },
       { shaderParts: [definition.fpArithShaderPath], entryPoint: "fp_ops_main", useWorkgroupOverride: true },
-      { shaderParts: definition.g1ArithShaderParts, entryPoint: "g1_ops_main", useWorkgroupOverride: definition.g1OpsWorkgroupOverride },
+      { shaderParts: definition.g1ArithShaderParts, entryPoint: "g1_ops_main", useWorkgroupOverride: true },
       { shaderParts: definition.g2ArithShaderParts, entryPoint: "g2_ops_main", useWorkgroupOverride: true },
       { shaderParts: [definition.frVectorShaderPath], entryPoint: "fr_vector_main", useWorkgroupOverride: true },
       { shaderParts: [definition.frNTTShaderPath], entryPoint: "fr_ntt_stage_main", useWorkgroupOverride: true },

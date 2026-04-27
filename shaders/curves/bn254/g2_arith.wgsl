@@ -9,11 +9,6 @@ struct G2Point {
   z: Fp2,
 }
 
-struct Params {
-  lane0: vec4<u32>,
-  lane1: vec4<u32>,
-}
-
 const G2_OP_COPY: u32 = 0u;
 const G2_OP_JAC_INFINITY: u32 = 1u;
 const G2_OP_AFFINE_TO_JAC: u32 = 2u;
@@ -22,22 +17,6 @@ const G2_OP_DOUBLE_JAC: u32 = 4u;
 const G2_OP_ADD_MIXED: u32 = 5u;
 const G2_OP_JAC_TO_AFFINE: u32 = 6u;
 const G2_OP_AFFINE_ADD: u32 = 7u;
-
-@group(0) @binding(0) var<storage, read> input_a: array<u32>;
-@group(0) @binding(1) var<storage, read> input_b: array<u32>;
-@group(0) @binding(2) var<storage, read_write> output: array<u32>;
-@group(0) @binding(3) var<uniform> params: Params;
-@group(0) @binding(4) var<storage, read> input_meta0: array<u32>;
-@group(0) @binding(5) var<storage, read> input_meta1: array<u32>;
-@group(0) @binding(6) var<storage, read> input_meta2: array<u32>;
-
-fn params_count() -> u32 {
-  return params.lane0.x;
-}
-
-fn params_opcode() -> u32 {
-  return params.lane0.y;
-}
 
 fn fp2_zero() -> Fp2 {
   var z: Fp2;
@@ -364,63 +343,4 @@ fn g2_dispatch(opcode: u32, a: G2Point, b: G2Point) -> G2Point {
     return g2_jac_to_affine(g2_add_mixed(g2_affine_to_jac(a), b));
   }
   return g2_jac_infinity();
-}
-
-fn fp_load_from(buffer_kind: u32, base: u32) -> Fp {
-  var z: Fp;
-  if (buffer_kind == 0u) {
-    for (var i = 0u; i < 8u; i = i + 1u) {
-      z.limbs[i] = input_a[base + i];
-    }
-    return z;
-  }
-  for (var i = 0u; i < 8u; i = i + 1u) {
-    z.limbs[i] = input_b[base + i];
-  }
-  return z;
-}
-
-fn fp2_load_from(buffer_kind: u32, base: u32) -> Fp2 {
-  var z: Fp2;
-  z.c0 = fp_load_from(buffer_kind, base);
-  z.c1 = fp_load_from(buffer_kind, base + 8u);
-  return z;
-}
-
-fn g2_load_from(buffer_kind: u32, index: u32) -> G2Point {
-  let base = index * 48u;
-  var p: G2Point;
-  p.x = fp2_load_from(buffer_kind, base + 0u);
-  p.y = fp2_load_from(buffer_kind, base + 16u);
-  p.z = fp2_load_from(buffer_kind, base + 32u);
-  return p;
-}
-
-fn fp_store(base: u32, value: Fp) {
-  for (var i = 0u; i < 8u; i = i + 1u) {
-    output[base + i] = value.limbs[i];
-  }
-}
-
-fn fp2_store(base: u32, value: Fp2) {
-  fp_store(base, value.c0);
-  fp_store(base + 8u, value.c1);
-}
-
-fn g2_store(index: u32, value: G2Point) {
-  let base = index * 48u;
-  fp2_store(base + 0u, value.x);
-  fp2_store(base + 16u, value.y);
-  fp2_store(base + 32u, value.z);
-}
-
-override WORKGROUP_SIZE: u32 = 64;
-
-@compute @workgroup_size(WORKGROUP_SIZE)
-fn g2_ops_main(@builtin(global_invocation_id) id: vec3<u32>) {
-  let i = id.x;
-  if (i >= params_count()) {
-    return;
-  }
-  g2_store(i, g2_dispatch(params_opcode(), g2_load_from(0u, i), g2_load_from(1u, i)));
 }
