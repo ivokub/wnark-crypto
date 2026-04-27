@@ -1,4 +1,4 @@
-.PHONY: web-build web-bundle-shaders testdata fixture-bn254-g1 fixture-bls12_377-g1 fixture-bls12_381-g1 fixture-bn254-g2 fixture-bls12_377-g2 fixture-bls12_381-g2 poc-wasm-build poc-wasm-fixture-bn254 poc-wasm-fixture-bls12_381 poc-gnark-groth16-build poc-gnark-groth16-fixtures
+.PHONY: web-build web-bundle-shaders testdata fixture-bn254-g1 fixture-bls12_377-g1 fixture-bls12_381-g1 fixture-bn254-g2 fixture-bls12_377-g2 fixture-bls12_381-g2 poc-gnark-groth16-build poc-gnark-groth16-fixtures
 
 COUNT ?= 524288
 G2_COUNT ?= 524288
@@ -34,18 +34,6 @@ fixture-bls12_377-g2:
 
 fixture-bls12_381-g2:
 	go run ./cmd/curvegpu-testdata-gen -target bls12-381-g2-bases-fixture -g2-fixture-count $(G2_COUNT)
-
-poc-wasm-build: web-build
-	mkdir -p poc-wasm/dist
-	cp "$$(go env GOROOT)/lib/wasm/wasm_exec.js" poc-wasm/dist/wasm_exec.js
-	GOOS=js GOARCH=wasm go build -o poc-wasm/dist/go-webgpu.wasm ./poc-wasm/go-webgpu
-	GOOS=js GOARCH=wasm go build -o poc-wasm/dist/go-gnark.wasm ./poc-wasm/go-gnark
-
-poc-wasm-fixture-bn254:
-	$(MAKE) fixture-bn254-g1 COUNT=$(COUNT)
-
-poc-wasm-fixture-bls12_381:
-	$(MAKE) fixture-bls12_381-g1 COUNT=$(COUNT)
 
 poc-gnark-groth16-build: web-build
 	mkdir -p poc-gnark-groth16/dist

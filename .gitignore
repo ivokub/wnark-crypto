@@ -1,7 +1,6 @@
 .gocache/
 web/dist/
 web/src/curvegpu/shader_bundle.generated.ts
-poc-wasm/dist/
 poc-gnark-groth16/dist/
 poc-gnark-groth16/fixtures/
 external/heliax-wasm/target/
