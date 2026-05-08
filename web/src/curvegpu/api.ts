@@ -411,14 +411,35 @@ export interface NTTModule {
   forwardPackedMont(values: Uint8Array): Promise<Uint8Array>;
   /** Run the inverse NTT over packed Montgomery-form field elements. */
   inversePackedMont(values: Uint8Array): Promise<Uint8Array>;
+}
+
+/**
+ * Groth16-specific scalar-field helpers.
+ *
+ * These methods are separated from the generic NTT module even though they
+ * reuse the same NTT/vector kernels internally.
+ */
+export interface Groth16Module {
+  readonly context: CurveGPUContext;
+  readonly curve: SupportedCurveID;
   /**
    * Compute the Groth16 quotient vector H from packed regular little-endian
    * A, B, and C witness polynomials already padded to the FFT domain size.
    *
    * The returned packed vector is in regular little-endian coefficient form
    * and has the same element count as the padded inputs.
-   */
+  */
   computeGroth16QuotientPackedRegular(a: Uint8Array, b: Uint8Array, c: Uint8Array): Promise<Uint8Array>;
+  /**
+   * Compute the Groth16 quotient vector H from packed Montgomery little-endian
+   * A, B, and C witness polynomials already padded to the FFT domain size.
+   *
+   * The returned packed vector is in regular little-endian coefficient form
+   * and has the same element count as the padded inputs.
+   */
+  computeGroth16QuotientPackedMont(a: Uint8Array, b: Uint8Array, c: Uint8Array): Promise<Uint8Array>;
+  /** Precompute and cache Groth16 quotient-domain data for a power-of-two domain size. */
+  prewarmGroth16QuotientDomain(size: number): Promise<void>;
 }
 
 /**
@@ -551,6 +572,8 @@ export interface CurveModule {
   readonly g2: G2Module;
   /** Scalar-field NTT. */
   readonly ntt: NTTModule;
+  /** Groth16-specific scalar-field helpers. */
+  readonly groth16: Groth16Module;
   /** Multi-scalar multiplication over G1. */
   readonly g1msm: G1MSMModule;
   /** Multi-scalar multiplication over G2. */

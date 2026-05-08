@@ -248,6 +248,18 @@ export async function createCurveModule(context: CurveGPUContext, curve: Support
     },
     fp,
   );
+  const ntt = createNTTModule(
+    context,
+    {
+      curve: definition.id,
+      domainPath: definition.frNTTDomainPath ?? "",
+      modulusHex: definition.frModulusHex ?? "",
+      vectorKernel: registry.getOpsKernel("fr_vector_main"),
+      fieldKernel: registry.getOpsKernel("fr_ops_main"),
+      nttKernel: registry.getOpsKernel("fr_ntt_stage_main"),
+    },
+    fr,
+  );
   return {
     id: curve,
     context,
@@ -255,18 +267,8 @@ export async function createCurveModule(context: CurveGPUContext, curve: Support
     fp,
     g1,
     g2,
-    ntt: createNTTModule(
-      context,
-      {
-        curve: definition.id,
-        domainPath: definition.frNTTDomainPath ?? "",
-        modulusHex: definition.frModulusHex ?? "",
-        vectorKernel: registry.getOpsKernel("fr_vector_main"),
-        fieldKernel: registry.getOpsKernel("fr_ops_main"),
-        nttKernel: registry.getOpsKernel("fr_ntt_stage_main"),
-      },
-      fr,
-    ),
+    ntt,
+    groth16: ntt,
     g1msm: createG1MSMModule(
       context,
       {

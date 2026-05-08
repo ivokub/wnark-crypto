@@ -141,6 +141,38 @@ func bridgeMSMG2(handle, vectorName string, scalarsPacked []byte) ([]byte, error
 	return goBytes(value)
 }
 
+type bridgeMSMBatchResult struct {
+	G1ABytes []byte
+	G1BBytes []byte
+	G1KBytes []byte
+	G2BBytes []byte
+}
+
+func bridgeMSMBatch(handle string, g1A, g1B, g1K []byte) (bridgeMSMBatchResult, error) {
+	payload := jsObject()
+	payload.Set("g1A", jsUint8Array(g1A))
+	payload.Set("g1B", jsUint8Array(g1B))
+	payload.Set("g1K", jsUint8Array(g1K))
+	value, err := callPromise("msmBatch", handle, payload)
+	if err != nil {
+		return bridgeMSMBatchResult{}, err
+	}
+	result := bridgeMSMBatchResult{}
+	if result.G1ABytes, err = goBytes(value.Get("g1A")); err != nil {
+		return bridgeMSMBatchResult{}, err
+	}
+	if result.G1BBytes, err = goBytes(value.Get("g1B")); err != nil {
+		return bridgeMSMBatchResult{}, err
+	}
+	if result.G1KBytes, err = goBytes(value.Get("g1K")); err != nil {
+		return bridgeMSMBatchResult{}, err
+	}
+	if result.G2BBytes, err = goBytes(value.Get("g2B")); err != nil {
+		return bridgeMSMBatchResult{}, err
+	}
+	return result, nil
+}
+
 func bridgeComputeH(curve string, aPacked, bPacked, cPacked []byte) ([]byte, error) {
 	value, err := callPromise(
 		"computeH",
@@ -153,4 +185,23 @@ func bridgeComputeH(curve string, aPacked, bPacked, cPacked []byte) ([]byte, err
 		return nil, err
 	}
 	return goBytes(value)
+}
+
+func bridgeComputeHZMSMG1(handle string, aPacked, bPacked, cPacked []byte) ([]byte, error) {
+	value, err := callPromise(
+		"computeHZMSMG1",
+		handle,
+		jsUint8Array(aPacked),
+		jsUint8Array(bPacked),
+		jsUint8Array(cPacked),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return goBytes(value)
+}
+
+func bridgePrewarmQuotientDomain(curve string, domainSize int) error {
+	_, err := callPromise("prewarmQuotientDomain", curve, domainSize)
+	return err
 }

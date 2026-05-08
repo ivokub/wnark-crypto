@@ -1,4 +1,4 @@
-import type { CurveGPUContext, CurveGPUElementBytes, FieldModule, NTTModule, SupportedCurveID } from "./api.js";
+import type { CurveGPUContext, CurveGPUElementBytes, FieldModule, Groth16Module, NTTModule, SupportedCurveID } from "./api.js";
 import type { SimpleKernel } from "./runtime_common.js";
 import {
   cloneBytes,
@@ -138,7 +138,7 @@ export function createNTTModule(
     modulusHex: string;
   },
   fr: FieldModule,
-): NTTModule {
+): NTTModule & Groth16Module {
   const { curve, vectorKernel, fieldKernel, nttKernel, domainPath, modulusHex } = options;
   const label = `${curve}-fr-ntt`;
   const elementBytes = fr.byteSize;
@@ -439,6 +439,69 @@ export function createNTTModule(
     }
   }
 
+  async function computeGroth16QuotientPacked(
+    a: Uint8Array,
+    b: Uint8Array,
+    c: Uint8Array,
+    inputMontgomery: boolean,
+  ): Promise<Uint8Array> {
+    const count = ensurePackedElements(a, elementBytes, `${label}.groth16.a`);
+    if (b.byteLength !== a.byteLength || c.byteLength !== a.byteLength) {
+      throw new Error(`${label}: Groth16 quotient inputs must have identical packed lengths`);
+    }
+    if (count === 0 || (count & (count - 1)) !== 0) {
+      throw new Error(`${label}: Groth16 quotient input length must be a non-zero power of two`);
+    }
+
+    const domain = await prepareDomain(count);
+    const [aMont, bMont, cMont] = inputMontgomery
+      ? [a, b, c]
+      : await Promise.all([
+          fr.toMontgomeryPacked(a),
+          fr.toMontgomeryPacked(b),
+          fr.toMontgomeryPacked(c),
+        ]);
+    const [aCoeffMont, bCoeffMont, cCoeffMont] = await Promise.all([
+      runPipelinePacked({ values: aMont, inverse: true, inputRegular: false, outputRegular: false }),
+      runPipelinePacked({ values: bMont, inverse: true, inputRegular: false, outputRegular: false }),
+      runPipelinePacked({ values: cMont, inverse: true, inputRegular: false, outputRegular: false }),
+    ]);
+    const [aCosetInputMont, bCosetInputMont, cCosetInputMont] = await Promise.all([
+      runVectorOpPacked(VECTOR_OP_MUL_FACTORS, aCoeffMont, domain.cosetPowersPackedMont),
+      runVectorOpPacked(VECTOR_OP_MUL_FACTORS, bCoeffMont, domain.cosetPowersPackedMont),
+      runVectorOpPacked(VECTOR_OP_MUL_FACTORS, cCoeffMont, domain.cosetPowersPackedMont),
+    ]);
+    const [aCosetMont, bCosetMont, cCosetMont] = await Promise.all([
+      runPipelinePacked({ values: aCosetInputMont, inverse: false, inputRegular: false, outputRegular: false }),
+      runPipelinePacked({ values: bCosetInputMont, inverse: false, inputRegular: false, outputRegular: false }),
+      runPipelinePacked({ values: cCosetInputMont, inverse: false, inputRegular: false, outputRegular: false }),
+    ]);
+    const abCosetMont = await runFieldOpPacked(FIELD_OP_MUL, aCosetMont, bCosetMont);
+    const numeratorCosetMont = await runFieldOpPacked(FIELD_OP_SUB, abCosetMont, cCosetMont);
+    const scaledCosetMont = await runVectorOpPacked(
+      VECTOR_OP_MUL_FACTORS,
+      numeratorCosetMont,
+      domain.cosetDenInvFactorsPackedMont,
+    );
+    const hShiftedCoeffMont = await runPipelinePacked({
+      values: scaledCosetMont,
+      inverse: true,
+      inputRegular: false,
+      outputRegular: false,
+    });
+    const hCoeffMont = await runVectorOpPacked(
+      VECTOR_OP_MUL_FACTORS,
+      hShiftedCoeffMont,
+      domain.inverseCosetPowersPackedMont,
+    );
+    const hCoeffRegular = await fr.fromMontgomeryPacked(hCoeffMont);
+    return runVectorOpPacked(VECTOR_OP_BIT_REVERSE_COPY, hCoeffRegular, undefined, Math.round(Math.log2(count)));
+  }
+
+  async function prewarmGroth16QuotientDomain(size: number): Promise<void> {
+    await prepareDomain(size);
+  }
+
   return {
     context,
     curve,
@@ -487,56 +550,12 @@ export function createNTTModule(
     async inversePackedRegular(values: Uint8Array): Promise<Uint8Array> {
       return runPipelinePacked({ values, inverse: true, inputRegular: true, outputRegular: true });
     },
+    prewarmGroth16QuotientDomain,
     async computeGroth16QuotientPackedRegular(a: Uint8Array, b: Uint8Array, c: Uint8Array): Promise<Uint8Array> {
-      const count = ensurePackedElements(a, elementBytes, `${label}.groth16.a`);
-      if (b.byteLength !== a.byteLength || c.byteLength !== a.byteLength) {
-        throw new Error(`${label}: Groth16 quotient inputs must have identical packed lengths`);
-      }
-      if (count === 0 || (count & (count - 1)) !== 0) {
-        throw new Error(`${label}: Groth16 quotient input length must be a non-zero power of two`);
-      }
-
-      const domain = await prepareDomain(count);
-      const [aMont, bMont, cMont] = await Promise.all([
-        fr.toMontgomeryPacked(a),
-        fr.toMontgomeryPacked(b),
-        fr.toMontgomeryPacked(c),
-      ]);
-      const [aCoeffMont, bCoeffMont, cCoeffMont] = await Promise.all([
-        runPipelinePacked({ values: aMont, inverse: true, inputRegular: false, outputRegular: false }),
-        runPipelinePacked({ values: bMont, inverse: true, inputRegular: false, outputRegular: false }),
-        runPipelinePacked({ values: cMont, inverse: true, inputRegular: false, outputRegular: false }),
-      ]);
-      const [aCosetInputMont, bCosetInputMont, cCosetInputMont] = await Promise.all([
-        runVectorOpPacked(VECTOR_OP_MUL_FACTORS, aCoeffMont, domain.cosetPowersPackedMont),
-        runVectorOpPacked(VECTOR_OP_MUL_FACTORS, bCoeffMont, domain.cosetPowersPackedMont),
-        runVectorOpPacked(VECTOR_OP_MUL_FACTORS, cCoeffMont, domain.cosetPowersPackedMont),
-      ]);
-      const [aCosetMont, bCosetMont, cCosetMont] = await Promise.all([
-        runPipelinePacked({ values: aCosetInputMont, inverse: false, inputRegular: false, outputRegular: false }),
-        runPipelinePacked({ values: bCosetInputMont, inverse: false, inputRegular: false, outputRegular: false }),
-        runPipelinePacked({ values: cCosetInputMont, inverse: false, inputRegular: false, outputRegular: false }),
-      ]);
-      const abCosetMont = await runFieldOpPacked(FIELD_OP_MUL, aCosetMont, bCosetMont);
-      const numeratorCosetMont = await runFieldOpPacked(FIELD_OP_SUB, abCosetMont, cCosetMont);
-      const scaledCosetMont = await runVectorOpPacked(
-        VECTOR_OP_MUL_FACTORS,
-        numeratorCosetMont,
-        domain.cosetDenInvFactorsPackedMont,
-      );
-      const hShiftedCoeffMont = await runPipelinePacked({
-        values: scaledCosetMont,
-        inverse: true,
-        inputRegular: false,
-        outputRegular: false,
-      });
-      const hCoeffMont = await runVectorOpPacked(
-        VECTOR_OP_MUL_FACTORS,
-        hShiftedCoeffMont,
-        domain.inverseCosetPowersPackedMont,
-      );
-      const hCoeffRegular = await fr.fromMontgomeryPacked(hCoeffMont);
-      return runVectorOpPacked(VECTOR_OP_BIT_REVERSE_COPY, hCoeffRegular, undefined, Math.round(Math.log2(count)));
+      return computeGroth16QuotientPacked(a, b, c, false);
+    },
+    async computeGroth16QuotientPackedMont(a: Uint8Array, b: Uint8Array, c: Uint8Array): Promise<Uint8Array> {
+      return computeGroth16QuotientPacked(a, b, c, true);
     },
   };
 }

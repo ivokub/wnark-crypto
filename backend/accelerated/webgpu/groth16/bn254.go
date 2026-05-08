@@ -30,8 +30,15 @@ const (
 // browser-side cached MSM bases.
 type BN254ProvingKey struct {
 	native.ProvingKey
-	prepareMu sync.Mutex
-	handle    string
+	prepareMu      sync.Mutex
+	scratchMu      sync.Mutex
+	handle         string
+	quotientWarmed bool
+	g1AIndices     []int
+	g1BIndices     []int
+	scratch0       []byte
+	scratch1       []byte
+	scratch2       []byte
 }
 
 func proveBN254(r1cs *cs.R1CS, pk *BN254ProvingKey, fullWitness witness.Witness, opts ...backend.ProverOption) (*native.Proof, error) {
@@ -48,6 +55,8 @@ func proveBN254(r1cs *cs.R1CS, pk *BN254ProvingKey, fullWitness witness.Witness,
 	if err := pk.ensurePrepared(); err != nil {
 		return nil, err
 	}
+	pk.scratchMu.Lock()
+	defer pk.scratchMu.Unlock()
 
 	_solution, err := r1cs.Solve(fullWitness, opt.SolverOpts...)
 	if err != nil {
@@ -55,33 +64,41 @@ func proveBN254(r1cs *cs.R1CS, pk *BN254ProvingKey, fullWitness witness.Witness,
 	}
 	solution := _solution.(*cs.R1CSSolution)
 	wireValues := []bn254fr.Element(solution.W)
+	domainSize := int(pk.Domain.Cardinality)
 
-	h, err := bridgeComputeHBN254(solution.A, solution.B, solution.C, int(pk.Domain.Cardinality))
+	pk.scratch0 = packBN254FrVectorMontLEPaddedInto(pk.scratch0, solution.A, domainSize)
+	pk.scratch1 = packBN254FrVectorMontLEPaddedInto(pk.scratch1, solution.B, domainSize)
+	pk.scratch2 = packBN254FrVectorMontLEPaddedInto(pk.scratch2, solution.C, domainSize)
+	zPacked, err := bridgeComputeHZMSMG1(pk.handle, pk.scratch0, pk.scratch1, pk.scratch2)
 	if err != nil {
-		return nil, fmt.Errorf("webgpu groth16 bn254: quotient H: %w", err)
+		return nil, fmt.Errorf("webgpu groth16 bn254: quotient H + msm G1.Z: %w", err)
 	}
-	wireValuesA := filterWireValuesBN254(wireValues, pk.InfinityA)
-	wireValuesB := filterWireValuesBN254(wireValues, pk.InfinityB)
-	privateWireValues := append([]bn254fr.Element(nil), wireValues[r1cs.GetNbPublicVariables():]...)
+	publicVariables := r1cs.GetNbPublicVariables()
 
-	arBaseAff, err := decodeBN254G1AffineFromPacked(bridgeMSMG1(pk.handle, "g1A", packBN254FrVectorRegularLE(wireValuesA)))
+	pk.scratch0, _ = packBN254FrVectorFilteredInto(pk.scratch0, wireValues, pk.g1AIndices, len(pk.InfinityA))
+	pk.scratch1, _ = packBN254FrVectorFilteredInto(pk.scratch1, wireValues, pk.g1BIndices, len(pk.InfinityB))
+	pk.scratch2 = packBN254FrVectorRegularLEInto(pk.scratch2, wireValues[publicVariables:])
+	batchMSM, err := bridgeMSMBatch(pk.handle, pk.scratch0, pk.scratch1, pk.scratch2)
+	if err != nil {
+		return nil, fmt.Errorf("webgpu groth16 bn254: batched MSMs: %w", err)
+	}
+	arBaseAff, err := decodeBN254G1AffineFromPacked(batchMSM.G1ABytes, nil)
 	if err != nil {
 		return nil, fmt.Errorf("webgpu groth16 bn254: msm G1.A: %w", err)
 	}
-	bs1BaseAff, err := decodeBN254G1AffineFromPacked(bridgeMSMG1(pk.handle, "g1B", packBN254FrVectorRegularLE(wireValuesB)))
+	bs1BaseAff, err := decodeBN254G1AffineFromPacked(batchMSM.G1BBytes, nil)
 	if err != nil {
 		return nil, fmt.Errorf("webgpu groth16 bn254: msm G1.B: %w", err)
 	}
-	kBaseAff, err := decodeBN254G1AffineFromPacked(bridgeMSMG1(pk.handle, "g1K", packBN254FrVectorRegularLE(privateWireValues)))
+	kBaseAff, err := decodeBN254G1AffineFromPacked(batchMSM.G1KBytes, nil)
 	if err != nil {
 		return nil, fmt.Errorf("webgpu groth16 bn254: msm G1.K: %w", err)
 	}
-	sizeH := int(pk.Domain.Cardinality - 1)
-	zBaseAff, err := decodeBN254G1AffineFromPacked(bridgeMSMG1(pk.handle, "g1Z", packBN254FrVectorRegularLE(h[:sizeH])))
+	zBaseAff, err := decodeBN254G1AffineFromPacked(zPacked, nil)
 	if err != nil {
 		return nil, fmt.Errorf("webgpu groth16 bn254: msm G1.Z: %w", err)
 	}
-	bsBaseAff, err := decodeBN254G2AffineFromPacked(bridgeMSMG2(pk.handle, "g2B", packBN254FrVectorRegularLE(wireValuesB)))
+	bsBaseAff, err := decodeBN254G2AffineFromPacked(batchMSM.G2BBytes, nil)
 	if err != nil {
 		return nil, fmt.Errorf("webgpu groth16 bn254: msm G2.B: %w", err)
 	}
@@ -139,67 +156,114 @@ func (pk *BN254ProvingKey) ensurePrepared() error {
 	pk.prepareMu.Lock()
 	defer pk.prepareMu.Unlock()
 
-	if pk.handle != "" {
+	if pk.handle != "" && pk.quotientWarmed {
 		return nil
 	}
 	if err := bridgeInit("bn254"); err != nil {
 		return err
 	}
 
-	payload := jsObject()
-	payload.Set("g1A", jsUint8Array(packBN254G1AffineJacobianBatch(pk.G1.A)))
-	payload.Set("g1ACount", len(pk.G1.A))
-	payload.Set("g1B", jsUint8Array(packBN254G1AffineJacobianBatch(pk.G1.B)))
-	payload.Set("g1BCount", len(pk.G1.B))
-	payload.Set("g1K", jsUint8Array(packBN254G1AffineJacobianBatch(pk.G1.K)))
-	payload.Set("g1KCount", len(pk.G1.K))
-	payload.Set("g1Z", jsUint8Array(packBN254G1AffineJacobianBatch(pk.G1.Z)))
-	payload.Set("g1ZCount", len(pk.G1.Z))
-	payload.Set("g2B", jsUint8Array(packBN254G2AffineJacobianBatch(pk.G2.B)))
-	payload.Set("g2BCount", len(pk.G2.B))
+	if pk.handle == "" {
+		payload := jsObject()
+		payload.Set("g1A", jsUint8Array(packBN254G1AffineJacobianBatch(pk.G1.A)))
+		payload.Set("g1ACount", len(pk.G1.A))
+		payload.Set("g1B", jsUint8Array(packBN254G1AffineJacobianBatch(pk.G1.B)))
+		payload.Set("g1BCount", len(pk.G1.B))
+		payload.Set("g1K", jsUint8Array(packBN254G1AffineJacobianBatch(pk.G1.K)))
+		payload.Set("g1KCount", len(pk.G1.K))
+		payload.Set("g1Z", jsUint8Array(packBN254G1AffineJacobianBatch(pk.G1.Z)))
+		payload.Set("g1ZCount", len(pk.G1.Z))
+		payload.Set("g2B", jsUint8Array(packBN254G2AffineJacobianBatch(pk.G2.B)))
+		payload.Set("g2BCount", len(pk.G2.B))
 
-	handle, err := bridgePrepareKey("bn254", payload)
-	if err != nil {
-		return err
+		handle, err := bridgePrepareKey("bn254", payload)
+		if err != nil {
+			return err
+		}
+		pk.handle = handle
+		pk.g1AIndices = computeKeptIndices(pk.InfinityA)
+		pk.g1BIndices = computeKeptIndices(pk.InfinityB)
 	}
-	pk.handle = handle
+	if !pk.quotientWarmed {
+		if err := bridgePrewarmQuotientDomain("bn254", int(pk.Domain.Cardinality)); err != nil {
+			return err
+		}
+		pk.quotientWarmed = true
+	}
 	return nil
 }
 
-func filterWireValuesBN254(values []bn254fr.Element, infinity []bool) []bn254fr.Element {
-	if len(infinity) == 0 {
-		return append([]bn254fr.Element(nil), values...)
+func packBN254FrVectorRegularLEInto(dst []byte, values []bn254fr.Element) []byte {
+	required := len(values) * bn254FrBytes
+	if cap(dst) < required {
+		dst = make([]byte, required)
+	} else {
+		dst = dst[:required]
 	}
-	out := make([]bn254fr.Element, 0, len(values))
-	for i := range values {
-		if i < len(infinity) && infinity[i] {
-			continue
-		}
-		out = append(out, values[i])
-	}
-	return out
-}
-
-func bridgeComputeHBN254(a, b, c []bn254fr.Element, domainSize int) ([]bn254fr.Element, error) {
-	aPacked := packBN254FrVectorRegularLE(padBN254FrVector(a, domainSize))
-	bPacked := packBN254FrVectorRegularLE(padBN254FrVector(b, domainSize))
-	cPacked := packBN254FrVectorRegularLE(padBN254FrVector(c, domainSize))
-	return unpackBN254FrVectorRegularLE(bridgeComputeH("bn254", aPacked, bPacked, cPacked))
-}
-
-func packBN254FrVectorRegularLE(values []bn254fr.Element) []byte {
-	out := make([]byte, 0, len(values)*bn254FrBytes)
 	for i := range values {
 		be := values[i].Bytes()
-		out = append(out, reverseBytes(be[:])...)
+		base := i * bn254FrBytes
+		for j := 0; j < bn254FrBytes; j++ {
+			dst[base+j] = be[bn254FrBytes-1-j]
+		}
 	}
-	return out
+	return dst
 }
 
-func padBN254FrVector(values []bn254fr.Element, size int) []bn254fr.Element {
-	out := make([]bn254fr.Element, size)
-	copy(out, values)
-	return out
+func packBN254FrVectorMontLEPaddedInto(dst []byte, values []bn254fr.Element, size int) []byte {
+	required := size * bn254FrBytes
+	if cap(dst) < required {
+		dst = make([]byte, required)
+	} else {
+		dst = dst[:required]
+		clear(dst)
+	}
+	for i := range values {
+		base := i * bn254FrBytes
+		for j, word := range [4]uint64(values[i]) {
+			binary.LittleEndian.PutUint64(dst[base+j*8:base+(j+1)*8], word)
+		}
+	}
+	return dst
+}
+
+func packBN254FrVectorFilteredInto(dst []byte, values []bn254fr.Element, keptPrefixIndices []int, prefixLen int) ([]byte, int) {
+	limit := prefixLen
+	if limit > len(values) {
+		limit = len(values)
+	}
+	count := len(values) - limit
+	for _, idx := range keptPrefixIndices {
+		if idx >= limit {
+			break
+		}
+		count++
+	}
+	required := count * bn254FrBytes
+	if cap(dst) < required {
+		dst = make([]byte, required)
+	} else {
+		dst = dst[:required]
+	}
+	offset := 0
+	for _, idx := range keptPrefixIndices {
+		if idx >= limit {
+			break
+		}
+		be := values[idx].Bytes()
+		for j := 0; j < bn254FrBytes; j++ {
+			dst[offset+j] = be[bn254FrBytes-1-j]
+		}
+		offset += bn254FrBytes
+	}
+	for i := limit; i < len(values); i++ {
+		be := values[i].Bytes()
+		for j := 0; j < bn254FrBytes; j++ {
+			dst[offset+j] = be[bn254FrBytes-1-j]
+		}
+		offset += bn254FrBytes
+	}
+	return dst, count
 }
 
 func unpackBN254FrVectorRegularLE(packed []byte, err error) ([]bn254fr.Element, error) {

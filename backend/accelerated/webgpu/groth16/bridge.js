@@ -155,8 +155,34 @@ async function msmG1(handle, vectorName, scalarsPacked) {
   return out;
 }
 
+async function msmG1Cached(entry, vectorName, scalarsPacked) {
+  const module = await getCurveModule(entry.curve);
+  const config = CURVE_CONFIG[entry.curve];
+  const basesPacked = entry[vectorName];
+  const count = entry[`${vectorName}Count`];
+  if (!(basesPacked instanceof Uint8Array) || typeof count !== "number") {
+    throw new Error(`missing cached G1 vector ${vectorName}`);
+  }
+  const resultPacked = await module.g1msm.pippengerPackedJacobianBases(basesPacked, scalarsPacked, {
+    count: 1,
+    termsPerInstance: count,
+    window: module.g1msm.bestWindow(count),
+  });
+  const jacobian = unpackG1JacobianPoint(entry.curve, resultPacked.slice(0, config.g1PointBytes));
+  const affine = await module.g1.jacobianToAffine(jacobian);
+  const out = new Uint8Array(2 * config.g1CoordinateBytes);
+  out.set(affine.x, 0);
+  out.set(affine.y, config.g1CoordinateBytes);
+  return out;
+}
+
 async function msmG2(handle, vectorName, scalarsPacked) {
   const entry = getKey(handle);
+  const point = await msmG2Cached(entry, vectorName, cloneBytes(scalarsPacked));
+  return point;
+}
+
+async function msmG2Cached(entry, vectorName, scalarsPacked) {
   const module = await getCurveModule(entry.curve);
   const config = CURVE_CONFIG[entry.curve];
   const basesPacked = entry[vectorName];
@@ -179,9 +205,46 @@ async function msmG2(handle, vectorName, scalarsPacked) {
   return out;
 }
 
+async function msmBatch(handle, payload) {
+  const entry = getKey(handle);
+  const points = {};
+
+  if (payload.g1A) {
+    points.g1A = await msmG1Cached(entry, "g1A", payload.g1A);
+  }
+  if (payload.g1B) {
+    const g1BScalars = payload.g1B;
+    points.g1B = await msmG1Cached(entry, "g1B", g1BScalars);
+    points.g2B = await msmG2Cached(entry, "g2B", g1BScalars);
+  }
+  if (payload.g1K) {
+    points.g1K = await msmG1Cached(entry, "g1K", payload.g1K);
+  }
+
+  return points;
+}
+
 async function computeH(curve, aPacked, bPacked, cPacked) {
   const module = await getCurveModule(curve);
-  return module.ntt.computeGroth16QuotientPackedRegular(cloneBytes(aPacked), cloneBytes(bPacked), cloneBytes(cPacked));
+  return module.groth16.computeGroth16QuotientPackedRegular(cloneBytes(aPacked), cloneBytes(bPacked), cloneBytes(cPacked));
+}
+
+async function computeHZMSMG1(handle, aPacked, bPacked, cPacked) {
+  const entry = getKey(handle);
+  const module = await getCurveModule(entry.curve);
+  const quotient = await module.groth16.computeGroth16QuotientPackedMont(
+    cloneBytes(aPacked),
+    cloneBytes(bPacked),
+    cloneBytes(cPacked),
+  );
+  const zCount = Number(entry.g1ZCount);
+  const scalars = quotient.subarray(0, zCount * 32);
+  return msmG1Cached(entry, "g1Z", scalars);
+}
+
+async function prewarmQuotientDomain(curve, size) {
+  const module = await getCurveModule(curve);
+  await module.groth16.prewarmGroth16QuotientDomain(Number(size));
 }
 
 globalThis.wnarkGroth16WebGPU = {
@@ -190,5 +253,8 @@ globalThis.wnarkGroth16WebGPU = {
   releaseKey,
   msmG1,
   msmG2,
+  msmBatch,
   computeH,
+  computeHZMSMG1,
+  prewarmQuotientDomain,
 };
