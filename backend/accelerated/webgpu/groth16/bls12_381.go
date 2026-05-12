@@ -287,11 +287,8 @@ func packBLS12381FrVectorRegularLEInto(dst []byte, values []bls12381fr.Element) 
 		dst = dst[:required]
 	}
 	for i := range values {
-		be := values[i].Bytes()
 		base := i * bls12381FrBytes
-		for j := 0; j < bls12381FrBytes; j++ {
-			dst[base+j] = be[bls12381FrBytes-1-j]
-		}
+		writeBLS12381FrRegularLE(dst[base:base+bls12381FrBytes], &values[i])
 	}
 	return dst
 }
@@ -321,10 +318,7 @@ func packBLS12381FrVectorRegularLEFilteredOutInto(dst []byte, values []bls12381f
 		if _, ok := removeSet[firstIndex+i]; ok {
 			continue
 		}
-		be := values[i].Bytes()
-		for j := 0; j < bls12381FrBytes; j++ {
-			dst[offset+j] = be[bls12381FrBytes-1-j]
-		}
+		writeBLS12381FrRegularLE(dst[offset:offset+bls12381FrBytes], &values[i])
 		offset += bls12381FrBytes
 	}
 	return dst
@@ -340,9 +334,7 @@ func packBLS12381FrVectorMontLEPaddedInto(dst []byte, values []bls12381fr.Elemen
 	}
 	for i := range values {
 		base := i * bls12381FrBytes
-		for j, word := range [4]uint64(values[i]) {
-			binary.LittleEndian.PutUint64(dst[base+j*8:base+(j+1)*8], word)
-		}
+		writeBLS12381FrMontLE(dst[base:base+bls12381FrBytes], &values[i])
 	}
 	return dst
 }
@@ -370,20 +362,27 @@ func packBLS12381FrVectorFilteredInto(dst []byte, values []bls12381fr.Element, k
 		if idx >= limit {
 			break
 		}
-		be := values[idx].Bytes()
-		for j := 0; j < bls12381FrBytes; j++ {
-			dst[offset+j] = be[bls12381FrBytes-1-j]
-		}
+		writeBLS12381FrRegularLE(dst[offset:offset+bls12381FrBytes], &values[idx])
 		offset += bls12381FrBytes
 	}
 	for i := limit; i < len(values); i++ {
-		be := values[i].Bytes()
-		for j := 0; j < bls12381FrBytes; j++ {
-			dst[offset+j] = be[bls12381FrBytes-1-j]
-		}
+		writeBLS12381FrRegularLE(dst[offset:offset+bls12381FrBytes], &values[i])
 		offset += bls12381FrBytes
 	}
 	return dst, count
+}
+
+func writeBLS12381FrRegularLE(dst []byte, value *bls12381fr.Element) {
+	be := value.Bytes()
+	for i := 0; i < bls12381FrBytes; i++ {
+		dst[i] = be[bls12381FrBytes-1-i]
+	}
+}
+
+func writeBLS12381FrMontLE(dst []byte, value *bls12381fr.Element) {
+	for i, word := range [4]uint64(*value) {
+		binary.LittleEndian.PutUint64(dst[i*8:(i+1)*8], word)
+	}
 }
 
 func unpackBLS12381FrVectorRegularLE(packed []byte, err error) ([]bls12381fr.Element, error) {
@@ -407,40 +406,33 @@ func unpackBLS12381FrVectorRegularLE(packed []byte, err error) ([]bls12381fr.Ele
 }
 
 func packBLS12381G1AffineJacobianBatch(points []curve.G1Affine) []byte {
-	out := make([]byte, 0, len(points)*bls12381G1PointBytes)
+	out := make([]byte, len(points)*bls12381G1PointBytes)
 	one := bls12381FpOneMontLE()
-	zero := make([]byte, bls12381G1CoordinateBytes)
 	for i := range points {
 		if points[i].IsInfinity() {
-			out = append(out, zero...)
-			out = append(out, zero...)
-			out = append(out, zero...)
 			continue
 		}
-		out = append(out, bls12381FpMontLE(points[i].X)...)
-		out = append(out, bls12381FpMontLE(points[i].Y)...)
-		out = append(out, one...)
+		base := i * bls12381G1PointBytes
+		writeBLS12381FPMontLE(out[base:base+bls12381G1CoordinateBytes], &points[i].X)
+		writeBLS12381FPMontLE(out[base+bls12381G1CoordinateBytes:base+2*bls12381G1CoordinateBytes], &points[i].Y)
+		copy(out[base+2*bls12381G1CoordinateBytes:base+3*bls12381G1CoordinateBytes], one)
 	}
 	return out
 }
 
 func packBLS12381G2AffineJacobianBatch(points []curve.G2Affine) []byte {
-	out := make([]byte, 0, len(points)*bls12381G2PointBytes)
+	out := make([]byte, len(points)*bls12381G2PointBytes)
 	one := bls12381FpOneMontLE()
-	zero := make([]byte, bls12381G2ComponentBytes)
 	for i := range points {
 		if points[i].IsInfinity() {
-			for j := 0; j < 6; j++ {
-				out = append(out, zero...)
-			}
 			continue
 		}
-		out = append(out, bls12381FpMontLE(points[i].X.A0)...)
-		out = append(out, bls12381FpMontLE(points[i].X.A1)...)
-		out = append(out, bls12381FpMontLE(points[i].Y.A0)...)
-		out = append(out, bls12381FpMontLE(points[i].Y.A1)...)
-		out = append(out, one...)
-		out = append(out, zero...)
+		base := i * bls12381G2PointBytes
+		writeBLS12381FPMontLE(out[base:base+bls12381G2ComponentBytes], &points[i].X.A0)
+		writeBLS12381FPMontLE(out[base+bls12381G2ComponentBytes:base+2*bls12381G2ComponentBytes], &points[i].X.A1)
+		writeBLS12381FPMontLE(out[base+2*bls12381G2ComponentBytes:base+3*bls12381G2ComponentBytes], &points[i].Y.A0)
+		writeBLS12381FPMontLE(out[base+3*bls12381G2ComponentBytes:base+4*bls12381G2ComponentBytes], &points[i].Y.A1)
+		copy(out[base+4*bls12381G2ComponentBytes:base+5*bls12381G2ComponentBytes], one)
 	}
 	return out
 }
@@ -481,16 +473,16 @@ func readBLS12381FPMontLE(src []byte) bls12381fp.Element {
 	return bls12381fp.Element(words)
 }
 
-func bls12381FpMontLE(v bls12381fp.Element) []byte {
-	out := make([]byte, bls12381G1CoordinateBytes)
-	for i, word := range [6]uint64(v) {
-		binary.LittleEndian.PutUint64(out[i*8:(i+1)*8], word)
+func writeBLS12381FPMontLE(dst []byte, value *bls12381fp.Element) {
+	for i, word := range [6]uint64(*value) {
+		binary.LittleEndian.PutUint64(dst[i*8:(i+1)*8], word)
 	}
-	return out
 }
 
 func bls12381FpOneMontLE() []byte {
+	out := make([]byte, bls12381G1CoordinateBytes)
 	var one bls12381fp.Element
 	one.SetOne()
-	return bls12381FpMontLE(one)
+	writeBLS12381FPMontLE(out, &one)
+	return out
 }

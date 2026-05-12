@@ -15,6 +15,7 @@ import {
   unpackElementBatch,
 } from "./runtime_common.js";
 import { fetchJSON } from "./browser_utils.js";
+import { hexToBytesLE } from "./encoding.js";
 
 declare const GPUBufferUsage: {
   STORAGE: number;
@@ -174,14 +175,14 @@ export function createNTTModule(
           fr.toMontgomeryPacked(packElementBatch(stage, elementBytes, `${label}.inverseStageRegular`)),
         ),
       );
-      const inverseScaleMont = await fr.toMontgomery(bigIntToBytesLE(hexToBigInt(domain.cardinality_inv_hex), elementBytes));
+      const inverseScaleMont = await fr.toMontgomery(hexToBytesLE(domain.cardinality_inv_hex, elementBytes));
       const cosetPowersPackedMont = await fr.toMontgomeryPacked(
         buildPowerVectorPackedRegular(hexToBigInt(domain.coset_gen_hex), size, modulus, elementBytes),
       );
       const inverseCosetPowersPackedMont = await fr.toMontgomeryPacked(
         buildPowerVectorPackedRegular(hexToBigInt(domain.coset_gen_inv_hex), size, modulus, elementBytes),
       );
-      const cosetDenInvMont = await fr.toMontgomery(bigIntToBytesLE(hexToBigInt(domain.coset_den_inv_hex), elementBytes));
+      const cosetDenInvMont = await fr.toMontgomery(hexToBytesLE(domain.coset_den_inv_hex, elementBytes));
       return {
         forwardStageMont,
         inverseStageMont,

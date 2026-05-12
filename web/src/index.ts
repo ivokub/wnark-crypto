@@ -34,14 +34,14 @@
  *
  * ## Coordinate conventions
  *
- * All field elements and curve points are passed and returned in **Montgomery form** as
- * `Uint32Array` little-endian u32 limb arrays.  Use `splitBytesLEToU32` /
- * `joinU32LimbsToBytesLE` to convert to/from standard byte representations.
+ * Public byte-oriented APIs use fixed-width little-endian `Uint8Array` values.
+ * Field arithmetic and point coordinates use Montgomery form unless a method
+ * explicitly says it accepts or returns regular little-endian values.
  *
- * - **Affine points** — `{x, y}` where each coordinate is a `Uint32Array`.
- * - **Jacobian points** — `{x, y, z}` packed as a flat `Uint32Array` in `[x | y | z]` order.
- * - **G2 affine / Jacobian** — same layout but each coordinate is an Fp2 element
- *   (`{c0, c1}` each a `Uint32Array`).
+ * - **MSM scalars** — regular little-endian scalar-field bytes.
+ * - **Affine/Jacobian coordinates** — Montgomery little-endian base-field bytes.
+ * - **Packed vectors** — concatenated fixed-width elements in the representation
+ *   named by the method (`PackedRegular` or `PackedMont`).
  *
  * ## Shader bundling
  *
@@ -112,6 +112,14 @@ export type { CurveDefinition } from "./curvegpu/curves.js";
 
 export type { CurveID, FieldID, FieldShape } from "./curvegpu/types.js";
 export { shapeFor } from "./curvegpu/types.js";
+
+export type {
+  MontgomeryLEBytes,
+  PackedMontgomeryLEBytes,
+  PackedRegularLEBytes,
+  RegularLEBytes,
+} from "./curvegpu/encoding.js";
+export { hexToBytesLE } from "./curvegpu/encoding.js";
 
 export {
   joinU32LimbsToBigUint64,
