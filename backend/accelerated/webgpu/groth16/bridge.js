@@ -113,7 +113,8 @@ async function init(curve) {
 async function prepareKey(curve, payload) {
   await init(curve);
   const handle = `${curve}:${nextHandle++}`;
-  keyCache.set(handle, {
+  const commitmentCount = Number(payload.commitmentCount ?? 0);
+  const entry = {
     curve,
     g1A: cloneBytes(payload.g1A),
     g1ACount: Number(payload.g1ACount),
@@ -125,7 +126,17 @@ async function prepareKey(curve, payload) {
     g1ZCount: Number(payload.g1ZCount),
     g2B: cloneBytes(payload.g2B),
     g2BCount: Number(payload.g2BCount),
-  });
+    commitmentCount,
+  };
+  for (let i = 0; i < commitmentCount; i++) {
+    const basisName = `commitmentBasis${i}`;
+    const basisExpSigmaName = `commitmentBasisExpSigma${i}`;
+    entry[basisName] = cloneBytes(payload[basisName]);
+    entry[`${basisName}Count`] = Number(payload[`${basisName}Count`]);
+    entry[basisExpSigmaName] = cloneBytes(payload[basisExpSigmaName]);
+    entry[`${basisExpSigmaName}Count`] = Number(payload[`${basisExpSigmaName}Count`]);
+  }
+  keyCache.set(handle, entry);
   return { handle };
 }
 

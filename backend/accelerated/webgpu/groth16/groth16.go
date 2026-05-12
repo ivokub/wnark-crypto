@@ -22,8 +22,9 @@ import (
 // wasm targets.
 //
 // The current implementation accelerates the heavy quotient-H and MSM stages
-// while leaving witness solving in Go. Commitment-carrying circuits are
-// rejected for now.
+// while leaving witness solving in Go. BSB22 commitments are handled by
+// replacing gnark's commitment hint during solving and offloading the
+// commitment/PoK MSMs to WebGPU.
 func Prove(r1cs constraint.ConstraintSystem, pk gnarkgroth16.ProvingKey, fullWitness witness.Witness, opts ...backend.ProverOption) (gnarkgroth16.Proof, error) {
 	switch _r1cs := r1cs.(type) {
 	case *csbn254.R1CS:

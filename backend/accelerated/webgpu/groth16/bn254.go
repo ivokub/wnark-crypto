@@ -6,16 +6,21 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"strconv"
 	"sync"
 
+	"github.com/consensys/gnark-crypto/ecc"
 	curve "github.com/consensys/gnark-crypto/ecc/bn254"
 	bn254fp "github.com/consensys/gnark-crypto/ecc/bn254/fp"
 	bn254fr "github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr/hash_to_field"
 	"github.com/consensys/gnark/backend"
 	native "github.com/consensys/gnark/backend/groth16/bn254"
 	"github.com/consensys/gnark/backend/witness"
 	"github.com/consensys/gnark/constraint"
 	cs "github.com/consensys/gnark/constraint/bn254"
+	"github.com/consensys/gnark/constraint/solver"
+	fcs "github.com/consensys/gnark/frontend/cs"
 )
 
 const (
@@ -46,11 +51,11 @@ func proveBN254(r1cs *cs.R1CS, pk *BN254ProvingKey, fullWitness witness.Witness,
 	if err != nil {
 		return nil, fmt.Errorf("new prover config: %w", err)
 	}
+	if opt.HashToFieldFn == nil {
+		opt.HashToFieldFn = hash_to_field.New([]byte(constraint.CommitmentDst))
+	}
 
 	commitmentInfo := r1cs.CommitmentInfo.(constraint.Groth16Commitments)
-	if len(commitmentInfo) > 0 {
-		return nil, fmt.Errorf("webgpu groth16 bn254: commitment hints are not supported yet")
-	}
 
 	if err := pk.ensurePrepared(); err != nil {
 		return nil, err
@@ -58,13 +63,89 @@ func proveBN254(r1cs *cs.R1CS, pk *BN254ProvingKey, fullWitness witness.Witness,
 	pk.scratchMu.Lock()
 	defer pk.scratchMu.Unlock()
 
-	_solution, err := r1cs.Solve(fullWitness, opt.SolverOpts...)
+	proof := &native.Proof{
+		Commitments: make([]curve.G1Affine, len(commitmentInfo)),
+	}
+	privateCommittedValues := make([][]bn254fr.Element, len(commitmentInfo))
+	solverOpts := opt.SolverOpts[:len(opt.SolverOpts):len(opt.SolverOpts)]
+	bsb22ID := solver.GetHintID(fcs.Bsb22CommitmentComputePlaceholder)
+	solverOpts = append(solverOpts, solver.OverrideHint(bsb22ID, func(_ *big.Int, in []*big.Int, out []*big.Int) error {
+		i := int(in[0].Int64())
+		if i < 0 || i >= len(commitmentInfo) {
+			return fmt.Errorf("webgpu groth16 bn254: invalid commitment index %d", i)
+		}
+		in = in[1:]
+		hashedCount := len(commitmentInfo[i].PublicAndCommitmentCommitted)
+		if len(in) < hashedCount {
+			return fmt.Errorf("webgpu groth16 bn254: commitment hint %d has %d inputs, expected at least %d", i, len(in), hashedCount)
+		}
+		hashed := in[:hashedCount]
+		committed := in[hashedCount:]
+
+		privateCommittedValues[i] = make([]bn254fr.Element, len(committed))
+		for j, inJ := range committed {
+			privateCommittedValues[i][j].SetBigInt(inJ)
+		}
+
+		scalars := packBN254FrVectorRegularLEInto(nil, privateCommittedValues[i])
+		commitmentPacked, err := bridgeMSMG1(pk.handle, "commitmentBasis"+strconv.Itoa(i), scalars)
+		if err != nil {
+			return fmt.Errorf("webgpu groth16 bn254: commitment %d MSM: %w", i, err)
+		}
+		if proof.Commitments[i], err = decodeBN254G1AffineFromPacked(commitmentPacked, nil); err != nil {
+			return fmt.Errorf("webgpu groth16 bn254: commitment %d decode: %w", i, err)
+		}
+
+		if _, err := opt.HashToFieldFn.Write(constraint.SerializeCommitment(proof.Commitments[i].Marshal(), hashed, (bn254fr.Bits-1)/8+1)); err != nil {
+			return err
+		}
+		hashBts := opt.HashToFieldFn.Sum(nil)
+		opt.HashToFieldFn.Reset()
+		nbBuf := bn254fr.Bytes
+		if opt.HashToFieldFn.Size() < bn254fr.Bytes {
+			nbBuf = opt.HashToFieldFn.Size()
+		}
+		var res bn254fr.Element
+		res.SetBytes(hashBts[:nbBuf])
+		res.BigInt(out[0])
+		return nil
+	}))
+
+	_solution, err := r1cs.Solve(fullWitness, solverOpts...)
 	if err != nil {
 		return nil, err
 	}
 	solution := _solution.(*cs.R1CSSolution)
 	wireValues := []bn254fr.Element(solution.W)
 	domainSize := int(pk.Domain.Cardinality)
+
+	if len(commitmentInfo) > 0 {
+		poks := make([]curve.G1Affine, len(commitmentInfo))
+		for i := range commitmentInfo {
+			if privateCommittedValues[i] == nil {
+				return nil, fmt.Errorf("webgpu groth16 bn254: commitment hint %d was not evaluated", i)
+			}
+			scalars := packBN254FrVectorRegularLEInto(nil, privateCommittedValues[i])
+			pokPacked, err := bridgeMSMG1(pk.handle, "commitmentBasisExpSigma"+strconv.Itoa(i), scalars)
+			if err != nil {
+				return nil, fmt.Errorf("webgpu groth16 bn254: commitment %d pok MSM: %w", i, err)
+			}
+			if poks[i], err = decodeBN254G1AffineFromPacked(pokPacked, nil); err != nil {
+				return nil, fmt.Errorf("webgpu groth16 bn254: commitment %d pok decode: %w", i, err)
+			}
+		}
+		commitmentsSerialized := make([]byte, bn254fr.Bytes*len(commitmentInfo))
+		for i := range commitmentInfo {
+			copy(commitmentsSerialized[bn254fr.Bytes*i:], wireValues[commitmentInfo[i].CommitmentIndex].Marshal())
+		}
+		challenge, err := bn254fr.Hash(commitmentsSerialized, []byte("G16-BSB22"), 1)
+		if err != nil {
+			return nil, err
+		}
+		if _, err = proof.CommitmentPok.Fold(poks, challenge[0], ecc.MultiExpConfig{NbTasks: 1}); err != nil {
+			return nil, err
+		}
+	}
 
 	pk.scratch0 = packBN254FrVectorMontLEPaddedInto(pk.scratch0, solution.A, domainSize)
 	pk.scratch1 = packBN254FrVectorMontLEPaddedInto(pk.scratch1, solution.B, domainSize)
@@ -77,7 +158,7 @@ func proveBN254(r1cs *cs.R1CS, pk *BN254ProvingKey, fullWitness witness.Witness,
 
 	pk.scratch0, _ = packBN254FrVectorFilteredInto(pk.scratch0, wireValues, pk.g1AIndices, len(pk.InfinityA))
 	pk.scratch1, _ = packBN254FrVectorFilteredInto(pk.scratch1, wireValues, pk.g1BIndices, len(pk.InfinityB))
-	pk.scratch2 = packBN254FrVectorRegularLEInto(pk.scratch2, wireValues[publicVariables:])
+	pk.scratch2 = packBN254FrVectorRegularLEFilteredOutInto(pk.scratch2, wireValues[publicVariables:], publicVariables, commitmentWireIndexesToRemove(commitmentInfo))
 	batchMSM, err := bridgeMSMBatch(pk.handle, pk.scratch0, pk.scratch1, pk.scratch2)
 	if err != nil {
 		return nil, fmt.Errorf("webgpu groth16 bn254: batched MSMs: %w", err)
@@ -143,9 +224,6 @@ func proveBN254(r1cs *cs.R1CS, pk *BN254ProvingKey, fullWitness witness.Witness,
 	bs.AddAssign(&deltaS)
 	bs.AddMixed(&pk.G2.Beta)
 
-	proof := &native.Proof{
-		Commitments: make([]curve.G1Affine, 0),
-	}
 	proof.Ar.FromJacobian(&ar)
 	proof.Krs.FromJacobian(&krs)
 	proof.Bs.FromJacobian(&bs)
@@ -175,6 +253,14 @@ func (pk *BN254ProvingKey) ensurePrepared() error {
 		payload.Set("g1ZCount", len(pk.G1.Z))
 		payload.Set("g2B", jsUint8Array(packBN254G2AffineJacobianBatch(pk.G2.B)))
 		payload.Set("g2BCount", len(pk.G2.B))
+		payload.Set("commitmentCount", len(pk.CommitmentKeys))
+		for i := range pk.CommitmentKeys {
+			suffix := strconv.Itoa(i)
+			payload.Set("commitmentBasis"+suffix, jsUint8Array(packBN254G1AffineJacobianBatch(pk.CommitmentKeys[i].Basis)))
+			payload.Set("commitmentBasis"+suffix+"Count", len(pk.CommitmentKeys[i].Basis))
+			payload.Set("commitmentBasisExpSigma"+suffix, jsUint8Array(packBN254G1AffineJacobianBatch(pk.CommitmentKeys[i].BasisExpSigma)))
+			payload.Set("commitmentBasisExpSigma"+suffix+"Count", len(pk.CommitmentKeys[i].BasisExpSigma))
+		}
 
 		handle, err := bridgePrepareKey("bn254", payload)
 		if err != nil {
@@ -206,6 +292,40 @@ func packBN254FrVectorRegularLEInto(dst []byte, values []bn254fr.Element) []byte
 		for j := 0; j < bn254FrBytes; j++ {
 			dst[base+j] = be[bn254FrBytes-1-j]
 		}
+	}
+	return dst
+}
+
+func packBN254FrVectorRegularLEFilteredOutInto(dst []byte, values []bn254fr.Element, firstIndex int, remove []int) []byte {
+	if len(remove) == 0 {
+		return packBN254FrVectorRegularLEInto(dst, values)
+	}
+	removeSet := make(map[int]struct{}, len(remove))
+	for _, idx := range remove {
+		removeSet[idx] = struct{}{}
+	}
+	count := 0
+	for i := range values {
+		if _, ok := removeSet[firstIndex+i]; !ok {
+			count++
+		}
+	}
+	required := count * bn254FrBytes
+	if cap(dst) < required {
+		dst = make([]byte, required)
+	} else {
+		dst = dst[:required]
+	}
+	offset := 0
+	for i := range values {
+		if _, ok := removeSet[firstIndex+i]; ok {
+			continue
+		}
+		be := values[i].Bytes()
+		for j := 0; j < bn254FrBytes; j++ {
+			dst[offset+j] = be[bn254FrBytes-1-j]
+		}
+		offset += bn254FrBytes
 	}
 	return dst
 }

@@ -2,6 +2,8 @@
 
 package groth16
 
+import "github.com/consensys/gnark/constraint"
+
 func computeKeptIndices(infinity []bool) []int {
 	if len(infinity) == 0 {
 		return nil
@@ -19,4 +21,21 @@ func computeKeptIndices(infinity []bool) []int {
 		}
 	}
 	return indices
+}
+
+func commitmentWireIndexesToRemove(commitmentInfo constraint.Groth16Commitments) []int {
+	if len(commitmentInfo) == 0 {
+		return nil
+	}
+	count := len(commitmentInfo)
+	privateCommitted := commitmentInfo.GetPrivateCommitted()
+	for _, indexes := range privateCommitted {
+		count += len(indexes)
+	}
+	out := make([]int, 0, count)
+	for _, indexes := range privateCommitted {
+		out = append(out, indexes...)
+	}
+	out = append(out, commitmentInfo.CommitmentIndexes()...)
+	return out
 }

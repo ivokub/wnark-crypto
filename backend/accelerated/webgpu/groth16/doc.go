@@ -7,7 +7,8 @@
 //   - circuit compilation, setup, witness assignment, and solver stay in gnark
 //   - Groth16 heavy MSMs are offloaded through a JS bridge to the browser
 //     WebGPU runtime in this repository
-//   - commitment hints are intentionally unsupported for now
+//   - BSB22 commitment hint, commitment MSM, and PoK MSM work is wired through
+//     the same WebGPU bridge
 //
 // The package mirrors gnark's accelerated backend layout without modifying the
 // gnark repository. Host applications are expected to load

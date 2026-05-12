@@ -6,16 +6,21 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"strconv"
 	"sync"
 
+	"github.com/consensys/gnark-crypto/ecc"
 	curve "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	bls12381fp "github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
 	bls12381fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
+	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr/hash_to_field"
 	"github.com/consensys/gnark/backend"
 	native "github.com/consensys/gnark/backend/groth16/bls12-381"
 	"github.com/consensys/gnark/backend/witness"
 	"github.com/consensys/gnark/constraint"
 	cs "github.com/consensys/gnark/constraint/bls12-381"
+	"github.com/consensys/gnark/constraint/solver"
+	fcs "github.com/consensys/gnark/frontend/cs"
 )
 
 const (
@@ -46,11 +51,11 @@ func proveBLS12381(r1cs *cs.R1CS, pk *BLS12381ProvingKey, fullWitness witness.Wi
 	if err != nil {
 		return nil, fmt.Errorf("new prover config: %w", err)
 	}
+	if opt.HashToFieldFn == nil {
+		opt.HashToFieldFn = hash_to_field.New([]byte(constraint.CommitmentDst))
+	}
 
 	commitmentInfo := r1cs.CommitmentInfo.(constraint.Groth16Commitments)
-	if len(commitmentInfo) > 0 {
-		return nil, fmt.Errorf("webgpu groth16 bls12_381: commitment hints are not supported yet")
-	}
 
 	if err := pk.ensurePrepared(); err != nil {
 		return nil, err
@@ -58,13 +63,89 @@ func proveBLS12381(r1cs *cs.R1CS, pk *BLS12381ProvingKey, fullWitness witness.Wi
 	pk.scratchMu.Lock()
 	defer pk.scratchMu.Unlock()
 
-	_solution, err := r1cs.Solve(fullWitness, opt.SolverOpts...)
+	proof := &native.Proof{
+		Commitments: make([]curve.G1Affine, len(commitmentInfo)),
+	}
+	privateCommittedValues := make([][]bls12381fr.Element, len(commitmentInfo))
+	solverOpts := opt.SolverOpts[:len(opt.SolverOpts):len(opt.SolverOpts)]
+	bsb22ID := solver.GetHintID(fcs.Bsb22CommitmentComputePlaceholder)
+	solverOpts = append(solverOpts, solver.OverrideHint(bsb22ID, func(_ *big.Int, in []*big.Int, out []*big.Int) error {
+		i := int(in[0].Int64())
+		if i < 0 || i >= len(commitmentInfo) {
+			return fmt.Errorf("webgpu groth16 bls12_381: invalid commitment index %d", i)
+		}
+		in = in[1:]
+		hashedCount := len(commitmentInfo[i].PublicAndCommitmentCommitted)
+		if len(in) < hashedCount {
+			return fmt.Errorf("webgpu groth16 bls12_381: commitment hint %d has %d inputs, expected at least %d", i, len(in), hashedCount)
+		}
+		hashed := in[:hashedCount]
+		committed := in[hashedCount:]
+
+		privateCommittedValues[i] = make([]bls12381fr.Element, len(committed))
+		for j, inJ := range committed {
+			privateCommittedValues[i][j].SetBigInt(inJ)
+		}
+
+		scalars := packBLS12381FrVectorRegularLEInto(nil, privateCommittedValues[i])
+		commitmentPacked, err := bridgeMSMG1(pk.handle, "commitmentBasis"+strconv.Itoa(i), scalars)
+		if err != nil {
+			return fmt.Errorf("webgpu groth16 bls12_381: commitment %d MSM: %w", i, err)
+		}
+		if proof.Commitments[i], err = decodeBLS12381G1AffineFromPacked(commitmentPacked, nil); err != nil {
+			return fmt.Errorf("webgpu groth16 bls12_381: commitment %d decode: %w", i, err)
+		}
+
+		if _, err := opt.HashToFieldFn.Write(constraint.SerializeCommitment(proof.Commitments[i].Marshal(), hashed, (bls12381fr.Bits-1)/8+1)); err != nil {
+			return err
+		}
+		hashBts := opt.HashToFieldFn.Sum(nil)
+		opt.HashToFieldFn.Reset()
+		nbBuf := bls12381fr.Bytes
+		if opt.HashToFieldFn.Size() < bls12381fr.Bytes {
+			nbBuf = opt.HashToFieldFn.Size()
+		}
+		var res bls12381fr.Element
+		res.SetBytes(hashBts[:nbBuf])
+		res.BigInt(out[0])
+		return nil
+	}))
+
+	_solution, err := r1cs.Solve(fullWitness, solverOpts...)
 	if err != nil {
 		return nil, err
 	}
 	solution := _solution.(*cs.R1CSSolution)
 	wireValues := []bls12381fr.Element(solution.W)
 	domainSize := int(pk.Domain.Cardinality)
+
+	if len(commitmentInfo) > 0 {
+		poks := make([]curve.G1Affine, len(commitmentInfo))
+		for i := range commitmentInfo {
+			if privateCommittedValues[i] == nil {
+				return nil, fmt.Errorf("webgpu groth16 bls12_381: commitment hint %d was not evaluated", i)
+			}
+			scalars := packBLS12381FrVectorRegularLEInto(nil, privateCommittedValues[i])
+			pokPacked, err := bridgeMSMG1(pk.handle, "commitmentBasisExpSigma"+strconv.Itoa(i), scalars)
+			if err != nil {
+				return nil, fmt.Errorf("webgpu groth16 bls12_381: commitment %d pok MSM: %w", i, err)
+			}
+			if poks[i], err = decodeBLS12381G1AffineFromPacked(pokPacked, nil); err != nil {
+				return nil, fmt.Errorf("webgpu groth16 bls12_381: commitment %d pok decode: %w", i, err)
+			}
+		}
+		commitmentsSerialized := make([]byte, bls12381fr.Bytes*len(commitmentInfo))
+		for i := range commitmentInfo {
+			copy(commitmentsSerialized[bls12381fr.Bytes*i:], wireValues[commitmentInfo[i].CommitmentIndex].Marshal())
+		}
+		challenge, err := bls12381fr.Hash(commitmentsSerialized, []byte("G16-BSB22"), 1)
+		if err != nil {
+			return nil, err
+		}
+		if _, err = proof.CommitmentPok.Fold(poks, challenge[0], ecc.MultiExpConfig{NbTasks: 1}); err != nil {
+			return nil, err
+		}
+	}
 
 	pk.scratch0 = packBLS12381FrVectorMontLEPaddedInto(pk.scratch0, solution.A, domainSize)
 	pk.scratch1 = packBLS12381FrVectorMontLEPaddedInto(pk.scratch1, solution.B, domainSize)
@@ -77,7 +158,7 @@ func proveBLS12381(r1cs *cs.R1CS, pk *BLS12381ProvingKey, fullWitness witness.Wi
 
 	pk.scratch0, _ = packBLS12381FrVectorFilteredInto(pk.scratch0, wireValues, pk.g1AIndices, len(pk.InfinityA))
 	pk.scratch1, _ = packBLS12381FrVectorFilteredInto(pk.scratch1, wireValues, pk.g1BIndices, len(pk.InfinityB))
-	pk.scratch2 = packBLS12381FrVectorRegularLEInto(pk.scratch2, wireValues[publicVariables:])
+	pk.scratch2 = packBLS12381FrVectorRegularLEFilteredOutInto(pk.scratch2, wireValues[publicVariables:], publicVariables, commitmentWireIndexesToRemove(commitmentInfo))
 	batchMSM, err := bridgeMSMBatch(pk.handle, pk.scratch0, pk.scratch1, pk.scratch2)
 	if err != nil {
 		return nil, fmt.Errorf("webgpu groth16 bls12_381: batched MSMs: %w", err)
@@ -143,9 +224,6 @@ func proveBLS12381(r1cs *cs.R1CS, pk *BLS12381ProvingKey, fullWitness witness.Wi
 	bs.AddAssign(&deltaS)
 	bs.AddMixed(&pk.G2.Beta)
 
-	proof := &native.Proof{
-		Commitments: make([]curve.G1Affine, 0),
-	}
 	proof.Ar.FromJacobian(&ar)
 	proof.Krs.FromJacobian(&krs)
 	proof.Bs.FromJacobian(&bs)
@@ -175,6 +253,14 @@ func (pk *BLS12381ProvingKey) ensurePrepared() error {
 		payload.Set("g1ZCount", len(pk.G1.Z))
 		payload.Set("g2B", jsUint8Array(packBLS12381G2AffineJacobianBatch(pk.G2.B)))
 		payload.Set("g2BCount", len(pk.G2.B))
+		payload.Set("commitmentCount", len(pk.CommitmentKeys))
+		for i := range pk.CommitmentKeys {
+			suffix := strconv.Itoa(i)
+			payload.Set("commitmentBasis"+suffix, jsUint8Array(packBLS12381G1AffineJacobianBatch(pk.CommitmentKeys[i].Basis)))
+			payload.Set("commitmentBasis"+suffix+"Count", len(pk.CommitmentKeys[i].Basis))
+			payload.Set("commitmentBasisExpSigma"+suffix, jsUint8Array(packBLS12381G1AffineJacobianBatch(pk.CommitmentKeys[i].BasisExpSigma)))
+			payload.Set("commitmentBasisExpSigma"+suffix+"Count", len(pk.CommitmentKeys[i].BasisExpSigma))
+		}
 
 		handle, err := bridgePrepareKey("bls12_381", payload)
 		if err != nil {
@@ -206,6 +292,40 @@ func packBLS12381FrVectorRegularLEInto(dst []byte, values []bls12381fr.Element) 
 		for j := 0; j < bls12381FrBytes; j++ {
 			dst[base+j] = be[bls12381FrBytes-1-j]
 		}
+	}
+	return dst
+}
+
+func packBLS12381FrVectorRegularLEFilteredOutInto(dst []byte, values []bls12381fr.Element, firstIndex int, remove []int) []byte {
+	if len(remove) == 0 {
+		return packBLS12381FrVectorRegularLEInto(dst, values)
+	}
+	removeSet := make(map[int]struct{}, len(remove))
+	for _, idx := range remove {
+		removeSet[idx] = struct{}{}
+	}
+	count := 0
+	for i := range values {
+		if _, ok := removeSet[firstIndex+i]; !ok {
+			count++
+		}
+	}
+	required := count * bls12381FrBytes
+	if cap(dst) < required {
+		dst = make([]byte, required)
+	} else {
+		dst = dst[:required]
+	}
+	offset := 0
+	for i := range values {
+		if _, ok := removeSet[firstIndex+i]; ok {
+			continue
+		}
+		be := values[i].Bytes()
+		for j := 0; j < bls12381FrBytes; j++ {
+			dst[offset+j] = be[bls12381FrBytes-1-j]
+		}
+		offset += bls12381FrBytes
 	}
 	return dst
 }
