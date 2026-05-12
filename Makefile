@@ -4,6 +4,7 @@ COUNT ?= 524288
 ITERS ?= 1
 FIXTURE_CURVE ?= all
 FIXTURE_LOGS ?= 12,15,18
+FIXTURE_COMMITMENTS ?= 0,1,2
 
 web-bundle-shaders:
 	cd web && npm run build:shaders
@@ -39,4 +40,4 @@ poc-gnark-groth16-build: web-build
 	GOOS=js GOARCH=wasm go build -o poc-gnark-groth16/dist/go-native.wasm ./poc-gnark-groth16/go-native
 
 poc-gnark-groth16-fixtures:
-	go run ./cmd/poc-gnark-groth16-fixtures -curve $(FIXTURE_CURVE) -logs $(FIXTURE_LOGS)
+	go run ./cmd/poc-gnark-groth16-fixtures -curve $(FIXTURE_CURVE) -logs $(FIXTURE_LOGS) -commitments $(FIXTURE_COMMITMENTS)

@@ -19,14 +19,20 @@ import (
 func main() {
 	var curveName string
 	var logsCSV string
+	var commitmentsCSV string
 	var outDir string
 
 	flag.StringVar(&curveName, "curve", "all", "curve to generate: bn254, bls12_377, bls12_381, or all")
 	flag.StringVar(&logsCSV, "logs", "12,15,18", "comma-separated circuit size logs")
+	flag.StringVar(&commitmentsCSV, "commitments", "0,1,2", "comma-separated commitment counts")
 	flag.StringVar(&outDir, "out", "poc-gnark-groth16/fixtures", "output fixture root")
 	flag.Parse()
 
 	logs, err := parseLogs(logsCSV)
+	if err != nil {
+		exit(err)
+	}
+	commitmentCounts, err := parseCommitments(commitmentsCSV)
 	if err != nil {
 		exit(err)
 	}
@@ -39,27 +45,29 @@ func main() {
 	for _, curveID := range curves {
 		name := curveKey(curveID)
 		for _, sizeLog := range logs {
-			if err := generateFixture(curveID, name, sizeLog, outDir); err != nil {
-				exit(err)
+			for _, commitments := range commitmentCounts {
+				if err := generateFixture(curveID, name, sizeLog, commitments, outDir); err != nil {
+					exit(err)
+				}
 			}
 		}
 	}
 }
 
-func generateFixture(curveID ecc.ID, curve string, sizeLog int, outDir string) error {
+func generateFixture(curveID ecc.ID, curve string, sizeLog, commitments int, outDir string) error {
 	depth := 1 << sizeLog
-	circuit := &common.MulAddChainCircuit{Steps: depth}
+	circuit := &common.MulAddChainCircuit{Steps: depth, Commitments: commitments}
 	ccs, err := frontend.Compile(curveID.ScalarField(), r1cs.NewBuilder, circuit)
 	if err != nil {
-		return fmt.Errorf("compile %s 2^%d: %w", curve, sizeLog, err)
+		return fmt.Errorf("compile %s 2^%d commit%d: %w", curve, sizeLog, commitments, err)
 	}
 
 	pk, vk, err := gnarkgroth16.Setup(ccs)
 	if err != nil {
-		return fmt.Errorf("setup %s 2^%d: %w", curve, sizeLog, err)
+		return fmt.Errorf("setup %s 2^%d commit%d: %w", curve, sizeLog, commitments, err)
 	}
 
-	base := filepath.Join(outDir, curve, fmt.Sprintf("2pow%d", sizeLog))
+	base := filepath.Join(outDir, curve, fmt.Sprintf("2pow%d", sizeLog), fmt.Sprintf("commit%d", commitments))
 	if err := os.MkdirAll(base, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", base, err)
 	}
@@ -74,7 +82,7 @@ func generateFixture(curveID ecc.ID, curve string, sizeLog int, outDir string) e
 		return err
 	}
 
-	fmt.Printf("wrote %s 2^%d fixtures under %s\n", curve, sizeLog, base)
+	fmt.Printf("wrote %s 2^%d commit%d fixtures under %s\n", curve, sizeLog, commitments, base)
 	return nil
 }
 
@@ -121,6 +129,29 @@ func parseLogs(csv string) ([]int, error) {
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no logs provided")
+	}
+	return out, nil
+}
+
+func parseCommitments(csv string) ([]int, error) {
+	parts := strings.Split(csv, ",")
+	out := make([]int, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		value, err := strconv.Atoi(part)
+		if err != nil {
+			return nil, fmt.Errorf("invalid commitments %q", part)
+		}
+		if value < 0 || value > 2 {
+			return nil, fmt.Errorf("invalid commitments %d", value)
+		}
+		out = append(out, value)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no commitment counts provided")
 	}
 	return out, nil
 }
