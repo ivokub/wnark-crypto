@@ -3,6 +3,7 @@ import "/backend/accelerated/webgpu/groth16/bridge.js";
 const implSelect = document.getElementById("impl");
 const curveSelect = document.getElementById("curve");
 const sizeLogSelect = document.getElementById("size-log");
+const commitmentsSelect = document.getElementById("commitments");
 const proveRunsInput = document.getElementById("prove-runs");
 const runButton = document.getElementById("run");
 const statusEl = document.getElementById("status");
@@ -35,6 +36,7 @@ function readConfig() {
   return {
     curve: curveSelect.value,
     sizeLog: Number.parseInt(sizeLogSelect.value, 10),
+    commitments: Number.parseInt(commitmentsSelect.value, 10),
     proveRuns: Number.parseInt(proveRunsInput.value, 10),
   };
 }
@@ -44,6 +46,7 @@ function applyQueryDefaults() {
   const impl = params.get("impl");
   const curve = params.get("curve");
   const sizeLog = params.get("size-log") ?? params.get("sizeLog");
+  const commitments = params.get("commitments") ?? params.get("commitment-count") ?? params.get("commitmentCount");
   const proveRuns = params.get("prove-runs") ?? params.get("proveRuns");
 
   if (impl && ["both", "webgpu-go", "native-go"].includes(impl)) {
@@ -54,6 +57,9 @@ function applyQueryDefaults() {
   }
   if (sizeLog && ["12", "15", "18"].includes(sizeLog)) {
     sizeLogSelect.value = sizeLog;
+  }
+  if (commitments && ["0", "1", "2"].includes(commitments)) {
+    commitmentsSelect.value = commitments;
   }
   if (proveRuns) {
     proveRunsInput.value = proveRuns;
@@ -105,6 +111,7 @@ function compareResults(webgpu, nativeImpl) {
   appendLog("--- comparison ---");
   appendLog(`curve: ${webgpu.curve}`);
   appendLog(`fixture: 2^${webgpu.size_log}`);
+  appendLog(`commitments: ${webgpu.commitments}`);
   appendLog(`depth: ${webgpu.depth_size}`);
   appendLog(`prove runs: ${webgpu.prove_runs}`);
   appendLog(`constraints: ${webgpu.constraints}`);
@@ -147,6 +154,7 @@ async function runSelected() {
   appendLog(`impl = ${impl}`);
   appendLog(`curve = ${config.curve}`);
   appendLog(`fixture = 2^${config.sizeLog}`);
+  appendLog(`commitments = ${config.commitments}`);
   appendLog(`prove_runs = ${config.proveRuns}`);
   appendLog("note = Proof bytes are not compared because prover randomness is expected. Each path loads a fixed serialized circuit and keys, then validates by WriteTo -> ReadFrom -> Verify.");
   appendLog("");

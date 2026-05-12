@@ -1,7 +1,12 @@
 # Groth16 Go WASM POC
 
 This POC compares two browser-side wasm Groth16 proof paths on the same fixed
-no-commitment circuit fixtures for BN254, BLS12-377, and BLS12-381:
+circuit fixtures for BN254, BLS12-377, and BLS12-381. Each fixture has a
+commitment variant:
+
+- `commit0`: no BSB22 commitments
+- `commit1`: one commitment over the first quarter of private chain variables
+- `commit2`: two commitments over two disjoint quarters of private chain variables
 
 - `webgpu-go`: the local WebGPU-accelerated prover package in this repo
 - `native-go`: native gnark Groth16 compiled to wasm
@@ -27,15 +32,11 @@ make poc-gnark-groth16-fixtures
 
 This creates:
 
-- `poc-gnark-groth16/fixtures/bn254/2pow12/`
-- `poc-gnark-groth16/fixtures/bn254/2pow15/`
-- `poc-gnark-groth16/fixtures/bn254/2pow18/`
-- `poc-gnark-groth16/fixtures/bls12_377/2pow12/`
-- `poc-gnark-groth16/fixtures/bls12_377/2pow15/`
-- `poc-gnark-groth16/fixtures/bls12_377/2pow18/`
-- `poc-gnark-groth16/fixtures/bls12_381/2pow12/`
-- `poc-gnark-groth16/fixtures/bls12_381/2pow15/`
-- `poc-gnark-groth16/fixtures/bls12_381/2pow18/`
+- `poc-gnark-groth16/fixtures/bn254/2pow12/commit0/`
+- `poc-gnark-groth16/fixtures/bn254/2pow12/commit1/`
+- `poc-gnark-groth16/fixtures/bn254/2pow12/commit2/`
+- the same `commit0`, `commit1`, and `commit2` layout for `2pow15`, `2pow18`,
+  `bls12_377`, and `bls12_381`
 
 Each fixture directory contains:
 
@@ -50,6 +51,7 @@ You can scope generation, for example:
 
 ```sh
 make poc-gnark-groth16-fixtures FIXTURE_CURVE=bls12_377 FIXTURE_LOGS=12,15
+make poc-gnark-groth16-fixtures FIXTURE_CURVE=bn254 FIXTURE_LOGS=12 FIXTURE_COMMITMENTS=1,2
 ```
 
 ## Build
@@ -82,8 +84,8 @@ Example autorun URLs:
 
 ```text
 http://localhost:8000/poc-gnark-groth16/index.html?autorun=1&impl=both&curve=bn254&size-log=12&prove-runs=1
-http://localhost:8000/poc-gnark-groth16/index.html?autorun=1&impl=both&curve=bls12_377&size-log=15&prove-runs=1
-http://localhost:8000/poc-gnark-groth16/index.html?autorun=1&impl=both&curve=bls12_381&size-log=15&prove-runs=1
+http://localhost:8000/poc-gnark-groth16/index.html?autorun=1&impl=both&curve=bls12_377&size-log=15&commitments=1&prove-runs=1
+http://localhost:8000/poc-gnark-groth16/index.html?autorun=1&impl=both&curve=bls12_381&size-log=15&commitments=2&prove-runs=1
 ```
 
 Useful outputs:

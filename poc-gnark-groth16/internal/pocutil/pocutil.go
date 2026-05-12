@@ -19,9 +19,10 @@ import (
 )
 
 type Config struct {
-	Curve     string
-	SizeLog   int
-	ProveRuns int
+	Curve       string
+	SizeLog     int
+	Commitments int
+	ProveRuns   int
 }
 
 type ProveFunc func(constraint.ConstraintSystem, gnarkgroth16.ProvingKey, witness.Witness) (gnarkgroth16.Proof, error)
@@ -42,15 +43,25 @@ func ParseConfig() (Config, error) {
 		return Config{}, fmt.Errorf("unsupported sizeLog %d", sizeLog)
 	}
 
+	commitments := 0
+	commitmentsValue := cfg.Get("commitments")
+	if !commitmentsValue.IsUndefined() && !commitmentsValue.IsNull() {
+		commitments = commitmentsValue.Int()
+	}
+	if commitments < 0 || commitments > 2 {
+		return Config{}, fmt.Errorf("unsupported commitments %d", commitments)
+	}
+
 	proveRuns := cfg.Get("proveRuns").Int()
 	if proveRuns <= 0 {
 		return Config{}, fmt.Errorf("invalid proveRuns %d", proveRuns)
 	}
 
 	return Config{
-		Curve:     curve,
-		SizeLog:   sizeLog,
-		ProveRuns: proveRuns,
+		Curve:       curve,
+		SizeLog:     sizeLog,
+		Commitments: commitments,
+		ProveRuns:   proveRuns,
 	}, nil
 }
 
@@ -71,14 +82,15 @@ func FixtureDepth(sizeLog int) int {
 	return 1 << sizeLog
 }
 
-func BuildWitness(curveID ecc.ID, depth int) (witness.Witness, witness.Witness, error) {
+func BuildWitness(curveID ecc.ID, depth, commitments int) (witness.Witness, witness.Witness, error) {
 	field := curveID.ScalarField()
 	out := common.ComputeOutput(field, 3, 5, depth)
 	assignment := &common.MulAddChainCircuit{
-		X:     3,
-		Y:     5,
-		Out:   out,
-		Steps: depth,
+		X:           3,
+		Y:           5,
+		Out:         out,
+		Steps:       depth,
+		Commitments: commitments,
 	}
 
 	fullWitness, err := frontend.NewWitness(assignment, field)
@@ -102,6 +114,7 @@ func RunHarness(implName string, cfg Config, loadFn func(ecc.ID) gnarkgroth16.Pr
 
 	Logf("=== %s (%s) ===", implName, cfg.Curve)
 	Logf("fixture = 2^%d", cfg.SizeLog)
+	Logf("commitments = %d", cfg.Commitments)
 	Logf("depth = %d", depth)
 	Logf("prove_runs = %d", cfg.ProveRuns)
 
@@ -109,7 +122,7 @@ func RunHarness(implName string, cfg Config, loadFn func(ecc.ID) gnarkgroth16.Pr
 
 	SetStatus("Loading fixture")
 	fixtureStart := NowMS()
-	ccs, pk, vk, err := LoadFixture(curveID, cfg.Curve, cfg.SizeLog, loadFn)
+	ccs, pk, vk, err := LoadFixture(curveID, cfg.Curve, cfg.SizeLog, cfg.Commitments, loadFn)
 	if err != nil {
 		return err
 	}
@@ -119,7 +132,7 @@ func RunHarness(implName string, cfg Config, loadFn func(ecc.ID) gnarkgroth16.Pr
 
 	SetStatus("Building witness")
 	witnessStart := NowMS()
-	fullWitness, publicWitness, err := BuildWitness(curveID, depth)
+	fullWitness, publicWitness, err := BuildWitness(curveID, depth, cfg.Commitments)
 	if err != nil {
 		return err
 	}
@@ -201,6 +214,7 @@ func RunHarness(implName string, cfg Config, loadFn func(ecc.ID) gnarkgroth16.Pr
 		"prove_runs":                 cfg.ProveRuns,
 		"constraints":                ccs.GetNbConstraints(),
 		"size_log":                   cfg.SizeLog,
+		"commitments":                cfg.Commitments,
 		"depth_size":                 depth,
 		"fixture_duration_ms":        fixtureDuration,
 		"witness_duration_ms":        witnessDuration,
@@ -218,12 +232,12 @@ func RunHarness(implName string, cfg Config, loadFn func(ecc.ID) gnarkgroth16.Pr
 	return nil
 }
 
-func FixtureBasePath(curve string, sizeLog int) string {
-	return fmt.Sprintf("/poc-gnark-groth16/fixtures/%s/2pow%d", curve, sizeLog)
+func FixtureBasePath(curve string, sizeLog, commitments int) string {
+	return fmt.Sprintf("/poc-gnark-groth16/fixtures/%s/2pow%d/commit%d", curve, sizeLog, commitments)
 }
 
-func LoadFixture(curveID ecc.ID, curve string, sizeLog int, pkFactory func(ecc.ID) gnarkgroth16.ProvingKey) (constraint.ConstraintSystem, gnarkgroth16.ProvingKey, gnarkgroth16.VerifyingKey, error) {
-	base := FixtureBasePath(curve, sizeLog)
+func LoadFixture(curveID ecc.ID, curve string, sizeLog, commitments int, pkFactory func(ecc.ID) gnarkgroth16.ProvingKey) (constraint.ConstraintSystem, gnarkgroth16.ProvingKey, gnarkgroth16.VerifyingKey, error) {
+	base := FixtureBasePath(curve, sizeLog, commitments)
 	ccsBytes, err := FetchBytes(base + "/ccs.bin")
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("fetch ccs: %w", err)
