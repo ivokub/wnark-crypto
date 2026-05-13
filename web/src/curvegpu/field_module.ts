@@ -22,7 +22,6 @@ const OP_MUL = 9;
 const OP_SQUARE = 10;
 const OP_TO_MONT = 11;
 const OP_FROM_MONT = 12;
-const UNIFORM_WORDS = 8;
 
 type FieldOpCode =
   | typeof OP_COPY

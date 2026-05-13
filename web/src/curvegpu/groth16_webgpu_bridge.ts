@@ -155,10 +155,6 @@ async function prepareKey(curve: SupportedCurveID, payload: Record<string, Uint8
   return { handle };
 }
 
-async function releaseKey(handle: string) {
-  keyCache.delete(handle);
-}
-
 async function msmG1Cached(entry: CachedKey, vectorName: string, scalarsPacked: Uint8Array): Promise<Uint8Array> {
   const bridge = assertBridge(entry.curve);
   const config = CURVE_CONFIG[entry.curve];
@@ -207,10 +203,6 @@ async function msmG1(handle: string, vectorName: string, scalarsPacked: Uint8Arr
   return msmG1Cached(getKey(handle), vectorName, cloneBytes(scalarsPacked));
 }
 
-async function msmG2(handle: string, vectorName: string, scalarsPacked: Uint8Array) {
-  return msmG2Cached(getKey(handle), vectorName, cloneBytes(scalarsPacked));
-}
-
 async function msmBatch(handle: string, payload: Record<string, Uint8Array | undefined>) {
   const entry = getKey(handle);
   const points: Record<string, Uint8Array> = {};
@@ -227,15 +219,6 @@ async function msmBatch(handle: string, payload: Record<string, Uint8Array | und
   }
 
   return points;
-}
-
-async function computeH(curve: SupportedCurveID, aPacked: Uint8Array, bPacked: Uint8Array, cPacked: Uint8Array) {
-  const bridge = assertBridge(curve);
-  return bridge.quotient.computeGroth16QuotientPackedRegular(
-    cloneBytes(aPacked),
-    cloneBytes(bPacked),
-    cloneBytes(cPacked),
-  );
 }
 
 async function computeHZMSMG1(handle: string, aPacked: Uint8Array, bPacked: Uint8Array, cPacked: Uint8Array) {
@@ -261,11 +244,8 @@ export function installGroth16WebGPUBridge(dependencies: BridgeDependencies): vo
   (globalThis as typeof globalThis & { wnarkGroth16WebGPU?: unknown }).wnarkGroth16WebGPU = {
     init,
     prepareKey,
-    releaseKey,
     msmG1,
-    msmG2,
     msmBatch,
-    computeH,
     computeHZMSMG1,
     prewarmQuotientDomain,
   };

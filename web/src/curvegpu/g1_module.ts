@@ -23,7 +23,6 @@ const OP_DOUBLE_JAC = 4;
 const OP_ADD_MIXED = 5;
 const OP_JAC_TO_AFFINE = 6;
 const OP_AFFINE_ADD = 7;
-const UNIFORM_WORDS = 8;
 
 type G1OpCode =
   | typeof OP_COPY
@@ -219,10 +218,6 @@ export function createG1Module(
 
   function makeZeroJacobianBatch(count: number): CurveGPUJacobianPoint[] {
     return Array.from({ length: count }, () => clonePoint(zeroJacobianPoint));
-  }
-
-  function makeAffineInfinityBatch(count: number): CurveGPUAffinePoint[] {
-    return Array.from({ length: count }, () => cloneAffine(zeroAffinePoint));
   }
 
   return {

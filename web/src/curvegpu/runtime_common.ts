@@ -175,10 +175,6 @@ export async function readbackSimpleBuffer(
   }
 }
 
-function createStorageBuffer(device: GPUDevice, label: string, size: number, usage: GPUBufferUsageFlags): GPUBuffer {
-  return device.createBuffer({ label, size, usage });
-}
-
 export async function runSimpleKernel(options: {
   device: GPUDevice;
   pool?: BufferPool;

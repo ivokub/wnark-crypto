@@ -78,36 +78,12 @@ function affineToHex(point: CurveGPUG2AffinePoint): AffinePoint {
   };
 }
 
-function jacobianToHex(point: CurveGPUG2JacobianPoint): JacobianPoint {
-  return {
-    x: { c0_bytes_le: bytesToHex(point.x.c0), c1_bytes_le: bytesToHex(point.x.c1) },
-    y: { c0_bytes_le: bytesToHex(point.y.c0), c1_bytes_le: bytesToHex(point.y.c1) },
-    z: { c0_bytes_le: bytesToHex(point.z.c0), c1_bytes_le: bytesToHex(point.z.c1) },
-  };
-}
-
 function toAffinePoint(point: CurveGPUG2JacobianPoint): CurveGPUG2AffinePoint {
   return { x: point.x, y: point.y };
 }
 
 function equalFp2(a: Fp2Point, b: Fp2Point): boolean {
   return a.c0_bytes_le === b.c0_bytes_le && a.c1_bytes_le === b.c1_bytes_le;
-}
-
-function expectPointBatch(name: string, got: readonly CurveGPUG2JacobianPoint[], want: readonly JacobianPoint[]): void {
-  if (got.length !== want.length) {
-    throw new Error(`${name}: length mismatch got=${got.length} want=${want.length}`);
-  }
-  for (let i = 0; i < got.length; i += 1) {
-    const gotHex = jacobianToHex(got[i]);
-    if (!equalFp2(gotHex.x, want[i].x) || !equalFp2(gotHex.y, want[i].y) || !equalFp2(gotHex.z, want[i].z)) {
-      throw new Error(
-        `${name}: mismatch at index ${i}` +
-        ` got=(${gotHex.x.c0_bytes_le}/${gotHex.x.c1_bytes_le},${gotHex.y.c0_bytes_le}/${gotHex.y.c1_bytes_le},${gotHex.z.c0_bytes_le}/${gotHex.z.c1_bytes_le})` +
-        ` want=(${want[i].x.c0_bytes_le}/${want[i].x.c1_bytes_le},${want[i].y.c0_bytes_le}/${want[i].y.c1_bytes_le},${want[i].z.c0_bytes_le}/${want[i].z.c1_bytes_le})`,
-      );
-    }
-  }
 }
 
 function expectAffineBatch(name: string, got: readonly CurveGPUG2AffinePoint[], want: readonly JacobianPoint[]): void {

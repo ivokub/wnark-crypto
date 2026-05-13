@@ -34,13 +34,6 @@ type RuntimeGlobal = {
   release(handle: string): Promise<void>;
 };
 
-type RuntimeSlot = {
-  kind: Groth16RuntimeKind;
-  wasmExecURL: string;
-  wasmURL: string;
-  runtime: RuntimeGlobal;
-};
-
 type Groth16ModuleConfig = {
   context: CurveGPUContext;
   curve: SupportedCurveID;

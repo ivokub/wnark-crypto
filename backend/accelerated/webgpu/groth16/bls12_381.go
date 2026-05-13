@@ -385,26 +385,6 @@ func writeBLS12381FrMontLE(dst []byte, value *bls12381fr.Element) {
 	}
 }
 
-func unpackBLS12381FrVectorRegularLE(packed []byte, err error) ([]bls12381fr.Element, error) {
-	if err != nil {
-		return nil, err
-	}
-	if len(packed)%bls12381FrBytes != 0 {
-		return nil, fmt.Errorf("webgpu groth16 bls12_381: expected a multiple of %d fr bytes, got %d", bls12381FrBytes, len(packed))
-	}
-	count := len(packed) / bls12381FrBytes
-	out := make([]bls12381fr.Element, count)
-	var canonical [bls12381FrBytes]byte
-	for i := 0; i < count; i++ {
-		src := packed[i*bls12381FrBytes : (i+1)*bls12381FrBytes]
-		for j := 0; j < bls12381FrBytes; j++ {
-			canonical[bls12381FrBytes-1-j] = src[j]
-		}
-		out[i].SetBytes(canonical[:])
-	}
-	return out, nil
-}
-
 func packBLS12381G1AffineJacobianBatch(points []curve.G1Affine) []byte {
 	out := make([]byte, len(points)*bls12381G1PointBytes)
 	one := bls12381FpOneMontLE()

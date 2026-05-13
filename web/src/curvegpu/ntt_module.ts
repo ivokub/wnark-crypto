@@ -1,7 +1,6 @@
 import type { CurveGPUContext, CurveGPUElementBytes, FieldModule, Groth16QuotientModule, NTTModule, SupportedCurveID } from "./api.js";
 import type { SimpleKernel } from "./runtime_common.js";
 import {
-  cloneBytes,
   createSimpleBindGroup,
   createSimpleStorageBuffer,
   createSimpleStorageBufferFromBytes,
@@ -29,7 +28,6 @@ const FIELD_OP_SUB = 4;
 const FIELD_OP_MUL = 9;
 const FIELD_OP_TO_MONT = 11;
 const FIELD_OP_FROM_MONT = 12;
-const UNIFORM_WORDS = 8;
 type DomainMetadata = {
   log_n: number;
   size: number;
@@ -143,7 +141,6 @@ export function createNTTModule(
   const { curve, vectorKernel, fieldKernel, nttKernel, domainPath, modulusHex } = options;
   const label = `${curve}-fr-ntt`;
   const elementBytes = fr.byteSize;
-  const zeroElement = new Uint8Array(elementBytes);
 
   const getVectorKernel = lazyAsync(async () => vectorKernel);
   const getFieldKernel = lazyAsync(async () => fieldKernel);
@@ -198,23 +195,6 @@ export function createNTTModule(
     return promise;
   }
 
-  async function runVectorOp(opcode: number, values: readonly Uint8Array[], factors?: readonly Uint8Array[], logCount = 0): Promise<Uint8Array[]> {
-    const count = values.length;
-    const kernel = await getVectorKernel();
-    const output = await runSimpleKernel({
-      device: context.device,
-      pool: context.bufferPool,
-      kernel,
-      label: `${label}-vector-${opcode}`,
-      inputA: packElementBatch(values, elementBytes, `${label}.values`),
-      inputB: packElementBatch(factors ?? Array.from({ length: count }, () => zeroElement), elementBytes, `${label}.factors`),
-      outputBytes: count * elementBytes,
-      uniformWords: Uint32Array.from([count, opcode, logCount, 0, 0, 0, 0, 0]),
-      workgroups: Math.ceil(count / kernel.workgroupSize),
-    });
-    return unpackElementBatch(output, elementBytes, count);
-  }
-
   async function runVectorOpPacked(opcode: number, valuesPacked: Uint8Array, factorsPacked?: Uint8Array, logCount = 0): Promise<Uint8Array> {
     const count = ensurePackedElements(valuesPacked, elementBytes, `${label}.valuesPacked`);
     const kernel = await getVectorKernel();
@@ -252,47 +232,6 @@ export function createNTTModule(
       uniformWords: Uint32Array.from([count, opcode, 0, 0, 0, 0, 0, 0]),
       workgroups: Math.ceil(count / kernel.workgroupSize),
     });
-  }
-
-  async function runStages(values: readonly Uint8Array[], stages: readonly Uint8Array[], inverse: boolean): Promise<Uint8Array[]> {
-    let state = values.map(cloneBytes);
-    const kernel = await getNTTKernel();
-    for (let stage = 0; stage < stages.length; stage += 1) {
-      const count = state.length;
-      const output = await runSimpleKernel({
-        device: context.device,
-        pool: context.bufferPool,
-        kernel,
-        label: `${label}-stage-${stage}-${inverse ? "inv" : "fwd"}`,
-        inputA: packElementBatch(state, elementBytes, `${label}.state`),
-        inputB: cloneBytes(stages[stage]),
-        outputBytes: count * elementBytes,
-        uniformWords: Uint32Array.from([count, 1 << stage, inverse ? 1 : 0, 0, 0, 0, 0, 0]),
-        workgroups: Math.ceil(count / kernel.workgroupSize),
-      });
-      state = unpackElementBatch(output, elementBytes, count);
-    }
-    return state;
-  }
-
-  async function runStagesPacked(valuesPacked: Uint8Array, stages: readonly Uint8Array[], inverse: boolean): Promise<Uint8Array> {
-    let state = cloneBytes(valuesPacked);
-    const kernel = await getNTTKernel();
-    const count = ensurePackedElements(state, elementBytes, `${label}.statePacked`);
-    for (let stage = 0; stage < stages.length; stage += 1) {
-      state = await runSimpleKernel({
-        device: context.device,
-        pool: context.bufferPool,
-        kernel,
-        label: `${label}-stage-packed-${stage}-${inverse ? "inv" : "fwd"}`,
-        inputA: state,
-        inputB: cloneBytes(stages[stage]),
-        outputBytes: count * elementBytes,
-        uniformWords: Uint32Array.from([count, 1 << stage, inverse ? 1 : 0, 0, 0, 0, 0, 0]),
-        workgroups: Math.ceil(count / kernel.workgroupSize),
-      });
-    }
-    return state;
   }
 
   async function runPipelinePacked(options: {

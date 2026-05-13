@@ -120,21 +120,8 @@ func bridgePrepareKey(curve string, payload js.Value) (string, error) {
 	return handle.String(), nil
 }
 
-func bridgeReleaseKey(handle string) error {
-	_, err := callPromise("releaseKey", handle)
-	return err
-}
-
 func bridgeMSMG1(handle, vectorName string, scalarsPacked []byte) ([]byte, error) {
 	value, err := callPromise("msmG1", handle, vectorName, jsUint8Array(scalarsPacked))
-	if err != nil {
-		return nil, err
-	}
-	return goBytes(value)
-}
-
-func bridgeMSMG2(handle, vectorName string, scalarsPacked []byte) ([]byte, error) {
-	value, err := callPromise("msmG2", handle, vectorName, jsUint8Array(scalarsPacked))
 	if err != nil {
 		return nil, err
 	}
@@ -171,20 +158,6 @@ func bridgeMSMBatch(handle string, g1A, g1B, g1K []byte) (bridgeMSMBatchResult, 
 		return bridgeMSMBatchResult{}, err
 	}
 	return result, nil
-}
-
-func bridgeComputeH(curve string, aPacked, bPacked, cPacked []byte) ([]byte, error) {
-	value, err := callPromise(
-		"computeH",
-		curve,
-		jsUint8Array(aPacked),
-		jsUint8Array(bPacked),
-		jsUint8Array(cPacked),
-	)
-	if err != nil {
-		return nil, err
-	}
-	return goBytes(value)
 }
 
 func bridgeComputeHZMSMG1(handle string, aPacked, bPacked, cPacked []byte) ([]byte, error) {

@@ -385,26 +385,6 @@ func writeBN254FrMontLE(dst []byte, value *bn254fr.Element) {
 	}
 }
 
-func unpackBN254FrVectorRegularLE(packed []byte, err error) ([]bn254fr.Element, error) {
-	if err != nil {
-		return nil, err
-	}
-	if len(packed)%bn254FrBytes != 0 {
-		return nil, fmt.Errorf("webgpu groth16 bn254: expected a multiple of %d fr bytes, got %d", bn254FrBytes, len(packed))
-	}
-	count := len(packed) / bn254FrBytes
-	out := make([]bn254fr.Element, count)
-	var canonical [bn254FrBytes]byte
-	for i := 0; i < count; i++ {
-		src := packed[i*bn254FrBytes : (i+1)*bn254FrBytes]
-		for j := 0; j < bn254FrBytes; j++ {
-			canonical[bn254FrBytes-1-j] = src[j]
-		}
-		out[i].SetBytes(canonical[:])
-	}
-	return out, nil
-}
-
 func packBN254G1AffineJacobianBatch(points []curve.G1Affine) []byte {
 	out := make([]byte, len(points)*bn254G1PointBytes)
 	one := bn254FpOneMontLE()

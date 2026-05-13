@@ -35,15 +35,6 @@ export interface CurveDefinition {
   readonly zeroHex: string;
 }
 
-function fieldShaderParts(fpArithShaderPath: string, curveShaderPath: string): readonly string[] {
-  return [
-    `${fpArithShaderPath}#section=fp-types`,
-    `${fpArithShaderPath}#section=fp-consts`,
-    `${fpArithShaderPath}#section=fp-core`,
-    curveShaderPath,
-  ];
-}
-
 function g1OpsShaderParts(fpArithShaderPath: string, g1IOPath: string): readonly string[] {
   return [
     `${fpArithShaderPath}#section=fp-types`,
