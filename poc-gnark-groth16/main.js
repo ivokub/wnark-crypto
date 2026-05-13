@@ -1,4 +1,4 @@
-import "/backend/accelerated/webgpu/groth16/bridge.js";
+import { createBLS12377, createBLS12381, createBN254, createCurveGPUContext, curveDefinition } from "/web/dist/index.js";
 
 const implSelect = document.getElementById("impl");
 const curveSelect = document.getElementById("curve");
@@ -66,44 +66,189 @@ function applyQueryDefaults() {
   }
 }
 
-async function ensureGoRuntime() {
-  if (typeof window.Go === "function") {
-    return;
-  }
-  await new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = "/poc-gnark-groth16/dist/wasm_exec.js";
-    script.onload = resolve;
-    script.onerror = () => reject(new Error("failed to load wasm_exec.js"));
-    document.head.appendChild(script);
-  });
+function fixtureBasePath(config) {
+  return `/poc-gnark-groth16/fixtures/${config.curve}/2pow${config.sizeLog}/commit${config.commitments}`;
 }
 
-async function runGoWasm(impl, wasmPath, config) {
-  await ensureGoRuntime();
-  appendLog(`--- ${impl} ---`);
-
-  const go = new window.Go();
-  const resultPromise = new Promise((resolve, reject) => {
-    window.__wnarkGroth16PocConfig = config;
-    window.__wnarkGroth16PocLog = (line) => appendLog(String(line));
-    window.__wnarkGroth16PocSetStatus = (text) => setStatus(String(text));
-    window.__wnarkGroth16PocComplete = (result) => resolve(result);
-    window.__wnarkGroth16PocFail = (message) => reject(new Error(String(message)));
-  });
-
-  const response = await fetch(wasmPath);
+async function fetchBytes(path) {
+  const response = await fetch(path);
   if (!response.ok) {
-    throw new Error(`failed to fetch ${wasmPath}: ${response.status}`);
+    throw new Error(`failed to fetch ${path}: ${response.status}`);
   }
-  const bytes = await response.arrayBuffer();
-  const { instance } = await WebAssembly.instantiate(bytes, go.importObject);
-  const runResult = go.run(instance);
-  const result = await resultPromise;
-  if (runResult && typeof runResult.then === "function") {
-    await runResult;
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+async function sha256Hex(bytes) {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+function computeOutput(modulus, x, y, depth) {
+  let acc = x % modulus;
+  const mul = y % modulus;
+  for (let i = 0; i < depth; i++) {
+    acc = (acc * mul + 1n) % modulus;
   }
-  return result;
+  return acc;
+}
+
+function buildWitnesses(curve, config) {
+  const definition = curveDefinition(config.curve);
+  if (!definition.frModulusHex) {
+    throw new Error(`missing scalar modulus for ${config.curve}`);
+  }
+  const depth = 1 << config.sizeLog;
+  const modulus = BigInt(definition.frModulusHex);
+  const x = 3n;
+  const y = 5n;
+  const out = computeOutput(modulus, x, y, depth);
+  return {
+    depth,
+    fullWitness: curve.groth16.encodeWitness([out, x, y], { publicCount: 1 }),
+    publicWitness: curve.groth16.encodeWitness([out], { publicCount: 1 }),
+  };
+}
+
+async function createCurve(config) {
+  const context = await createCurveGPUContext();
+  switch (config.curve) {
+    case "bn254":
+      return createBN254(context);
+    case "bls12_377":
+      return createBLS12377(context);
+    case "bls12_381":
+      return createBLS12381(context);
+    default:
+      throw new Error(`unsupported curve ${config.curve}`);
+  }
+}
+
+async function loadFixture(curve, config) {
+  const base = fixtureBasePath(config);
+  const [ccsBytes, pkBytes, vkBytes] = await Promise.all([
+    fetchBytes(`${base}/ccs.bin`),
+    fetchBytes(`${base}/pk.dump`),
+    fetchBytes(`${base}/vk.bin`),
+  ]);
+  const [ccs, pk, vk] = await Promise.all([
+    curve.groth16.readConstraintSystem(ccsBytes),
+    curve.groth16.readProvingKey(pkBytes, { format: "dump" }),
+    curve.groth16.readVerificationKey(vkBytes),
+  ]);
+  return { ccs, pk, vk };
+}
+
+async function disposeAll(handles) {
+  await Promise.allSettled(handles.map((handle) => handle.dispose()));
+}
+
+async function runGroth16Impl(label, runtimeKind, curve, config) {
+  appendLog(`--- ${label} ---`);
+  appendLog(`=== ${runtimeKind === "webgpu" ? "TS -> WebGPU Groth16" : "TS -> Native Groth16"} (${config.curve}) ===`);
+  appendLog(`fixture = 2^${config.sizeLog}`);
+  appendLog(`commitments = ${config.commitments}`);
+  appendLog(`prove_runs = ${config.proveRuns}`);
+
+  const handles = [];
+  const overallStart = performance.now();
+
+  try {
+    setStatus(`Loading ${label} runtime`);
+    await curve.groth16.loadRuntime({ kind: runtimeKind });
+
+    setStatus(`Loading ${label} fixture`);
+    const fixtureStart = performance.now();
+    const fixture = await loadFixture(curve, config);
+    handles.push(fixture.ccs, fixture.pk, fixture.vk);
+    const fixtureDuration = performance.now() - fixtureStart;
+    appendLog(`fixture_load_ms = ${formatMs(fixtureDuration)}`);
+    appendLog(`constraints = ${fixture.ccs.constraints}`);
+
+    setStatus(`Building ${label} witness`);
+    const witnessStart = performance.now();
+    const { depth, fullWitness, publicWitness } = buildWitnesses(curve, config);
+    const witnessDuration = performance.now() - witnessStart;
+    appendLog(`depth = ${depth}`);
+    appendLog(`witness_build_ms = ${formatMs(witnessDuration)}`);
+
+    setStatus(`Preparing ${label} proving key`);
+    const prepareStart = performance.now();
+    await curve.groth16.prepareProvingKey(fixture.pk);
+    const prepareDuration = performance.now() - prepareStart;
+    if (runtimeKind === "webgpu") {
+      appendLog(`prepare_ms = ${formatMs(prepareDuration)}`);
+    }
+
+    const startupDuration = fixtureDuration + witnessDuration + (runtimeKind === "webgpu" ? prepareDuration : 0);
+    appendLog(`startup_ms = ${formatMs(startupDuration)}`);
+
+    let proveDuration = 0;
+    let verifyDuration = 0;
+    let proofSizeBytes = 0;
+    let firstProofHash = "";
+
+    const steadyStateStart = performance.now();
+    for (let i = 0; i < config.proveRuns; i++) {
+      setStatus(`Proving ${label} round ${i + 1}/${config.proveRuns}`);
+      const proveStart = performance.now();
+      const proofBytes = await curve.groth16.prove(fixture.ccs, fixture.pk, fullWitness);
+      const roundProveDuration = performance.now() - proveStart;
+      proveDuration += roundProveDuration;
+      appendLog(`prove_round_${i}_ms = ${formatMs(roundProveDuration)}`);
+
+      const verifyStart = performance.now();
+      const verified = await curve.groth16.verify(proofBytes, fixture.vk, publicWitness);
+      const roundVerifyDuration = performance.now() - verifyStart;
+      verifyDuration += roundVerifyDuration;
+      if (!verified) {
+        throw new Error(`verify round ${i}: proof rejected`);
+      }
+
+      if (proofSizeBytes === 0) {
+        proofSizeBytes = proofBytes.byteLength;
+        firstProofHash = await sha256Hex(proofBytes);
+        appendLog(`proof_size_bytes = ${proofSizeBytes}`);
+        appendLog(`proof_round_0_sha256 = ${firstProofHash}`);
+      }
+      appendLog(`roundtrip_verify_round_${i} = OK`);
+    }
+
+    const steadyStateDuration = performance.now() - steadyStateStart;
+    const overallDuration = performance.now() - overallStart;
+
+    appendLog(`prove_total_ms = ${formatMs(proveDuration)}`);
+    appendLog(`prove_avg_ms = ${formatMs(proveDuration / config.proveRuns)}`);
+    appendLog("serialize_total_ms = 0.000");
+    appendLog("serialize_avg_ms = 0.000");
+    appendLog(`verify_total_ms = ${formatMs(verifyDuration)}`);
+    appendLog(`verify_avg_ms = ${formatMs(verifyDuration / config.proveRuns)}`);
+    appendLog(`steady_state_total_ms = ${formatMs(steadyStateDuration)}`);
+    appendLog(`overall_total_ms = ${formatMs(overallDuration)}`);
+
+    return {
+      impl: label,
+      curve: config.curve,
+      prove_runs: config.proveRuns,
+      constraints: fixture.ccs.constraints,
+      size_log: config.sizeLog,
+      commitments: config.commitments,
+      depth_size: depth,
+      fixture_duration_ms: fixtureDuration,
+      witness_duration_ms: witnessDuration,
+      prepare_duration_ms: runtimeKind === "webgpu" ? prepareDuration : 0,
+      startup_duration_ms: startupDuration,
+      prove_duration_ms: proveDuration,
+      serialize_duration_ms: 0,
+      verify_duration_ms: verifyDuration,
+      steady_state_duration_ms: steadyStateDuration,
+      overall_duration_ms: overallDuration,
+      proof_size_bytes: proofSizeBytes,
+      proof_first_sha256: firstProofHash,
+      roundtrip_verify_succeeded: true,
+    };
+  } finally {
+    await disposeAll(handles);
+  }
 }
 
 function compareResults(webgpu, nativeImpl) {
@@ -150,30 +295,33 @@ async function runSelected() {
   const impl = implSelect.value;
   const config = readConfig();
 
-  appendLog("=== Groth16 Go WASM POC ===");
+  appendLog("=== Groth16 TS Browser POC ===");
   appendLog(`impl = ${impl}`);
   appendLog(`curve = ${config.curve}`);
   appendLog(`fixture = 2^${config.sizeLog}`);
   appendLog(`commitments = ${config.commitments}`);
   appendLog(`prove_runs = ${config.proveRuns}`);
-  appendLog("note = Proof bytes are not compared because prover randomness is expected. Each path loads a fixed serialized circuit and keys, then validates by WriteTo -> ReadFrom -> Verify.");
+  appendLog("note = Proof bytes are not compared because prover randomness is expected. JS owns fixture loading, witness encoding, proving, and verification calls.");
   appendLog("");
 
-  setStatus("Running");
+  setStatus("Initializing curve module");
   try {
+    const curve = await createCurve(config);
     let webgpuResult = null;
     let nativeResult = null;
 
     if (impl === "webgpu-go" || impl === "both") {
-      webgpuResult = await runGoWasm("webgpu-go", "/poc-gnark-groth16/dist/go-webgpu.wasm", config);
+      webgpuResult = await runGroth16Impl("webgpu-go", "webgpu", curve, config);
     }
     if (impl === "native-go" || impl === "both") {
-      nativeResult = await runGoWasm("native-go", "/poc-gnark-groth16/dist/go-native.wasm", config);
+      nativeResult = await runGroth16Impl("native-go", "native", curve, config);
     }
     if (webgpuResult && nativeResult) {
       compareResults(webgpuResult, nativeResult);
     }
     setStatus("PASS");
+    appendLog("");
+    appendLog("PASS: Groth16 TS browser POC completed");
   } catch (error) {
     setStatus("FAIL");
     appendLog("");

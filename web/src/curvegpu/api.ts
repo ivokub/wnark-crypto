@@ -414,12 +414,12 @@ export interface NTTModule {
 }
 
 /**
- * Groth16-specific scalar-field helpers.
+ * Groth16 quotient helpers.
  *
- * These methods are separated from the generic NTT module even though they
- * reuse the same NTT/vector kernels internally.
+ * These methods are separated from the generic NTT module even though they reuse
+ * the same NTT/vector kernels internally.
  */
-export interface Groth16Module {
+export interface Groth16QuotientModule {
   readonly context: CurveGPUContext;
   readonly curve: SupportedCurveID;
   /**
@@ -440,6 +440,63 @@ export interface Groth16Module {
   computeGroth16QuotientPackedMont(a: Uint8Array, b: Uint8Array, c: Uint8Array): Promise<Uint8Array>;
   /** Precompute and cache Groth16 quotient-domain data for a power-of-two domain size. */
   prewarmGroth16QuotientDomain(size: number): Promise<void>;
+}
+
+export type Groth16ProvingKeyFormat = "serialized" | "dump";
+export type Groth16RuntimeKind = "webgpu" | "native";
+
+export type Groth16RuntimeOptions = {
+  /** Optional URL for Go's wasm_exec.js runtime shim. Defaults to the package asset. */
+  wasmExecURL?: string;
+  /** Optional URL for the WebGPU-accelerated Groth16 Go WASM runtime. Defaults to the package asset. */
+  webgpuWasmURL?: string;
+  /** Optional URL for the native gnark Groth16 Go WASM runtime. Defaults to the package asset. */
+  nativeWasmURL?: string;
+};
+
+export interface Groth16Handle {
+  /** Release the corresponding Go WASM runtime handle. */
+  dispose(): Promise<void>;
+}
+
+export interface Groth16ConstraintSystem extends Groth16Handle {
+  /** Number of constraints reported by the deserialized constraint system. */
+  readonly constraints: number;
+}
+
+export interface Groth16ProvingKey extends Groth16Handle {}
+export interface Groth16VerificationKey extends Groth16Handle {}
+
+/**
+ * Browser Groth16 proof helpers backed by a long-lived Go WASM runtime.
+ */
+export interface Groth16Module extends Groth16QuotientModule {
+  /**
+   * Load the Go WASM Groth16 runtime.
+   *
+   * Defaults to the WebGPU runtime and package-shipped assets. Override URLs
+   * when serving the runtime from an application asset path or CDN.
+   */
+  loadRuntime(options?: Groth16RuntimeOptions & { kind?: Groth16RuntimeKind }): Promise<void>;
+  /** Deserialize a gnark Groth16 constraint system. */
+  readConstraintSystem(bytes: Uint8Array): Promise<Groth16ConstraintSystem>;
+  /** Deserialize a gnark Groth16 proving key. */
+  readProvingKey(bytes: Uint8Array, options?: { format?: Groth16ProvingKeyFormat }): Promise<Groth16ProvingKey>;
+  /** Deserialize a gnark Groth16 verification key. */
+  readVerificationKey(bytes: Uint8Array): Promise<Groth16VerificationKey>;
+  /** Precompute browser-side proving key caches. */
+  prepareProvingKey(pk: Groth16ProvingKey): Promise<void>;
+  /** Prove with a gnark binary witness and return gnark-serialized proof bytes. */
+  prove(ccs: Groth16ConstraintSystem, pk: Groth16ProvingKey, witness: Uint8Array): Promise<Uint8Array>;
+  /** Verify gnark-serialized proof bytes against a gnark binary public witness. */
+  verify(proof: Uint8Array, vk: Groth16VerificationKey, publicWitness: Uint8Array): Promise<boolean>;
+  /**
+   * Encode flat regular field values as a gnark binary witness.
+   *
+   * Values must be ordered `[public | private]`. The binary witness protocol
+   * stores field elements as fixed-width big-endian bytes.
+   */
+  encodeWitness(values: readonly bigint[], options: { publicCount: number }): Uint8Array;
 }
 
 /**

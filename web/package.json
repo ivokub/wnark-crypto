@@ -20,6 +20,7 @@
     "dist/src/**/*.js",
     "dist/src/**/*.d.ts",
     "dist/src/**/*.d.ts.map",
+    "dist/assets/**/*",
     "README.md"
   ],
   "scripts": {

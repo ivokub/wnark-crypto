@@ -1,4 +1,4 @@
-import type { CurveGPUContext, CurveGPUElementBytes, FieldModule, Groth16Module, NTTModule, SupportedCurveID } from "./api.js";
+import type { CurveGPUContext, CurveGPUElementBytes, FieldModule, Groth16QuotientModule, NTTModule, SupportedCurveID } from "./api.js";
 import type { SimpleKernel } from "./runtime_common.js";
 import {
   cloneBytes,
@@ -139,7 +139,7 @@ export function createNTTModule(
     modulusHex: string;
   },
   fr: FieldModule,
-): NTTModule & Groth16Module {
+): NTTModule & Groth16QuotientModule {
   const { curve, vectorKernel, fieldKernel, nttKernel, domainPath, modulusHex } = options;
   const label = `${curve}-fr-ntt`;
   const elementBytes = fr.byteSize;

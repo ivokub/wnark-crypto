@@ -84,7 +84,16 @@ export type {
   G2Module,
   G1MSMModule,
   G2MSMModule,
+  Groth16ConstraintSystem,
+  Groth16Handle,
   NTTModule,
+  Groth16Module,
+  Groth16ProvingKey,
+  Groth16ProvingKeyFormat,
+  Groth16QuotientModule,
+  Groth16RuntimeKind,
+  Groth16RuntimeOptions,
+  Groth16VerificationKey,
   SupportedCurveID,
 } from "./curvegpu/api.js";
 
@@ -112,6 +121,7 @@ export type { CurveDefinition } from "./curvegpu/curves.js";
 
 export type { CurveID, FieldID, FieldShape } from "./curvegpu/types.js";
 export { shapeFor } from "./curvegpu/types.js";
+export { defaultGroth16RuntimeURLs } from "./curvegpu/groth16_module.js";
 
 export type {
   MontgomeryLEBytes,
