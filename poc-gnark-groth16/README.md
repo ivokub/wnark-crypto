@@ -11,14 +11,13 @@ commitment variant:
 - `webgpu-go`: the local WebGPU-accelerated prover package in this repo
 - `native-go`: native gnark Groth16 compiled to wasm
 
-The benchmark flow is:
+The benchmark flow is now controlled from JavaScript:
 
 1. load serialized `ccs`, `pk`, and `vk` fixture files,
-2. build the witness in wasm,
-3. generate a proof,
-4. serialize it with `WriteTo`,
-5. deserialize it with `ReadFrom`,
-6. verify it with gnark `groth16.Verify`.
+2. construct gnark binary witness bytes from deterministic `bigint` values,
+3. pass fixture and witness bytes to the TS-facing Groth16 module,
+4. generate serialized proof bytes,
+5. verify the proof bytes through the same TS-facing module.
 
 Proof bytes are not compared because Groth16 proving is randomized.
 
@@ -44,8 +43,7 @@ Each fixture directory contains:
 - `pk.dump`
 - `vk.bin`
 
-`pk.dump` uses gnark's fast unsafe proving-key dump format. The browser loader
-falls back to legacy `pk.bin` fixtures if they already exist locally.
+`pk.dump` uses gnark's fast unsafe proving-key dump format.
 
 You can scope generation, for example:
 
@@ -57,14 +55,16 @@ make poc-gnark-groth16-fixtures FIXTURE_CURVE=bn254 FIXTURE_LOGS=12 FIXTURE_COMM
 ## Build
 
 ```sh
-make poc-gnark-groth16-build
+make web-build
 ```
 
 This will:
 
 - build the browser library under `web/dist/`
-- compile the two Go wasm binaries into `poc-gnark-groth16/dist/`
-- copy `wasm_exec.js` into `poc-gnark-groth16/dist/`
+- compile the Go wasm Groth16 runtimes into `web/dist/assets/`
+
+The POC uses the default runtime URLs exported by the TS library, so it loads
+`wasm_exec.js` and the Groth16 wasm runtimes directly from `web/dist/assets/`.
 
 ## Run
 
