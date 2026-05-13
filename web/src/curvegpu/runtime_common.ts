@@ -2,7 +2,6 @@ import { fetchText } from "./browser_utils.js";
 import { fetchShaderParts } from "./shaders.js";
 import type { BufferPool } from "./buffer_pool.js";
 
-declare const GPUShaderStage: { COMPUTE: number };
 declare const GPUBufferUsage: {
   STORAGE: number;
   COPY_DST: number;

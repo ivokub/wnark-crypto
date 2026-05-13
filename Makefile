@@ -1,4 +1,4 @@
-.PHONY: web-build web-bundle-shaders web-groth16-assets testdata fixture-bn254-g1 fixture-bls12_377-g1 fixture-bls12_381-g1 fixture-bn254-g2 fixture-bls12_377-g2 fixture-bls12_381-g2 poc-gnark-groth16-fixtures
+.PHONY: web-build web-bundle-shaders web-lint web-groth16-assets testdata fixture-bn254-g1 fixture-bls12_377-g1 fixture-bls12_381-g1 fixture-bn254-g2 fixture-bls12_377-g2 fixture-bls12_381-g2 poc-gnark-groth16-fixtures
 
 COUNT ?= 524288
 ITERS ?= 1
@@ -9,7 +9,10 @@ FIXTURE_COMMITMENTS ?= 0,1,2
 web-bundle-shaders:
 	cd web && npm run build:shaders
 
-web-build: web-bundle-shaders
+web-lint:
+	cd web && npm run lint
+
+web-build: web-bundle-shaders web-lint
 	cd web && npm run build
 	$(MAKE) web-groth16-assets
 

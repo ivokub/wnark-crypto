@@ -11,7 +11,8 @@
     "declarationMap": true,
     "outDir": "dist",
     "rootDir": ".",
-    "lib": ["ES2022", "DOM"]
+    "lib": ["ES2022", "DOM"],
+    "types": ["@webgpu/types"]
   },
   "include": ["index.ts", "src/**/*.ts", "tests/browser/src/**/*.ts", "examples/src/**/*.ts"]
 }

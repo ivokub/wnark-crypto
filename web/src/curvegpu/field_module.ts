@@ -10,7 +10,6 @@ import {
 } from "./runtime_common.js";
 
 const OP_COPY = 0;
-const OP_ZERO = 1;
 const OP_ONE = 2;
 const OP_ADD = 3;
 const OP_SUB = 4;
@@ -25,7 +24,6 @@ const OP_FROM_MONT = 12;
 
 type FieldOpCode =
   | typeof OP_COPY
-  | typeof OP_ZERO
   | typeof OP_ONE
   | typeof OP_ADD
   | typeof OP_SUB

@@ -25,9 +25,14 @@
   ],
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json",
-    "build:shaders": "node scripts/bundle-shaders.mjs"
+    "build:shaders": "node scripts/bundle-shaders.mjs",
+    "lint": "eslint ."
   },
   "devDependencies": {
-    "typescript": "^5.8.0"
+    "@eslint/js": "^9.0.0",
+    "@webgpu/types": "^0.1.70",
+    "eslint": "^9.0.0",
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.0.0"
   }
 }

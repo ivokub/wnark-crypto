@@ -464,8 +464,8 @@ export interface Groth16ConstraintSystem extends Groth16Handle {
   readonly constraints: number;
 }
 
-export interface Groth16ProvingKey extends Groth16Handle {}
-export interface Groth16VerificationKey extends Groth16Handle {}
+export type Groth16ProvingKey = Groth16Handle;
+export type Groth16VerificationKey = Groth16Handle;
 
 /**
  * Browser Groth16 proof helpers backed by a long-lived Go WASM runtime.
