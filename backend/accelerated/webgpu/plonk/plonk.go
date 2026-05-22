@@ -14,10 +14,9 @@ import (
 
 // Prove runs the PLONK prover for supported curves.
 //
-// For the initial scaffold only BN254 is supported, and the implementation
-// delegates to gnark's native BN254 PLONK prover. The wrapper exists so we can
-// replace individual prover phases with WebGPU calls without changing the
-// browser-facing runtime API.
+// For now only BN254 is supported. The implementation is a local copy of
+// gnark's generated BN254 PLONK prover so we can replace individual prover
+// phases with WebGPU calls without changing the browser-facing runtime API.
 func Prove(spr constraint.ConstraintSystem, pk gnarkplonk.ProvingKey, fullWitness witness.Witness) (gnarkplonk.Proof, error) {
 	switch typedSPR := spr.(type) {
 	case *csbn254.SparseR1CS:
@@ -43,9 +42,9 @@ func NewProvingKey(curveID ecc.ID) gnarkplonk.ProvingKey {
 
 // Prepare initializes browser-side caches for a deserialized proving key.
 func Prepare(pk gnarkplonk.ProvingKey) error {
-	switch typed := pk.(type) {
+	switch pk.(type) {
 	case *BN254ProvingKey:
-		return typed.ensurePrepared()
+		return nil
 	default:
 		return fmt.Errorf("webgpu plonk: unsupported proving key type %T", pk)
 	}
