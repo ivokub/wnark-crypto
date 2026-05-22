@@ -95,6 +95,14 @@ export type {
   Groth16RuntimeOptions,
   Groth16VerificationKey,
   SupportedCurveID,
+  PlonkConstraintSystem,
+  PlonkHandle,
+  PlonkModule,
+  PlonkProvingKey,
+  PlonkProvingKeyFormat,
+  PlonkRuntimeKind,
+  PlonkRuntimeOptions,
+  PlonkVerificationKey,
 } from "./curvegpu/api.js";
 
 export {
@@ -122,6 +130,7 @@ export type { CurveDefinition } from "./curvegpu/curves.js";
 export type { CurveID, FieldID, FieldShape } from "./curvegpu/types.js";
 export { shapeFor } from "./curvegpu/types.js";
 export { defaultGroth16RuntimeURLs } from "./curvegpu/groth16_module.js";
+export { defaultPlonkRuntimeURLs } from "./curvegpu/plonk_module.js";
 
 export type {
   MontgomeryLEBytes,

@@ -4,6 +4,7 @@ import { createG1Module } from "./g1_module.js";
 import { createG2Module } from "./g2_module.js";
 import { createG2MSMModule } from "./g2_msm_module.js";
 import { createGroth16Module } from "./groth16_module.js";
+import { createPlonkModule } from "./plonk_module.js";
 import { createG1MSMModule } from "./msm_module.js";
 import { buildJacPippengerRuntime } from "./msm_pippenger.js";
 import { createNTTModule } from "./ntt_module.js";
@@ -285,6 +286,12 @@ export async function createCurveModule(context: CurveGPUContext, curve: Support
     g1msm,
     g2msm,
   });
+  const plonk = createPlonkModule({
+    context,
+    curve: definition.id,
+    modulusHex: definition.frModulusHex ?? "",
+    frBytes: frShape.byteSize,
+  });
   return {
     id: curve,
     context,
@@ -294,6 +301,7 @@ export async function createCurveModule(context: CurveGPUContext, curve: Support
     g2,
     ntt,
     groth16,
+    plonk,
     g1msm,
     g2msm,
   };

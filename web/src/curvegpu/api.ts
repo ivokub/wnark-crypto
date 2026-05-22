@@ -499,6 +499,65 @@ export interface Groth16Module extends Groth16QuotientModule {
   encodeWitness(values: readonly bigint[], options: { publicCount: number }): Uint8Array;
 }
 
+export type PlonkProvingKeyFormat = "serialized" | "unsafe";
+export type PlonkRuntimeKind = "webgpu" | "native";
+
+export type PlonkRuntimeOptions = {
+  /** Optional URL for Go's wasm_exec.js runtime shim. Defaults to the package asset. */
+  wasmExecURL?: string;
+  /** Optional URL for the WebGPU-accelerated PLONK Go WASM runtime. Defaults to the package asset. */
+  webgpuWasmURL?: string;
+  /** Optional URL for the native gnark PLONK Go WASM runtime. Defaults to the package asset. */
+  nativeWasmURL?: string;
+};
+
+export interface PlonkHandle {
+  /** Release the corresponding Go WASM runtime handle. */
+  dispose(): Promise<void>;
+}
+
+export interface PlonkConstraintSystem extends PlonkHandle {
+  /** Number of constraints reported by the deserialized constraint system. */
+  readonly constraints: number;
+}
+
+export type PlonkProvingKey = PlonkHandle;
+export type PlonkVerificationKey = PlonkHandle;
+
+/**
+ * Browser PLONK proof helpers backed by a long-lived Go WASM runtime.
+ */
+export interface PlonkModule {
+  readonly context: CurveGPUContext;
+  readonly curve: SupportedCurveID;
+  /**
+   * Load the Go WASM PLONK runtime.
+   *
+   * Defaults to the WebGPU runtime and package-shipped assets. Override URLs
+   * when serving the runtime from an application asset path or CDN.
+   */
+  loadRuntime(options?: PlonkRuntimeOptions & { kind?: PlonkRuntimeKind }): Promise<void>;
+  /** Deserialize a gnark PLONK constraint system. */
+  readConstraintSystem(bytes: Uint8Array): Promise<PlonkConstraintSystem>;
+  /** Deserialize a gnark PLONK proving key. */
+  readProvingKey(bytes: Uint8Array, options?: { format?: PlonkProvingKeyFormat }): Promise<PlonkProvingKey>;
+  /** Deserialize a gnark PLONK verification key. */
+  readVerificationKey(bytes: Uint8Array): Promise<PlonkVerificationKey>;
+  /** Precompute browser-side proving key caches. */
+  prepareProvingKey(pk: PlonkProvingKey): Promise<void>;
+  /** Prove with a gnark binary witness and return gnark-serialized proof bytes. */
+  prove(ccs: PlonkConstraintSystem, pk: PlonkProvingKey, witness: Uint8Array): Promise<Uint8Array>;
+  /** Verify gnark-serialized proof bytes against a gnark binary public witness. */
+  verify(proof: Uint8Array, vk: PlonkVerificationKey, publicWitness: Uint8Array): Promise<boolean>;
+  /**
+   * Encode flat regular field values as a gnark binary witness.
+   *
+   * Values must be ordered `[public | private]`. The binary witness protocol
+   * stores field elements as fixed-width big-endian bytes.
+   */
+  encodeWitness(values: readonly bigint[], options: { publicCount: number }): Uint8Array;
+}
+
 /**
  * Multi-scalar multiplication module over G1 affine bases.
  */
@@ -631,6 +690,8 @@ export interface CurveModule {
   readonly ntt: NTTModule;
   /** Groth16-specific scalar-field helpers. */
   readonly groth16: Groth16Module;
+  /** PLONK proof helpers. */
+  readonly plonk: PlonkModule;
   /** Multi-scalar multiplication over G1. */
   readonly g1msm: G1MSMModule;
   /** Multi-scalar multiplication over G2. */
