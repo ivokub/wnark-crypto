@@ -8,7 +8,6 @@ Generate the initial fixtures:
 
 ```sh
 make poc-plonk-fixtures
-make poc-plonk-fixtures PLONK_FIXTURE_COMMITMENTS=1,2
 ```
 
 Build the web package and wasm runtimes:
