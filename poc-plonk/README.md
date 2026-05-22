@@ -21,6 +21,7 @@ Serve the repository root and open:
 ```text
 http://localhost:8000/poc-plonk/index.html
 http://localhost:8000/poc-plonk/index.html?autorun=1&impl=native-go&curve=bn254&size-log=12&commitments=0&prove-runs=1
+http://localhost:8000/poc-plonk/index.html?autorun=1&impl=webgpu-go&curve=bn254&size-log=18&commitments=0&prove-runs=1
 ```
 
 The `webgpu-go` runtime currently uses the accelerated backend wrapper, but the

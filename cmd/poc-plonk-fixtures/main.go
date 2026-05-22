@@ -24,7 +24,7 @@ func main() {
 	var outDir string
 
 	flag.StringVar(&curveName, "curve", "bn254", "curve to generate: bn254")
-	flag.StringVar(&logsCSV, "logs", "12", "comma-separated circuit size logs")
+	flag.StringVar(&logsCSV, "logs", "12,15,18", "comma-separated circuit size logs")
 	flag.StringVar(&commitmentsCSV, "commitments", "0", "comma-separated commitment counts")
 	flag.StringVar(&outDir, "out", "poc-plonk/fixtures", "output fixture root")
 	flag.Parse()

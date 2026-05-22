@@ -55,7 +55,7 @@ function applyQueryDefaults() {
   if (curve && curve === "bn254") {
     curveSelect.value = curve;
   }
-  if (sizeLog && sizeLog === "12") {
+  if (sizeLog && ["12", "15", "18"].includes(sizeLog)) {
     sizeLogSelect.value = sizeLog;
   }
   if (commitments && ["0", "1", "2"].includes(commitments)) {
