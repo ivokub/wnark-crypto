@@ -11,6 +11,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./shader_bundle": {
+      "types": "./dist/src/curvegpu/shader_bundle.generated.d.ts",
+      "import": "./dist/src/curvegpu/shader_bundle.generated.js"
     }
   },
   "files": [
