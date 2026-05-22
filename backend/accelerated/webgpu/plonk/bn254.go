@@ -12,7 +12,6 @@ import (
 	"hash"
 	"math/big"
 	"math/bits"
-	"time"
 
 	curve "github.com/consensys/gnark-crypto/ecc/bn254"
 	bn254fp "github.com/consensys/gnark-crypto/ecc/bn254/fp"
@@ -29,7 +28,6 @@ import (
 	cs "github.com/consensys/gnark/constraint/bn254"
 	"github.com/consensys/gnark/constraint/solver"
 	fcs "github.com/consensys/gnark/frontend/cs"
-	"github.com/consensys/gnark/logger"
 )
 
 const (
@@ -78,12 +76,6 @@ type BN254ProvingKey struct {
 }
 
 func proveBN254(spr *cs.SparseR1CS, pk *BN254ProvingKey, fullWitness witness.Witness, opts ...backend.ProverOption) (*native.Proof, error) {
-
-	log := logger.Logger().With().
-		Str("curve", spr.CurveID().String()).
-		Int("nbConstraints", spr.GetNbConstraints()).
-		Str("backend", "plonk").Logger()
-
 	// parse the options
 	opt, err := backend.NewProverConfig(opts...)
 	if err != nil {
@@ -93,8 +85,6 @@ func proveBN254(spr *cs.SparseR1CS, pk *BN254ProvingKey, fullWitness witness.Wit
 	if err := pk.ensurePrepared(); err != nil {
 		return nil, fmt.Errorf("prepare proving key: %w", err)
 	}
-
-	start := time.Now()
 
 	// init instance
 	instance, err := newInstance(spr, pk, fullWitness, &opt)
@@ -130,7 +120,6 @@ func proveBN254(spr *cs.SparseR1CS, pk *BN254ProvingKey, fullWitness witness.Wit
 		return nil, fmt.Errorf("batch opening: %w", err)
 	}
 
-	log.Debug().Dur("took", time.Since(start)).Msg("prover done")
 	return instance.proof, nil
 }
 
