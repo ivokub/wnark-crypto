@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PLONK Go WASM POC</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      }
+      body {
+        margin: 2rem;
+        max-width: 1100px;
+      }
+      label {
+        display: inline-flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        margin: 0 1rem 1rem 0;
+      }
+      select,
+      input,
+      button {
+        font: inherit;
+      }
+      #status {
+        margin: 1rem 0;
+        font-weight: 700;
+      }
+      #log {
+        min-height: 30rem;
+        padding: 1rem;
+        overflow: auto;
+        white-space: pre-wrap;
+        border: 1px solid currentColor;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>PLONK TS Browser POC</h1>
+    <p>
+      BN254-only scaffold for now. The WebGPU runtime currently delegates proving to gnark's native PLONK
+      implementation through the accelerated backend wrapper.
+    </p>
+
+    <label>
+      impl
+      <select id="impl">
+        <option value="native-go">native-go</option>
+        <option value="webgpu-go">webgpu-go</option>
+        <option value="both">both</option>
+      </select>
+    </label>
+    <label>
+      curve
+      <select id="curve">
+        <option value="bn254">bn254</option>
+      </select>
+    </label>
+    <label>
+      size
+      <select id="size-log">
+        <option value="12">2^12</option>
+      </select>
+    </label>
+    <label>
+      commitments
+      <select id="commitments">
+        <option value="0">0</option>
+        <option value="1">1</option>
+        <option value="2">2</option>
+      </select>
+    </label>
+    <label>
+      prove runs
+      <input id="prove-runs" type="number" min="1" value="1" />
+    </label>
+    <button id="run">Run</button>
+
+    <div id="status">idle</div>
+    <pre id="log"></pre>
+
+    <script type="module" src="/poc-plonk/main.js"></script>
+  </body>
+</html>
