@@ -131,6 +131,8 @@ func (pk *BN254ProvingKey) ensurePrepared() error {
 		return err
 	}
 	payload := jsObject()
+	payload.Set("kzg", jsUint8Array(packBN254G1AffineJacobianBatch(pk.Kzg.G1)))
+	payload.Set("kzgCount", len(pk.Kzg.G1))
 	payload.Set("kzgLagrange", jsUint8Array(packBN254G1AffineJacobianBatch(pk.KzgLagrange.G1)))
 	payload.Set("kzgLagrangeCount", len(pk.KzgLagrange.G1))
 	handle, err := bridgePrepareKey("bn254", payload)
@@ -589,7 +591,7 @@ func (s *instance) computeQuotient() (err error) {
 	}
 
 	// commit to h
-	if err := commitToQuotient(s.h1(), s.h2(), s.h3(), s.proof, s.pk.Kzg); err != nil {
+	if err := s.commitToQuotient(s.h1(), s.h2(), s.h3()); err != nil {
 		return err
 	}
 
@@ -1123,15 +1125,15 @@ func coefficients(p []*iop.Polynomial) [][]fr.Element {
 	return res
 }
 
-func commitToQuotient(h1, h2, h3 []fr.Element, proof *native.Proof, kzgPk kzg.ProvingKey) error {
+func (s *instance) commitToQuotient(h1, h2, h3 []fr.Element) error {
 	var err error
-	if proof.H[0], err = kzg.Commit(h1, kzgPk, 1); err != nil {
+	if s.proof.H[0], err = s.msmG1("kzg", 0, h1); err != nil {
 		return err
 	}
-	if proof.H[1], err = kzg.Commit(h2, kzgPk, 1); err != nil {
+	if s.proof.H[1], err = s.msmG1("kzg", 0, h2); err != nil {
 		return err
 	}
-	proof.H[2], err = kzg.Commit(h3, kzgPk, 1)
+	s.proof.H[2], err = s.msmG1("kzg", 0, h3)
 	return err
 }
 

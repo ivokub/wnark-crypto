@@ -27,6 +27,8 @@ type BridgeDependencies = {
 
 type CachedKey = {
   curve: SupportedCurveID;
+  kzg: Uint8Array;
+  kzgCount: number;
   kzgLagrange: Uint8Array;
   kzgLagrangeCount: number;
 };
@@ -80,21 +82,35 @@ async function init(curve: SupportedCurveID) {
 
 async function prepareKey(curve: SupportedCurveID, payload: Record<string, Uint8Array | number | undefined>) {
   assertBridge(curve);
+  const kzg = payload.kzg;
+  const kzgCount = Number(payload.kzgCount);
   const kzgLagrange = payload.kzgLagrange;
   const kzgLagrangeCount = Number(payload.kzgLagrangeCount);
+  if (!(kzg instanceof Uint8Array)) {
+    throw new Error("PLONK key payload is missing kzg");
+  }
   if (!(kzgLagrange instanceof Uint8Array)) {
     throw new Error("PLONK key payload is missing kzgLagrange");
+  }
+  if (!Number.isInteger(kzgCount) || kzgCount <= 0) {
+    throw new Error(`invalid PLONK kzgCount ${payload.kzgCount}`);
   }
   if (!Number.isInteger(kzgLagrangeCount) || kzgLagrangeCount <= 0) {
     throw new Error(`invalid PLONK kzgLagrangeCount ${payload.kzgLagrangeCount}`);
   }
-  const expectedBytes = kzgLagrangeCount * CURVE_CONFIG[curve].g1PointBytes;
-  if (kzgLagrange.byteLength !== expectedBytes) {
-    throw new Error(`PLONK kzgLagrange expected ${expectedBytes} bytes, got ${kzgLagrange.byteLength}`);
+  const kzgExpectedBytes = kzgCount * CURVE_CONFIG[curve].g1PointBytes;
+  if (kzg.byteLength !== kzgExpectedBytes) {
+    throw new Error(`PLONK kzg expected ${kzgExpectedBytes} bytes, got ${kzg.byteLength}`);
+  }
+  const kzgLagrangeExpectedBytes = kzgLagrangeCount * CURVE_CONFIG[curve].g1PointBytes;
+  if (kzgLagrange.byteLength !== kzgLagrangeExpectedBytes) {
+    throw new Error(`PLONK kzgLagrange expected ${kzgLagrangeExpectedBytes} bytes, got ${kzgLagrange.byteLength}`);
   }
   const handle = `${curve}:${nextHandle++}`;
   const entry: CachedKey = {
     curve,
+    kzg: cloneBytes(kzg),
+    kzgCount,
     kzgLagrange: cloneBytes(kzgLagrange),
     kzgLagrangeCount,
   };
@@ -106,19 +122,21 @@ async function msmG1(handle: string, vectorName: string, scalarsPacked: Uint8Arr
   const entry = getKey(handle);
   const bridge = assertBridge(entry.curve);
   const config = CURVE_CONFIG[entry.curve];
-  if (vectorName !== "kzgLagrange") {
+  if (vectorName !== "kzg" && vectorName !== "kzgLagrange") {
     throw new Error(`missing cached PLONK G1 vector ${vectorName}`);
   }
-  const termCount = count ?? entry.kzgLagrangeCount - start;
+  const vector = entry[vectorName];
+  const vectorCount = entry[`${vectorName}Count`];
+  const termCount = count ?? vectorCount - start;
   if (!Number.isInteger(start) || start < 0 || !Number.isInteger(termCount) || termCount <= 0) {
     throw new Error(`invalid PLONK MSM range start=${start} count=${termCount}`);
   }
-  if (start + termCount > entry.kzgLagrangeCount) {
-    throw new Error(`PLONK MSM range exceeds kzgLagrange: start=${start} count=${termCount}`);
+  if (start + termCount > vectorCount) {
+    throw new Error(`PLONK MSM range exceeds ${vectorName}: start=${start} count=${termCount}`);
   }
   const baseStart = start * config.g1PointBytes;
   const baseEnd = (start + termCount) * config.g1PointBytes;
-  const basesPacked = entry.kzgLagrange.subarray(baseStart, baseEnd);
+  const basesPacked = vector.subarray(baseStart, baseEnd);
   const resultPacked = await bridge.g1msm.pippengerPackedJacobianBases(basesPacked, cloneBytes(scalarsPacked), {
     count: 1,
     termsPerInstance: termCount,
