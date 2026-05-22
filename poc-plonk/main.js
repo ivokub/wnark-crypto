@@ -101,11 +101,12 @@ function estimatedConstraints(steps, commitments) {
 }
 
 function chainStepsForTarget(sizeLog, commitments) {
-  const target = targetConstraints(sizeLog);
+  const target = targetConstraints(sizeLog) - 4;
+  const commitmentCount = Math.max(0, Math.min(2, commitments));
   let steps = 4;
   for (;;) {
     const next = steps + 4;
-    if (estimatedConstraints(next, commitments) > target) {
+    if (estimatedConstraints(next, commitmentCount) > target) {
       return steps;
     }
     steps = next;
