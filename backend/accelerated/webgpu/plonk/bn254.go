@@ -633,11 +633,33 @@ func (s *instance) openZ() (err error) {
 	zetaShifted.Mul(&s.zeta, &s.pk.Vk.Generator)
 	s.blindedZ = getBlindedCoefficients(s.x[id_Z], s.bp[id_Bz])
 	// open z at zeta
-	s.proof.ZShiftedOpening, err = kzg.Open(s.blindedZ, zetaShifted, s.pk.Kzg)
+	s.proof.ZShiftedOpening, err = s.openKZG("z_opening", s.blindedZ, zetaShifted)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func (s *instance) openKZG(label string, p []fr.Element, point fr.Element) (kzg.OpeningProof, error) {
+	if len(p) > len(s.pk.Kzg.G1) {
+		return kzg.OpeningProof{}, kzg.ErrInvalidPolynomialSize
+	}
+
+	var proof kzg.OpeningProof
+	proof.ClaimedValue = evalKZGPolynomial(p, point)
+
+	var h []fr.Element
+	cp := make([]fr.Element, len(p))
+	copy(cp, p)
+	h = dividePolyByXMinusA(cp, proof.ClaimedValue, point)
+
+	hCommit, err := return s.msmG1("kzg", 0, h)
+	if err != nil {
+		return kzg.OpeningProof{}, err
+	}
+	proof.H.Set(&hCommit)
+
+	return proof, nil
 }
 
 func (s *instance) h1() []fr.Element {
@@ -731,16 +753,79 @@ func (s *instance) batchOpening() error {
 	digestsToOpen[5] = s.pk.Vk.S[1]
 
 	var err error
-	s.proof.BatchedProof, err = kzg.BatchOpenSinglePoint(
+	s.proof.BatchedProof, err = s.batchOpenSinglePoint(
+		"batch_opening",
 		polysToOpen,
 		digestsToOpen,
 		s.zeta,
 		s.kzgFoldingHash,
-		s.pk.Kzg,
 		s.proof.ZShiftedOpening.ClaimedValue.Marshal(),
 	)
-
 	return err
+}
+
+func (s *instance) batchOpenSinglePoint(label string, polynomials [][]fr.Element, digests []curve.G1Affine, point fr.Element, hf hash.Hash, dataTranscript ...[]byte) (kzg.BatchOpeningProof, error) {
+	nbDigests := len(digests)
+	if nbDigests != len(polynomials) {
+		return kzg.BatchOpeningProof{}, kzg.ErrInvalidNbDigests
+	}
+	if nbDigests == 0 {
+		return kzg.BatchOpeningProof{}, kzg.ErrZeroNbDigests
+	}
+
+	largestPoly := -1
+	for _, p := range polynomials {
+		if len(p) > len(s.pk.Kzg.G1) {
+			return kzg.BatchOpeningProof{}, kzg.ErrInvalidPolynomialSize
+		}
+		if len(p) > largestPoly {
+			largestPoly = len(p)
+		}
+	}
+
+	var res kzg.BatchOpeningProof
+	res.ClaimedValues = make([]fr.Element, len(polynomials))
+	for i := range polynomials {
+		res.ClaimedValues[i] = evalKZGPolynomial(polynomials[i], point)
+	}
+
+	var gamma fr.Element
+	gamma, err = deriveKZGBatchGamma(point, digests, res.ClaimedValues, hf, dataTranscript...)
+	if err != nil {
+		return kzg.BatchOpeningProof{}, err
+	}
+
+	var foldedEvaluations fr.Element
+	foldedEvaluations = res.ClaimedValues[nbDigests-1]
+	for i := nbDigests - 2; i >= 0; i-- {
+		foldedEvaluations.Mul(&foldedEvaluations, &gamma).
+			Add(&foldedEvaluations, &res.ClaimedValues[i])
+	}
+
+	var foldedPolynomials []fr.Element
+	foldedPolynomials = make([]fr.Element, largestPoly)
+	copy(foldedPolynomials, polynomials[0])
+
+	gammaPower := gamma
+	for i := 1; i < len(polynomials); i++ {
+		var term fr.Element
+		for j := range polynomials[i] {
+			term.Mul(&polynomials[i][j], &gammaPower)
+			foldedPolynomials[j].Add(&foldedPolynomials[j], &term)
+		}
+		gammaPower.Mul(&gammaPower, &gamma)
+	}
+
+	var h []fr.Element
+	h = dividePolyByXMinusA(foldedPolynomials, foldedEvaluations, point)
+
+	hCommit, err := s.msmG1("kzg", 0, h)
+	if err != nil {
+		return kzg.BatchOpeningProof{}, err
+	}
+	res.H.Set(&hCommit)
+
+	return res, nil
 }
 
 // evaluate the full set of constraints, all polynomials in x are back in
@@ -1098,6 +1183,61 @@ func commitBlindingFactor(n int, b *iop.Polynomial, key kzg.ProvingKey) curve.G1
 		res.Add(&res, &hi)
 	}
 	return res
+}
+
+func evalKZGPolynomial(p []fr.Element, point fr.Element) fr.Element {
+	var res fr.Element
+	for i := len(p) - 1; i >= 0; i-- {
+		res.Mul(&res, &point).Add(&res, &p[i])
+	}
+	return res
+}
+
+// dividePolyByXMinusA computes (f-f(a))/(x-a), reusing f for the result.
+func dividePolyByXMinusA(f []fr.Element, fa, a fr.Element) []fr.Element {
+	if len(f) == 0 {
+		return []fr.Element{}
+	}
+
+	f[0].Sub(&f[0], &fa)
+
+	var t fr.Element
+	for i := len(f) - 2; i >= 0; i-- {
+		t.Mul(&f[i+1], &a)
+		f[i].Add(&f[i], &t)
+	}
+
+	return f[1:]
+}
+
+func deriveKZGBatchGamma(point fr.Element, digests []curve.G1Affine, claimedValues []fr.Element, hf hash.Hash, dataTranscript ...[]byte) (fr.Element, error) {
+	fs := fiatshamir.NewTranscript(hf, "gamma")
+	if err := fs.Bind("gamma", point.Marshal()); err != nil {
+		return fr.Element{}, err
+	}
+	for i := range digests {
+		if err := fs.Bind("gamma", digests[i].Marshal()); err != nil {
+			return fr.Element{}, err
+		}
+	}
+	for i := range claimedValues {
+		if err := fs.Bind("gamma", claimedValues[i].Marshal()); err != nil {
+			return fr.Element{}, err
+		}
+	}
+	for i := range dataTranscript {
+		if err := fs.Bind("gamma", dataTranscript[i]); err != nil {
+			return fr.Element{}, err
+		}
+	}
+
+	gammaBytes, err := fs.ComputeChallenge("gamma")
+	if err != nil {
+		return fr.Element{}, err
+	}
+	var gamma fr.Element
+	gamma.SetBytes(gammaBytes)
+	return gamma, nil
 }
 
 // return a random polynomial of degree n, if n==-1 cancel the blinding
