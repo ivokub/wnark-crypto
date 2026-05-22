@@ -522,7 +522,7 @@ func (s *instance) deriveGammaAndBeta() error {
 // /!\ The polynomial p is supposed to be in Lagrange form.
 func (s *instance) commitToPolyAndBlinding(p, b *iop.Polynomial) (commit curve.G1Affine, err error) {
 
-	commit, err = kzg.Commit(p.Coefficients(), s.pk.KzgLagrange, 1)
+	commit, err = return s.msmG1("kzgLagrange", 0, p.Coefficients())
 
 	// we add in the blinding contribution
 	n := int(s.domain0.Cardinality)
@@ -704,7 +704,7 @@ func (s *instance) computeLinearizedPolynomial() error {
 	)
 
 	var err error
-	s.linearizedPolynomialDigest, err = kzg.Commit(s.linearizedPolynomial, s.pk.Kzg, 1)
+	s.linearizedPolynomialDigest, err = s.msmG1("kzg", 0, s.linearizedPolynomial)
 	return err
 }
 
