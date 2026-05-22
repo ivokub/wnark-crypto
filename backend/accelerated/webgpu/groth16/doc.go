@@ -11,7 +11,7 @@
 //     the same WebGPU bridge
 //
 // The package mirrors gnark's accelerated backend layout without modifying the
-// gnark repository. Host applications are expected to load
-// `backend/accelerated/webgpu/groth16/bridge.js` before invoking Prove so the
-// wasm code can call into the browser runtime through `syscall/js`.
+// gnark repository. Host applications are expected to install the WebGPU bridge
+// from the TS package before invoking Prove so the wasm code can call into the
+// browser runtime through `syscall/js`.
 package groth16
