@@ -291,6 +291,8 @@ export async function createCurveModule(context: CurveGPUContext, curve: Support
     curve: definition.id,
     modulusHex: definition.frModulusHex ?? "",
     frBytes: frShape.byteSize,
+    g1,
+    g1msm,
   });
   return {
     id: curve,

@@ -1,5 +1,7 @@
 import type {
   CurveGPUContext,
+  G1Module,
+  G1MSMModule,
   PlonkConstraintSystem,
   PlonkHandle,
   PlonkModule,
@@ -10,6 +12,7 @@ import type {
   PlonkVerificationKey,
   SupportedCurveID,
 } from "./api.js";
+import { installPlonkWebGPUBridge } from "./plonk_webgpu_bridge.js";
 
 type GoInstance = {
   importObject: WebAssembly.Imports;
@@ -33,6 +36,8 @@ type PlonkModuleConfig = {
   curve: SupportedCurveID;
   modulusHex: string;
   frBytes: number;
+  g1: G1Module;
+  g1msm: G1MSMModule;
 };
 
 export const defaultPlonkRuntimeURLs = Object.freeze({
@@ -106,12 +111,17 @@ async function waitForRuntimeGlobal(name: string): Promise<RuntimeGlobal> {
   throw new Error(`PLONK WASM runtime ${name} did not initialize`);
 }
 
-async function loadGoRuntime(kind: PlonkRuntimeKind, options: Required<PlonkRuntimeOptions>): Promise<RuntimeGlobal> {
+async function loadGoRuntime(
+  kind: PlonkRuntimeKind,
+  options: Required<PlonkRuntimeOptions>,
+  beforeStart: () => void,
+): Promise<RuntimeGlobal> {
   const wasmURL = kind === "native" ? options.nativeWasmURL : options.webgpuWasmURL;
   const cacheKey = `${kind}\n${options.wasmExecURL}\n${wasmURL}`;
   let promise = loadedRuntimes.get(cacheKey);
   if (!promise) {
     promise = (async () => {
+      beforeStart();
       await ensureWasmExec(options.wasmExecURL);
       const response = await fetch(wasmURL);
       if (!response.ok) {
@@ -127,6 +137,8 @@ async function loadGoRuntime(kind: PlonkRuntimeKind, options: Required<PlonkRunt
       return waitForRuntimeGlobal(runtimeGlobals[kind]);
     })();
     loadedRuntimes.set(cacheKey, promise);
+  } else {
+    beforeStart();
   }
   return promise;
 }
@@ -223,9 +235,19 @@ export function createPlonkModule(config: PlonkModuleConfig): PlonkModule {
   let currentRuntime: Promise<RuntimeGlobal> | null = null;
   let currentKind: PlonkRuntimeKind = "webgpu";
 
+  function installBridge(): void {
+    installPlonkWebGPUBridge({
+      context: config.context,
+      curve: config.curve,
+      g1: config.g1,
+      g1msm: config.g1msm,
+    });
+  }
+
   async function loadRuntime(options?: PlonkRuntimeOptions & { kind?: PlonkRuntimeKind }): Promise<void> {
     currentKind = options?.kind ?? "webgpu";
-    currentRuntime = loadGoRuntime(currentKind, normalizeRuntimeOptions(options));
+    const runtimeOptions = normalizeRuntimeOptions(options);
+    currentRuntime = loadGoRuntime(currentKind, runtimeOptions, currentKind === "webgpu" ? installBridge : () => {});
     await currentRuntime;
   }
 

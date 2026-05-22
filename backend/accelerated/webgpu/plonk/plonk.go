@@ -42,9 +42,9 @@ func NewProvingKey(curveID ecc.ID) gnarkplonk.ProvingKey {
 
 // Prepare initializes browser-side caches for a deserialized proving key.
 func Prepare(pk gnarkplonk.ProvingKey) error {
-	switch pk.(type) {
+	switch typedPK := pk.(type) {
 	case *BN254ProvingKey:
-		return nil
+		return typedPK.ensurePrepared()
 	default:
 		return fmt.Errorf("webgpu plonk: unsupported proving key type %T", pk)
 	}

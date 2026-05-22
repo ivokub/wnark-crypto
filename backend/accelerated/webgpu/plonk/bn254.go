@@ -6,6 +6,7 @@
 package plonk
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"hash"
@@ -13,8 +14,8 @@ import (
 	"math/bits"
 	"time"
 
-	"github.com/consensys/gnark-crypto/ecc"
 	curve "github.com/consensys/gnark-crypto/ecc/bn254"
+	bn254fp "github.com/consensys/gnark-crypto/ecc/bn254/fp"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr/fft"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr/hash_to_field"
@@ -65,8 +66,15 @@ const (
 	order_blinding_Z = 2
 )
 
+const (
+	bn254FrBytes           = fr.Bytes
+	bn254G1CoordinateBytes = bn254fp.Bytes
+	bn254G1PointBytes      = 3 * bn254G1CoordinateBytes
+)
+
 type BN254ProvingKey struct {
 	native.ProvingKey
+	handle string
 }
 
 func proveBN254(spr *cs.SparseR1CS, pk *BN254ProvingKey, fullWitness witness.Witness, opts ...backend.ProverOption) (*native.Proof, error) {
@@ -80,6 +88,10 @@ func proveBN254(spr *cs.SparseR1CS, pk *BN254ProvingKey, fullWitness witness.Wit
 	opt, err := backend.NewProverConfig(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("get prover options: %w", err)
+	}
+
+	if err := pk.ensurePrepared(); err != nil {
+		return nil, fmt.Errorf("prepare proving key: %w", err)
 	}
 
 	start := time.Now()
@@ -120,6 +132,90 @@ func proveBN254(spr *cs.SparseR1CS, pk *BN254ProvingKey, fullWitness witness.Wit
 
 	log.Debug().Dur("took", time.Since(start)).Msg("prover done")
 	return instance.proof, nil
+}
+
+func (pk *BN254ProvingKey) ensurePrepared() error {
+	if pk.handle != "" {
+		return nil
+	}
+	if err := bridgeInit("bn254"); err != nil {
+		return err
+	}
+	payload := jsObject()
+	payload.Set("kzgLagrange", jsUint8Array(packBN254G1AffineJacobianBatch(pk.KzgLagrange.G1)))
+	payload.Set("kzgLagrangeCount", len(pk.KzgLagrange.G1))
+	handle, err := bridgePrepareKey("bn254", payload)
+	if err != nil {
+		return err
+	}
+	pk.handle = handle
+	return nil
+}
+
+func packBN254FrVectorRegularLEInto(dst []byte, values []fr.Element) []byte {
+	required := len(values) * bn254FrBytes
+	if cap(dst) < required {
+		dst = make([]byte, required)
+	} else {
+		dst = dst[:required]
+	}
+	for i := range values {
+		base := i * bn254FrBytes
+		writeBN254FrRegularLE(dst[base:base+bn254FrBytes], &values[i])
+	}
+	return dst
+}
+
+func writeBN254FrRegularLE(dst []byte, value *fr.Element) {
+	be := value.Bytes()
+	for i := 0; i < bn254FrBytes; i++ {
+		dst[i] = be[bn254FrBytes-1-i]
+	}
+}
+
+func packBN254G1AffineJacobianBatch(points []curve.G1Affine) []byte {
+	out := make([]byte, len(points)*bn254G1PointBytes)
+	for i := range points {
+		base := i * bn254G1PointBytes
+		writeBN254FPMontLE(out[base:base+bn254G1CoordinateBytes], &points[i].X)
+		writeBN254FPMontLE(out[base+bn254G1CoordinateBytes:base+2*bn254G1CoordinateBytes], &points[i].Y)
+		writeBN254G1JacobianZOne(out[base+2*bn254G1CoordinateBytes : base+3*bn254G1CoordinateBytes])
+	}
+	return out
+}
+
+func decodeBN254G1AffineFromPacked(packed []byte, err error) (curve.G1Affine, error) {
+	if err != nil {
+		return curve.G1Affine{}, err
+	}
+	if len(packed) != 2*bn254G1CoordinateBytes {
+		return curve.G1Affine{}, fmt.Errorf("webgpu plonk bn254: expected %d G1 bytes, got %d", 2*bn254G1CoordinateBytes, len(packed))
+	}
+	return curve.G1Affine{
+		X: readBN254FPMontLE(packed[:bn254G1CoordinateBytes]),
+		Y: readBN254FPMontLE(packed[bn254G1CoordinateBytes:]),
+	}, nil
+}
+
+func readBN254FPMontLE(src []byte) bn254fp.Element {
+	var words [4]uint64
+	for i := range words {
+		words[i] = binary.LittleEndian.Uint64(src[i*8 : (i+1)*8])
+	}
+	return bn254fp.Element(words)
+}
+
+func writeBN254FPMontLE(dst []byte, value *bn254fp.Element) {
+	words := [4]uint64(*value)
+	for i := range words {
+		binary.LittleEndian.PutUint64(dst[i*8:(i+1)*8], words[i])
+	}
+}
+
+func writeBN254G1JacobianZOne(dst []byte) {
+	var one bn254fp.Element
+	one.SetOne()
+	writeBN254FPMontLE(dst, &one)
 }
 
 // represents a Prover instance
@@ -351,7 +447,8 @@ func (s *instance) commitToLRO() error {
 		coeffs[i].Sub(&coeffs[i], &s0)
 	}
 	var commit curve.G1Affine
-	if _, err := commit.MultiExp(s.pk.KzgLagrange.G1[:offset], coeffs[:offset], ecc.MultiExpConfig{NbTasks: 1}); err != nil {
+	commit, err := s.msmG1("kzgLagrange", 0, coeffs[:offset])
+	if err != nil {
 		return err
 	}
 	for i := 0; i < offset; i++ {
@@ -366,7 +463,8 @@ func (s *instance) commitToLRO() error {
 	for i := nbPublic; i < offset; i++ {
 		coeffs[i].Sub(&coeffs[i], &s0)
 	}
-	if _, err := commit.MultiExp(s.pk.KzgLagrange.G1[nbPublic:offset], coeffs[nbPublic:offset], ecc.MultiExpConfig{NbTasks: 1}); err != nil {
+	commit, err = s.msmG1("kzgLagrange", nbPublic, coeffs[nbPublic:offset])
+	if err != nil {
 		return err
 	}
 	for i := nbPublic; i < offset; i++ {
@@ -381,7 +479,8 @@ func (s *instance) commitToLRO() error {
 	for i := nbPublic; i < offset; i++ {
 		coeffs[i].Sub(&coeffs[i], &s0)
 	}
-	if _, err := commit.MultiExp(s.pk.KzgLagrange.G1[nbPublic:offset], coeffs[nbPublic:offset], ecc.MultiExpConfig{NbTasks: 1}); err != nil {
+	commit, err = s.msmG1("kzgLagrange", nbPublic, coeffs[nbPublic:offset])
+	if err != nil {
 		return err
 	}
 	for i := nbPublic; i < offset; i++ {
@@ -392,6 +491,12 @@ func (s *instance) commitToLRO() error {
 	s.proof.LRO[2].Add(&commit, &cb)
 
 	return nil
+}
+
+func (s *instance) msmG1(vectorName string, start int, scalars []fr.Element) (curve.G1Affine, error) {
+	scalarsPacked := packBN254FrVectorRegularLEInto(nil, scalars)
+	packed, err := bridgeMSMG1Slice(s.pk.handle, vectorName, start, len(scalars), scalarsPacked)
+	return decodeBN254G1AffineFromPacked(packed, err)
 }
 
 // deriveGammaAndBeta (copy constraint)
@@ -990,14 +1095,17 @@ func commitBlindingFactor(n int, b *iop.Polynomial, key kzg.ProvingKey) curve.G1
 	cp := b.Coefficients()
 	np := b.Size()
 
-	// lo
-	var tmp curve.G1Affine
-	tmp.MultiExp(key.G1[:np], cp, ecc.MultiExpConfig{NbTasks: 1})
-
-	// hi
 	var res curve.G1Affine
-	res.MultiExp(key.G1[n:n+np], cp, ecc.MultiExpConfig{NbTasks: 1})
-	res.Sub(&res, &tmp)
+	for i := 0; i < np; i++ {
+		var scalar big.Int
+		cp[i].BigInt(&scalar)
+
+		var hi, lo curve.G1Affine
+		hi.ScalarMultiplication(&key.G1[n+i], &scalar)
+		lo.ScalarMultiplication(&key.G1[i], &scalar)
+		hi.Sub(&hi, &lo)
+		res.Add(&res, &hi)
+	}
 	return res
 }
 
