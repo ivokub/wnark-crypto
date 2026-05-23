@@ -39,7 +39,8 @@ func main() {
 			}
 			return nil
 		},
-		Prepare: webgpuplonk.Prepare,
+		Prepare:       webgpuplonk.Prepare,
+		PrepareWithCS: webgpuplonk.PrepareWithCS,
 		Prove: func(ccs constraint.ConstraintSystem, pk gnarkplonk.ProvingKey, fullWitness witness.Witness) (gnarkplonk.Proof, error) {
 			return webgpuplonk.Prove(ccs, pk, fullWitness)
 		},

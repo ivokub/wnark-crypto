@@ -72,10 +72,25 @@ const (
 
 type BN254ProvingKey struct {
 	native.ProvingKey
-	handle string
+	handle               string
+	staticNumeratorCache *staticNumeratorCache
 }
 
-func proveBN254(spr *cs.SparseR1CS, pk *BN254ProvingKey, fullWitness witness.Witness, opts ...backend.ProverOption) (*native.Proof, error) {
+type staticNumeratorCache struct {
+	domain0Cardinality uint64
+	domain1Cardinality uint64
+	qcpCount           int
+	canonical          staticNumeratorPolys
+	cosets             []staticNumeratorPolys
+}
+
+type staticNumeratorPolys struct {
+	ql, qr, qm, qo *iop.Polynomial
+	s1, s2, s3     *iop.Polynomial
+	qcp            []*iop.Polynomial
+}
+
+func proveBN254(spr *cs.SparseR1CS, pk *BN254ProvingKey, fullWitness witness.Witness, opts ...backend.ProverOption) (proof *native.Proof, err error) {
 	// parse the options
 	opt, err := backend.NewProverConfig(opts...)
 	if err != nil {
@@ -123,6 +138,153 @@ func proveBN254(spr *cs.SparseR1CS, pk *BN254ProvingKey, fullWitness witness.Wit
 	return instance.proof, nil
 }
 
+func (pk *BN254ProvingKey) ensureStaticNumeratorCache(trace *native.Trace, domain0, domain1 *fft.Domain) error {
+	qcpCount := len(trace.Qcp)
+	if pk.staticNumeratorCache != nil &&
+		pk.staticNumeratorCache.domain0Cardinality == domain0.Cardinality &&
+		pk.staticNumeratorCache.domain1Cardinality == domain1.Cardinality &&
+		pk.staticNumeratorCache.qcpCount == qcpCount {
+		pk.staticNumeratorCache.canonical.applyToTrace(trace)
+		return nil
+	}
+
+	canonical := cloneStaticNumeratorPolys(trace)
+	canonical.forEach(func(p *iop.Polynomial) {
+		p.ToCanonical(domain0).ToRegular()
+	})
+
+	rho := int(domain1.Cardinality / domain0.Cardinality)
+	cosets := make([]staticNumeratorPolys, rho)
+
+	cosetTable, err := domain0.CosetTable()
+	if err != nil {
+		return err
+	}
+	scalingVector := cosetTable
+	scalingVectorRev := make([]fr.Element, len(cosetTable))
+	copy(scalingVectorRev, cosetTable)
+	fft.BitReverse(scalingVectorRev) //nolint:staticcheck // method is backwards compatible
+
+	working := canonical.clone()
+	for i := 0; i < rho; i++ {
+		if i == 1 {
+			w := domain1.Generator
+			scalingVector = make([]fr.Element, domain0.Cardinality)
+			fft.BuildExpTable(w, scalingVector)
+
+			copy(scalingVectorRev, scalingVector)
+			fft.BitReverse(scalingVectorRev) //nolint:staticcheck // method is backwards compatible
+		}
+
+		working.forEach(func(p *iop.Polynomial) {
+			transformPolynomialToCoset(p, domain0, scalingVector, scalingVectorRev)
+		})
+		cosets[i] = working.clone()
+	}
+
+	pk.staticNumeratorCache = &staticNumeratorCache{
+		domain0Cardinality: domain0.Cardinality,
+		domain1Cardinality: domain1.Cardinality,
+		qcpCount:           qcpCount,
+		canonical:          canonical,
+		cosets:             cosets,
+	}
+	pk.staticNumeratorCache.canonical.applyToTrace(trace)
+	return nil
+}
+
+func cloneStaticNumeratorPolys(trace *native.Trace) staticNumeratorPolys {
+	res := staticNumeratorPolys{
+		ql:  trace.Ql.Clone(),
+		qr:  trace.Qr.Clone(),
+		qm:  trace.Qm.Clone(),
+		qo:  trace.Qo.Clone(),
+		s1:  trace.S1.Clone(),
+		s2:  trace.S2.Clone(),
+		s3:  trace.S3.Clone(),
+		qcp: make([]*iop.Polynomial, len(trace.Qcp)),
+	}
+	for i := range trace.Qcp {
+		res.qcp[i] = trace.Qcp[i].Clone()
+	}
+	return res
+}
+
+func (p staticNumeratorPolys) clone() staticNumeratorPolys {
+	res := staticNumeratorPolys{
+		ql:  p.ql.Clone(),
+		qr:  p.qr.Clone(),
+		qm:  p.qm.Clone(),
+		qo:  p.qo.Clone(),
+		s1:  p.s1.Clone(),
+		s2:  p.s2.Clone(),
+		s3:  p.s3.Clone(),
+		qcp: make([]*iop.Polynomial, len(p.qcp)),
+	}
+	for i := range p.qcp {
+		res.qcp[i] = p.qcp[i].Clone()
+	}
+	return res
+}
+
+func (p staticNumeratorPolys) forEach(fn func(*iop.Polynomial)) {
+	fn(p.ql)
+	fn(p.qr)
+	fn(p.qm)
+	fn(p.qo)
+	fn(p.s1)
+	fn(p.s2)
+	fn(p.s3)
+	for i := range p.qcp {
+		fn(p.qcp[i])
+	}
+}
+
+func (p staticNumeratorPolys) applyToTrace(trace *native.Trace) {
+	trace.Ql = p.ql
+	trace.Qr = p.qr
+	trace.Qm = p.qm
+	trace.Qo = p.qo
+	trace.S1 = p.s1
+	trace.S2 = p.s2
+	trace.S3 = p.s3
+	trace.Qcp = p.qcp
+}
+
+func (p staticNumeratorPolys) applyToEval(dst []*iop.Polynomial) {
+	dst[id_Ql] = p.ql
+	dst[id_Qr] = p.qr
+	dst[id_Qm] = p.qm
+	dst[id_Qo] = p.qo
+	dst[id_S1] = p.s1
+	dst[id_S2] = p.s2
+	dst[id_S3] = p.s3
+	for i := range p.qcp {
+		dst[id_Qci+2*i] = p.qcp[i]
+	}
+}
+
+func transformPolynomialToCoset(p *iop.Polynomial, domain *fft.Domain, scalingVector, scalingVectorRev []fr.Element) {
+	// shift polynomials to be in the correct coset
+	p.ToCanonical(domain)
+
+	// scale by shifter
+	var w []fr.Element
+	if p.Layout == iop.Regular {
+		w = scalingVector
+	} else {
+		w = scalingVectorRev
+	}
+
+	cp := p.Coefficients()
+	for j := range cp {
+		cp[j].Mul(&cp[j], &w[j])
+	}
+
+	// fft in the correct coset
+	p.ToLagrange(domain).ToRegular()
+}
+
 func (pk *BN254ProvingKey) ensurePrepared() error {
 	if pk.handle != "" {
 		return nil
@@ -141,6 +303,15 @@ func (pk *BN254ProvingKey) ensurePrepared() error {
 	}
 	pk.handle = handle
 	return nil
+}
+
+func (pk *BN254ProvingKey) prepareWithCS(spr *cs.SparseR1CS) error {
+	if err := pk.ensurePrepared(); err != nil {
+		return err
+	}
+	domain0, domain1 := domainsForSPR(spr)
+	trace := native.NewTrace(spr, domain0)
+	return pk.ensureStaticNumeratorCache(trace, domain0, domain1)
 }
 
 func packBN254FrVectorRegularLEInto(dst []byte, values []fr.Element) []byte {
@@ -265,9 +436,7 @@ func newInstance(spr *cs.SparseR1CS, pk *BN254ProvingKey, fullWitness witness.Wi
 	s.x = make([]*iop.Polynomial, id_Qci+2*len(s.commitmentInfo))
 
 	// init fft domains
-	nbConstraints := spr.GetNbConstraints()
-	sizeSystem := uint64(nbConstraints + len(spr.Public)) // len(spr.Public) is for the placeholder constraints
-	s.domain0 = fft.NewDomain(sizeSystem)
+	s.domain0, s.domain1 = domainsForSPR(spr)
 
 	// sampling random numbers for blinding the quotient
 	if opts.StatisticalZK {
@@ -275,19 +444,30 @@ func newInstance(spr *cs.SparseR1CS, pk *BN254ProvingKey, fullWitness witness.Wi
 		s.quotientShardsRandomizers[1].SetRandom()
 	}
 
+	// build trace
+	s.trace = native.NewTrace(spr, s.domain0)
+	if err := pk.ensureStaticNumeratorCache(s.trace, s.domain0, s.domain1); err != nil {
+		return nil, err
+	}
+
+	return &s, nil
+}
+
+func domainsForSPR(spr *cs.SparseR1CS) (*fft.Domain, *fft.Domain) {
+	nbConstraints := spr.GetNbConstraints()
+	sizeSystem := uint64(nbConstraints + len(spr.Public)) // len(spr.Public) is for the placeholder constraints
+	domain0 := fft.NewDomain(sizeSystem)
+
 	// h, the quotient polynomial is of degree 3(n+1)+2, so it's in a 3(n+2) dim vector space,
 	// the domain is the next power of 2 superior to 3(n+2). 4*domainNum is enough in all cases
 	// except when n<6.
+	var domain1 *fft.Domain
 	if sizeSystem < 6 {
-		s.domain1 = fft.NewDomain(8*sizeSystem, fft.WithoutPrecompute())
+		domain1 = fft.NewDomain(8*sizeSystem, fft.WithoutPrecompute())
 	} else {
-		s.domain1 = fft.NewDomain(4*sizeSystem, fft.WithoutPrecompute())
+		domain1 = fft.NewDomain(4*sizeSystem, fft.WithoutPrecompute())
 	}
-
-	// build trace
-	s.trace = native.NewTrace(spr, s.domain0)
-
-	return &s, nil
+	return domain0, domain1
 }
 
 func (s *instance) initBlindingPolynomials() error {
@@ -522,7 +702,7 @@ func (s *instance) deriveGammaAndBeta() error {
 // /!\ The polynomial p is supposed to be in Lagrange form.
 func (s *instance) commitToPolyAndBlinding(p, b *iop.Polynomial) (commit curve.G1Affine, err error) {
 
-	commit, err = return s.msmG1("kzgLagrange", 0, p.Coefficients())
+	commit, err = s.msmG1("kzgLagrange", 0, p.Coefficients())
 
 	// we add in the blinding contribution
 	n := int(s.domain0.Cardinality)
@@ -633,14 +813,14 @@ func (s *instance) openZ() (err error) {
 	zetaShifted.Mul(&s.zeta, &s.pk.Vk.Generator)
 	s.blindedZ = getBlindedCoefficients(s.x[id_Z], s.bp[id_Bz])
 	// open z at zeta
-	s.proof.ZShiftedOpening, err = s.openKZG("z_opening", s.blindedZ, zetaShifted)
+	s.proof.ZShiftedOpening, err = s.openKZG(s.blindedZ, zetaShifted)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (s *instance) openKZG(label string, p []fr.Element, point fr.Element) (kzg.OpeningProof, error) {
+func (s *instance) openKZG(p []fr.Element, point fr.Element) (kzg.OpeningProof, error) {
 	if len(p) > len(s.pk.Kzg.G1) {
 		return kzg.OpeningProof{}, kzg.ErrInvalidPolynomialSize
 	}
@@ -648,12 +828,11 @@ func (s *instance) openKZG(label string, p []fr.Element, point fr.Element) (kzg.
 	var proof kzg.OpeningProof
 	proof.ClaimedValue = evalKZGPolynomial(p, point)
 
-	var h []fr.Element
 	cp := make([]fr.Element, len(p))
 	copy(cp, p)
-	h = dividePolyByXMinusA(cp, proof.ClaimedValue, point)
+	h := dividePolyByXMinusA(cp, proof.ClaimedValue, point)
 
-	hCommit, err := return s.msmG1("kzg", 0, h)
+	hCommit, err := s.msmG1("kzg", 0, h)
 	if err != nil {
 		return kzg.OpeningProof{}, err
 	}
@@ -754,7 +933,6 @@ func (s *instance) batchOpening() error {
 
 	var err error
 	s.proof.BatchedProof, err = s.batchOpenSinglePoint(
-		"batch_opening",
 		polysToOpen,
 		digestsToOpen,
 		s.zeta,
@@ -764,7 +942,7 @@ func (s *instance) batchOpening() error {
 	return err
 }
 
-func (s *instance) batchOpenSinglePoint(label string, polynomials [][]fr.Element, digests []curve.G1Affine, point fr.Element, hf hash.Hash, dataTranscript ...[]byte) (kzg.BatchOpeningProof, error) {
+func (s *instance) batchOpenSinglePoint(polynomials [][]fr.Element, digests []curve.G1Affine, point fr.Element, hf hash.Hash, dataTranscript ...[]byte) (kzg.BatchOpeningProof, error) {
 	nbDigests := len(digests)
 	if nbDigests != len(polynomials) {
 		return kzg.BatchOpeningProof{}, kzg.ErrInvalidNbDigests
@@ -789,8 +967,7 @@ func (s *instance) batchOpenSinglePoint(label string, polynomials [][]fr.Element
 		res.ClaimedValues[i] = evalKZGPolynomial(polynomials[i], point)
 	}
 
-	var gamma fr.Element
-	gamma, err = deriveKZGBatchGamma(point, digests, res.ClaimedValues, hf, dataTranscript...)
+	gamma, err := deriveKZGBatchGamma(point, digests, res.ClaimedValues, hf, dataTranscript...)
 	if err != nil {
 		return kzg.BatchOpeningProof{}, err
 	}
@@ -802,8 +979,7 @@ func (s *instance) batchOpenSinglePoint(label string, polynomials [][]fr.Element
 			Add(&foldedEvaluations, &res.ClaimedValues[i])
 	}
 
-	var foldedPolynomials []fr.Element
-	foldedPolynomials = make([]fr.Element, largestPoly)
+	foldedPolynomials := make([]fr.Element, largestPoly)
 	copy(foldedPolynomials, polynomials[0])
 
 	gammaPower := gamma
@@ -816,8 +992,7 @@ func (s *instance) batchOpenSinglePoint(label string, polynomials [][]fr.Element
 		gammaPower.Mul(&gammaPower, &gamma)
 	}
 
-	var h []fr.Element
-	h = dividePolyByXMinusA(foldedPolynomials, foldedEvaluations, point)
+	h := dividePolyByXMinusA(foldedPolynomials, foldedEvaluations, point)
 
 	hCommit, err := s.msmG1("kzg", 0, h)
 	if err != nil {
@@ -871,15 +1046,15 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 	}
 
 	var cs, css fr.Element
-	cs.Set(&s.domain1.FrMultiplicativeGen)
-	css.Square(&cs)
 
 	// stores the current coset shifter
 	var coset fr.Element
-	coset.SetOne()
 
 	// cosetExponentiatedToNMinusOne stores <coset>^n-1
 	var cosetExponentiatedToNMinusOne, one fr.Element
+	cs.Set(&s.domain1.FrMultiplicativeGen)
+	css.Square(&cs)
+	coset.SetOne()
 	one.SetOne()
 	bn := big.NewInt(int64(n))
 
@@ -1028,57 +1203,64 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 				w = scalingVectorRev
 			}
 
-			cp := p.Coefficients()
-			for j := range cp {
-				cp[j].Mul(&cp[j], &w[j])
+			transformGroupToCoset(dynamicPolyIDs)
+			if len(commitmentValuePolyIDs) > 0 {
+				transformGroupToCoset(commitmentValuePolyIDs)
+				}
 			}
 
-			// fft in the correct coset
-			p.ToLagrange(s.domain0).ToRegular()
-		})
+			copy(evalX, s.x)
+			staticCache.cosets[i].applyToEval(evalX)
+			_, err = iop.Evaluate(
+				allConstraints,
+				buf,
+				iop.Form{Basis: iop.Lagrange, Layout: iop.Regular},
+				evalX...,
+			)
+			if err != nil {
+				return err
+			}
 
-		if _, err := iop.Evaluate(
-			allConstraints,
-			buf,
-			iop.Form{Basis: iop.Lagrange, Layout: iop.Regular},
-			s.x...,
-		); err != nil {
+			for j := 0; j < int(n); j++ {
+				// we build the polynomial in bit reverse order
+				cres[bits.Reverse64(uint64(rho*j+i))>>mm] = buf[j]
+			}
+
+			cosetExponentiatedToNMinusOne.
+				Inverse(&cosetExponentiatedToNMinusOne)
+			// bl <- bl *( (s*ωⁱ)ⁿ-1 )**-1
+			for _, q := range s.bp {
+				cq := q.Coefficients()
+				for j := 0; j < len(cq); j++ {
+					cq[j].Mul(&cq[j], &cosetExponentiatedToNMinusOne)
+				}
+			}
+
+			return nil
+		}); err != nil {
 			return nil, err
-		}
-		for j := 0; j < int(n); j++ {
-			// we build the polynomial in bit reverse order
-			cres[bits.Reverse64(uint64(rho*j+i))>>mm] = buf[j]
-		}
-
-		cosetExponentiatedToNMinusOne.
-			Inverse(&cosetExponentiatedToNMinusOne)
-		// bl <- bl *( (s*ωⁱ)ⁿ-1 )**-1
-		for _, q := range s.bp {
-			cq := q.Coefficients()
-			for j := 0; j < len(cq); j++ {
-				cq[j].Mul(&cq[j], &cosetExponentiatedToNMinusOne)
-			}
 		}
 	}
 
 	// scale everything back
+	var totalShift fr.Element
 	s.x[id_ZS] = nil
 	s.x[id_Qk] = nil
 
-	var totalShift fr.Element
-	totalShift.Set(&shifters[0])
-	for i := 1; i < len(shifters); i++ {
-		totalShift.Mul(&totalShift, &shifters[i])
-	}
-	totalShift.Inverse(&totalShift)
-
-	batchApply(s.x, func(p *iop.Polynomial) {
-		if p == nil {
-			return
+		totalShift.Set(&shifters[0])
+		for i := 1; i < len(shifters); i++ {
+			totalShift.Mul(&totalShift, &shifters[i])
 		}
-		p.ToCanonical(s.domain0).ToRegular()
-		scalePowers(p, totalShift)
-	})
+		totalShift.Inverse(&totalShift)
+
+		canonicalizeAndScaleGroup(dynamicPolyIDs, totalShift)
+		if len(commitmentValuePolyIDs) > 0 {
+			canonicalizeAndScaleGroup(commitmentValuePolyIDs, totalShift)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 
 	for _, q := range s.bp {
 		scalePowers(q, totalShift)
@@ -1108,16 +1290,6 @@ func batchInvert(vec, buf []fr.Element) {
 		acc.Mul(&acc, &buf[i])
 	}
 	vec[0].Set(&acc)
-}
-
-// batchApply executes fn on all polynomials in x except x[id_ZS].
-func batchApply(x []*iop.Polynomial, fn func(*iop.Polynomial)) {
-	for i := 0; i < len(x); i++ {
-		if i == id_ZS {
-			continue
-		}
-		fn(x[i])
-	}
 }
 
 // p <- <p, (1, w, .., wⁿ) >

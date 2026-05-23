@@ -15,6 +15,7 @@ import (
 
 type ProveFunc[PK, Proof any] func(constraint.ConstraintSystem, PK, witness.Witness) (Proof, error)
 type PrepareFunc[PK any] func(PK) error
+type PrepareWithCSFunc[PK any] func(constraint.ConstraintSystem, PK) error
 type VerifyFunc[VK, Proof any] func(Proof, VK, witness.Witness) error
 
 type Config[PK, VK, Proof any] struct {
@@ -28,6 +29,7 @@ type Config[PK, VK, Proof any] struct {
 
 	ReadProvingKey func(PK, string, []byte) error
 	Prepare        PrepareFunc[PK]
+	PrepareWithCS  PrepareWithCSFunc[PK]
 	Prove          ProveFunc[PK, Proof]
 	Verify         VerifyFunc[VK, Proof]
 }
@@ -206,7 +208,18 @@ func (r *Runtime[PK, VK, Proof]) prepareProvingKey(args []js.Value) (js.Value, e
 	if err != nil {
 		return js.Undefined(), err
 	}
-	if err := r.ensurePrepared(handle, pk); err != nil {
+	var ccs *ccsEntry
+	if len(args) > 1 && args[1].Type() == js.TypeString {
+		entry, err := r.ccsFromArg(args, 1)
+		if err != nil {
+			return js.Undefined(), err
+		}
+		if entry.curve != pk.curve {
+			return js.Undefined(), fmt.Errorf("ccs and proving key curves do not match")
+		}
+		ccs = &entry
+	}
+	if err := r.ensurePrepared(handle, pk, ccs); err != nil {
 		return js.Undefined(), err
 	}
 	return js.Undefined(), nil
@@ -232,7 +245,7 @@ func (r *Runtime[PK, VK, Proof]) prove(args []js.Value) (js.Value, error) {
 	if err != nil {
 		return js.Undefined(), fmt.Errorf("read witness: %w", err)
 	}
-	if err := r.ensurePrepared(pkHandle, pk); err != nil {
+	if err := r.ensurePrepared(pkHandle, pk, &ccs); err != nil {
 		return js.Undefined(), err
 	}
 	proof, err := r.cfg.Prove(ccs.value, pk.value, fullWitness)
@@ -290,14 +303,26 @@ func (r *Runtime[PK, VK, Proof]) release(args []js.Value) (js.Value, error) {
 	return js.Undefined(), nil
 }
 
-func (r *Runtime[PK, VK, Proof]) ensurePrepared(handle string, pk pkEntry[PK]) error {
-	if pk.prepared || r.cfg.Prepare == nil {
+func (r *Runtime[PK, VK, Proof]) ensurePrepared(handle string, pk pkEntry[PK], ccs *ccsEntry) error {
+	if pk.prepared {
 		return nil
 	}
-	if err := r.cfg.Prepare(pk.value); err != nil {
-		return fmt.Errorf("prepare pk: %w", err)
+	if ccs != nil && r.cfg.PrepareWithCS != nil {
+		if err := r.cfg.PrepareWithCS(ccs.value, pk.value); err != nil {
+			return fmt.Errorf("prepare pk: %w", err)
+		}
+		pk.prepared = true
+		r.pks[handle] = pk
+		return nil
 	}
-	pk.prepared = true
+	if r.cfg.Prepare != nil {
+		if err := r.cfg.Prepare(pk.value); err != nil {
+			return fmt.Errorf("prepare pk: %w", err)
+		}
+	}
+	if r.cfg.PrepareWithCS == nil {
+		pk.prepared = true
+	}
 	r.pks[handle] = pk
 	return nil
 }

@@ -30,6 +30,22 @@ func Prove(spr constraint.ConstraintSystem, pk gnarkplonk.ProvingKey, fullWitnes
 	}
 }
 
+// PrepareWithCS initializes browser-side caches that need both the proving key
+// and the constraint system. For PLONK this includes the static quotient
+// numerator polynomials derived from the trace.
+func PrepareWithCS(spr constraint.ConstraintSystem, pk gnarkplonk.ProvingKey) error {
+	switch typedSPR := spr.(type) {
+	case *csbn254.SparseR1CS:
+		typedPK, ok := pk.(*BN254ProvingKey)
+		if !ok {
+			return fmt.Errorf("webgpu plonk: expected *BN254ProvingKey, got %T", pk)
+		}
+		return typedPK.prepareWithCS(typedSPR)
+	default:
+		return fmt.Errorf("webgpu plonk: unsupported constraint system %T", spr)
+	}
+}
+
 // NewProvingKey returns an empty proving-key wrapper for supported curves.
 func NewProvingKey(curveID ecc.ID) gnarkplonk.ProvingKey {
 	switch curveID {

@@ -192,7 +192,7 @@ async function runPlonkImpl(label, runtimeKind, curve, config) {
 
     setStatus(`Preparing ${label} proving key`);
     const prepareStart = performance.now();
-    await curve.plonk.prepareProvingKey(fixture.pk);
+    await curve.plonk.prepareProvingKey(fixture.pk, fixture.ccs);
     const prepareDuration = performance.now() - prepareStart;
     if (runtimeKind === "webgpu") {
       appendLog(`prepare_ms = ${formatMs(prepareDuration)}`);

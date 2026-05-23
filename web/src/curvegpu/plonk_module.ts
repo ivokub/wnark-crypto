@@ -25,7 +25,7 @@ type RuntimeGlobal = {
   readConstraintSystem(curve: SupportedCurveID, bytes: Uint8Array): Promise<{ handle: string; constraints: number }>;
   readProvingKey(curve: SupportedCurveID, bytes: Uint8Array, format: PlonkProvingKeyFormat): Promise<{ handle: string }>;
   readVerificationKey(curve: SupportedCurveID, bytes: Uint8Array): Promise<{ handle: string }>;
-  prepareProvingKey(handle: string): Promise<void>;
+  prepareProvingKey(handle: string, ccsHandle?: string): Promise<void>;
   prove(ccsHandle: string, pkHandle: string, witness: Uint8Array): Promise<Uint8Array>;
   verify(proof: Uint8Array, vkHandle: string, publicWitness: Uint8Array): Promise<boolean>;
   release(handle: string): Promise<void>;
@@ -277,8 +277,14 @@ export function createPlonkModule(config: PlonkModuleConfig): PlonkModule {
       const result = await runtime.readVerificationKey(config.curve, cloneBytes(bytes));
       return new VerificationKeyHandle(runtime, kind, config.curve, result.handle);
     },
-    async prepareProvingKey(pk: PlonkProvingKey): Promise<void> {
+    async prepareProvingKey(pk: PlonkProvingKey, ccs?: PlonkConstraintSystem): Promise<void> {
       const pkHandle = runtimeHandle(pk, "pk");
+      if (ccs) {
+        const ccsHandle = runtimeHandle(ccs, "ccs");
+        assertSameRuntime(ccsHandle, pkHandle);
+        await pkHandle.runtime.prepareProvingKey(pkHandle.handle, ccsHandle.handle);
+        return;
+      }
       await pkHandle.runtime.prepareProvingKey(pkHandle.handle);
     },
     async prove(ccs: PlonkConstraintSystem, pk: PlonkProvingKey, witness: Uint8Array): Promise<Uint8Array> {

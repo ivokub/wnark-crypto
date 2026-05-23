@@ -543,8 +543,13 @@ export interface PlonkModule {
   readProvingKey(bytes: Uint8Array, options?: { format?: PlonkProvingKeyFormat }): Promise<PlonkProvingKey>;
   /** Deserialize a gnark PLONK verification key. */
   readVerificationKey(bytes: Uint8Array): Promise<PlonkVerificationKey>;
-  /** Precompute browser-side proving key caches. */
-  prepareProvingKey(pk: PlonkProvingKey): Promise<void>;
+  /**
+   * Precompute browser-side proving key caches.
+   *
+   * Passing the constraint system lets the WebGPU runtime prepare PLONK
+   * trace-derived caches outside the timed prove path.
+   */
+  prepareProvingKey(pk: PlonkProvingKey, ccs?: PlonkConstraintSystem): Promise<void>;
   /** Prove with a gnark binary witness and return gnark-serialized proof bytes. */
   prove(ccs: PlonkConstraintSystem, pk: PlonkProvingKey, witness: Uint8Array): Promise<Uint8Array>;
   /** Verify gnark-serialized proof bytes against a gnark binary public witness. */
