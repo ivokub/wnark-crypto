@@ -41,6 +41,22 @@ func bridgeMSMG1Slice(handle, vectorName string, start, count int, scalarsPacked
 	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
 }
 
+func bridgeMSMG1Batch(handle, vectorName string, start, termsPerInstance, instanceCount int, scalarsPacked []byte) ([]byte, error) {
+	value, err := bridgeClient.CallPromise(
+		"msmG1Batch",
+		handle,
+		vectorName,
+		webgpubridge.JSUint8Array(scalarsPacked),
+		start,
+		termsPerInstance,
+		instanceCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
+}
+
 func bridgeTransformQuotientCoset(curve string, valuesPacked, scalingPacked []byte, vectorCount, elementCount int) ([]byte, error) {
 	value, err := bridgeClient.CallPromise(
 		"transformQuotientCoset",

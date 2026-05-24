@@ -70,6 +70,28 @@ function unpackG1JacobianPoint(curve: SupportedCurveID, packedPoint: Uint8Array)
   };
 }
 
+function unpackG1JacobianPoints(curve: SupportedCurveID, packedPoints: Uint8Array, count: number) {
+  const pointBytes = CURVE_CONFIG[curve].g1PointBytes;
+  if (packedPoints.byteLength !== count * pointBytes) {
+    throw new Error(`expected ${count * pointBytes} packed G1 Jacobian bytes, got ${packedPoints.byteLength}`);
+  }
+  return Array.from({ length: count }, (_, i) => {
+    const start = i * pointBytes;
+    return unpackG1JacobianPoint(curve, packedPoints.slice(start, start + pointBytes));
+  });
+}
+
+function packG1AffinePoints(curve: SupportedCurveID, points: readonly { x: Uint8Array; y: Uint8Array }[]) {
+  const coordinateBytes = CURVE_CONFIG[curve].g1CoordinateBytes;
+  const out = new Uint8Array(points.length * 2 * coordinateBytes);
+  for (const [i, point] of points.entries()) {
+    const start = i * 2 * coordinateBytes;
+    out.set(point.x, start);
+    out.set(point.y, start + coordinateBytes);
+  }
+  return out;
+}
+
 async function init(curve: SupportedCurveID) {
   const bridge = assertBridge(curve);
   return {
@@ -152,6 +174,57 @@ async function msmG1(handle: string, vectorName: string, scalarsPacked: Uint8Arr
   return out;
 }
 
+async function msmG1Batch(
+  handle: string,
+  vectorName: string,
+  scalarsPacked: Uint8Array,
+  start = 0,
+  termsPerInstance?: number,
+  count?: number,
+) {
+  const entry = getKey(handle);
+  const bridge = assertBridge(entry.curve);
+  const config = CURVE_CONFIG[entry.curve];
+  if (vectorName !== "kzg" && vectorName !== "kzgLagrange") {
+    throw new Error(`missing cached PLONK G1 vector ${vectorName}`);
+  }
+  const vector = entry[vectorName];
+  const vectorCount = entry[`${vectorName}Count`];
+  const instanceCount = count ?? 0;
+  const termCount = termsPerInstance ?? 0;
+  if (!Number.isInteger(start) || start < 0 || !Number.isInteger(termCount) || termCount <= 0) {
+    throw new Error(`invalid PLONK MSM batch range start=${start} termsPerInstance=${termCount}`);
+  }
+  if (!Number.isInteger(instanceCount) || instanceCount <= 0) {
+    throw new Error(`invalid PLONK MSM batch count ${instanceCount}`);
+  }
+  if (start + termCount > vectorCount) {
+    throw new Error(`PLONK MSM batch range exceeds ${vectorName}: start=${start} termsPerInstance=${termCount}`);
+  }
+
+  const scalarBytes = bridge.fr.byteSize * termCount * instanceCount;
+  if (scalarsPacked.byteLength !== scalarBytes) {
+    throw new Error(`PLONK MSM batch expected ${scalarBytes} scalar bytes, got ${scalarsPacked.byteLength}`);
+  }
+
+  const baseStart = start * config.g1PointBytes;
+  const baseEnd = (start + termCount) * config.g1PointBytes;
+  const bases = vector.subarray(baseStart, baseEnd);
+  const basesPacked = new Uint8Array(bases.byteLength * instanceCount);
+  for (let i = 0; i < instanceCount; i++) {
+    basesPacked.set(bases, i * bases.byteLength);
+  }
+
+  const resultPacked = await bridge.g1msm.pippengerPackedJacobianBases(basesPacked, cloneBytes(scalarsPacked), {
+    count: instanceCount,
+    termsPerInstance: termCount,
+    window: bridge.g1msm.bestWindow(termCount),
+  });
+  const jacobians = unpackG1JacobianPoints(entry.curve, resultPacked, instanceCount);
+  const affines = await bridge.g1.jacobianToAffineBatch(jacobians);
+  return packG1AffinePoints(entry.curve, affines);
+}
+
 async function transformQuotientCoset(
   curve: SupportedCurveID,
   valuesPacked: Uint8Array,
@@ -211,6 +284,7 @@ export function installPlonkWebGPUBridge(dependencies: BridgeDependencies): void
     init,
     prepareKey,
     msmG1,
+    msmG1Batch,
     transformQuotientCoset,
     prewarmQuotientTransformDomain,
   };

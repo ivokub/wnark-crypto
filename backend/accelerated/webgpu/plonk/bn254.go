@@ -331,6 +331,27 @@ func packBN254FrVectorRegularLEInto(dst []byte, values []fr.Element) []byte {
 	return dst
 }
 
+func packBN254FrVectorsRegularLEPaddedInto(dst []byte, vectors [][]fr.Element, elementCount int) ([]byte, error) {
+	if elementCount <= 0 {
+		return nil, errors.New("webgpu plonk bn254: empty MSM batch")
+	}
+	required := len(vectors) * elementCount * bn254FrBytes
+	if cap(dst) < required {
+		dst = make([]byte, required)
+	} else {
+		dst = dst[:required]
+		clear(dst)
+	}
+	for i, values := range vectors {
+		if len(values) > elementCount {
+			return nil, fmt.Errorf("webgpu plonk bn254: MSM batch vector %d has %d elements, expected at most %d", i, len(values), elementCount)
+		}
+		start := i * elementCount * bn254FrBytes
+		packBN254FrVectorRegularLEInto(dst[start:start+len(values)*bn254FrBytes], values)
+	}
+	return dst, nil
+}
+
 func writeBN254FrRegularLE(dst []byte, value *fr.Element) {
 	be := value.Bytes()
 	for i := 0; i < bn254FrBytes; i++ {
@@ -383,6 +404,25 @@ func decodeBN254G1AffineFromPacked(packed []byte, err error) (curve.G1Affine, er
 		X: readBN254FPMontLE(packed[:bn254G1CoordinateBytes]),
 		Y: readBN254FPMontLE(packed[bn254G1CoordinateBytes:]),
 	}, nil
+}
+
+func decodeBN254G1AffineBatchFromPacked(packed []byte, count int, err error) ([]curve.G1Affine, error) {
+	if err != nil {
+		return nil, err
+	}
+	expected := count * 2 * bn254G1CoordinateBytes
+	if len(packed) != expected {
+		return nil, fmt.Errorf("webgpu plonk bn254: expected %d G1 batch bytes, got %d", expected, len(packed))
+	}
+	res := make([]curve.G1Affine, count)
+	for i := range res {
+		start := i * 2 * bn254G1CoordinateBytes
+		res[i] = curve.G1Affine{
+			X: readBN254FPMontLE(packed[start : start+bn254G1CoordinateBytes]),
+			Y: readBN254FPMontLE(packed[start+bn254G1CoordinateBytes : start+2*bn254G1CoordinateBytes]),
+		}
+	}
+	return res, nil
 }
 
 func readBN254FPMontLE(src []byte) bn254fp.Element {
@@ -686,6 +726,24 @@ func (s *instance) msmG1(vectorName string, start int, scalars []fr.Element) (cu
 	scalarsPacked := packBN254FrVectorRegularLEInto(nil, scalars)
 	packed, err := bridgeMSMG1Slice(s.pk.handle, vectorName, start, len(scalars), scalarsPacked)
 	return decodeBN254G1AffineFromPacked(packed, err)
+}
+
+func (s *instance) msmG1Batch(vectorName string, start int, scalarVectors ...[]fr.Element) ([]curve.G1Affine, error) {
+	if len(scalarVectors) == 0 {
+		return nil, errors.New("webgpu plonk bn254: empty MSM batch")
+	}
+	termCount := 0
+	for _, scalars := range scalarVectors {
+		if len(scalars) > termCount {
+			termCount = len(scalars)
+		}
+	}
+	scalarsPacked, err := packBN254FrVectorsRegularLEPaddedInto(nil, scalarVectors, termCount)
+	if err != nil {
+		return nil, err
+	}
+	packed, err := bridgeMSMG1Batch(s.pk.handle, vectorName, start, termCount, len(scalarVectors), scalarsPacked)
+	return decodeBN254G1AffineBatchFromPacked(packed, len(scalarVectors), err)
 }
 
 func (s *instance) transformGroupToCoset(ids []int, scalingVector []fr.Element) error {
@@ -1575,15 +1633,12 @@ func coefficients(p []*iop.Polynomial) [][]fr.Element {
 }
 
 func (s *instance) commitToQuotient(h1, h2, h3 []fr.Element) error {
-	var err error
-	if s.proof.H[0], err = s.msmG1("kzg", 0, h1); err != nil {
+	commits, err := s.msmG1Batch("kzg", 0, h1, h2, h3)
+	if err != nil {
 		return err
 	}
-	if s.proof.H[1], err = s.msmG1("kzg", 0, h2); err != nil {
-		return err
-	}
-	s.proof.H[2], err = s.msmG1("kzg", 0, h3)
-	return err
+	copy(s.proof.H[:], commits)
+	return nil
 }
 
 // divideByZH
