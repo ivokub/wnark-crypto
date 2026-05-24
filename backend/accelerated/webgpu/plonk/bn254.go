@@ -149,9 +149,9 @@ func (pk *BN254ProvingKey) ensureStaticNumeratorCache(trace *native.Trace, domai
 	}
 
 	canonical := cloneStaticNumeratorPolys(trace)
-	canonical.forEach(func(p *iop.Polynomial) {
-		p.ToCanonical(domain0).ToRegular()
-	})
+	if err := canonicalizePolynomialsRegularWithWebGPU(canonical.polynomials(), int(domain0.Cardinality)); err != nil {
+		return err
+	}
 
 	rho := int(domain1.Cardinality / domain0.Cardinality)
 	cosets := make([]staticNumeratorPolys, rho)
@@ -161,24 +161,17 @@ func (pk *BN254ProvingKey) ensureStaticNumeratorCache(trace *native.Trace, domai
 		return err
 	}
 	scalingVector := cosetTable
-	scalingVectorRev := make([]fr.Element, len(cosetTable))
-	copy(scalingVectorRev, cosetTable)
-	fft.BitReverse(scalingVectorRev) //nolint:staticcheck // method is backwards compatible
-
 	working := canonical.clone()
 	for i := 0; i < rho; i++ {
 		if i == 1 {
 			w := domain1.Generator
 			scalingVector = make([]fr.Element, domain0.Cardinality)
 			fft.BuildExpTable(w, scalingVector)
-
-			copy(scalingVectorRev, scalingVector)
-			fft.BitReverse(scalingVectorRev) //nolint:staticcheck // method is backwards compatible
 		}
 
-		working.forEach(func(p *iop.Polynomial) {
-			transformPolynomialToCoset(p, domain0, scalingVector, scalingVectorRev)
-		})
+		if err := transformPolynomialsToCoset(working.polynomials(), domain0, scalingVector); err != nil {
+			return err
+		}
 		cosets[i] = working.clone()
 	}
 
@@ -227,17 +220,10 @@ func (p staticNumeratorPolys) clone() staticNumeratorPolys {
 	return res
 }
 
-func (p staticNumeratorPolys) forEach(fn func(*iop.Polynomial)) {
-	fn(p.ql)
-	fn(p.qr)
-	fn(p.qm)
-	fn(p.qo)
-	fn(p.s1)
-	fn(p.s2)
-	fn(p.s3)
-	for i := range p.qcp {
-		fn(p.qcp[i])
-	}
+func (p staticNumeratorPolys) polynomials() []*iop.Polynomial {
+	res := []*iop.Polynomial{p.ql, p.qr, p.qm, p.qo, p.s1, p.s2, p.s3}
+	res = append(res, p.qcp...)
+	return res
 }
 
 func (p staticNumeratorPolys) applyToTrace(trace *native.Trace) {
@@ -264,25 +250,20 @@ func (p staticNumeratorPolys) applyToEval(dst []*iop.Polynomial) {
 	}
 }
 
-func transformPolynomialToCoset(p *iop.Polynomial, domain *fft.Domain, scalingVector, scalingVectorRev []fr.Element) {
+func transformPolynomialsToCoset(polys []*iop.Polynomial, domain *fft.Domain, scalingVector []fr.Element) error {
 	// shift polynomials to be in the correct coset
-	p.ToCanonical(domain)
+	if err := canonicalizePolynomialsRegularWithWebGPU(polys, int(domain.Cardinality)); err != nil {
+		return err
+	}
 
 	// scale by shifter
-	var w []fr.Element
-	if p.Layout == iop.Regular {
-		w = scalingVector
-	} else {
-		w = scalingVectorRev
+	for _, p := range polys {
+		cp := p.Coefficients()
+		for j := range cp {
+			cp[j].Mul(&cp[j], &scalingVector[j])
+		}
 	}
-
-	cp := p.Coefficients()
-	for j := range cp {
-		cp[j].Mul(&cp[j], &w[j])
-	}
-
-	// fft in the correct coset
-	p.ToLagrange(domain).ToRegular()
+	return lagrangePolynomialsRegularWithWebGPU(polys, int(domain.Cardinality))
 }
 
 func (pk *BN254ProvingKey) ensurePrepared() error {
@@ -314,7 +295,10 @@ func (pk *BN254ProvingKey) prepareWithCS(spr *cs.SparseR1CS) error {
 	if err := pk.ensureStaticNumeratorCache(trace, domain0, domain1); err != nil {
 		return err
 	}
-	return bridgePrewarmQuotientTransformDomain("bn254", int(domain0.Cardinality))
+	if err := bridgePrewarmQuotientTransformDomain("bn254", int(domain0.Cardinality)); err != nil {
+		return err
+	}
+	return bridgePrewarmQuotientCanonicalizeDomain("bn254", int(domain1.Cardinality))
 }
 
 func packBN254FrVectorRegularLEInto(dst []byte, values []fr.Element) []byte {
@@ -378,6 +362,118 @@ func unpackBN254FrVectorRegularLEInto(dst []fr.Element, src []byte) error {
 			return err
 		}
 		dst[i] = value
+	}
+	return nil
+}
+
+type canonicalizeGroupKey struct {
+	inputBitReversed bool
+	inverseCoset     bool
+}
+
+func canonicalizePolynomialsRegularWithWebGPU(polys []*iop.Polynomial, elementCount int) error {
+	n := elementCount
+	groups := make(map[canonicalizeGroupKey][]*iop.Polynomial)
+	for _, p := range polys {
+		if p == nil {
+			continue
+		}
+		if p.Basis == iop.Canonical {
+			p.ToRegular()
+			continue
+		}
+		coeffs := p.Coefficients()
+		if len(coeffs) != n {
+			return fmt.Errorf("webgpu plonk bn254: canonicalize polynomial has %d coefficients, expected %d", len(coeffs), n)
+		}
+		switch p.Basis {
+		case iop.Lagrange:
+		case iop.LagrangeCoset:
+		default:
+			return fmt.Errorf("webgpu plonk bn254: unsupported polynomial basis %d", p.Basis)
+		}
+		switch p.Layout {
+		case iop.Regular:
+		case iop.BitReverse:
+		default:
+			return fmt.Errorf("webgpu plonk bn254: unsupported polynomial layout %d", p.Layout)
+		}
+		key := canonicalizeGroupKey{
+			inputBitReversed: p.Layout == iop.BitReverse,
+			inverseCoset:     p.Basis == iop.LagrangeCoset,
+		}
+		groups[key] = append(groups[key], p)
+	}
+
+	vectorBytes := n * bn254FrBytes
+	for key, group := range groups {
+		valuesPacked := make([]byte, len(group)*vectorBytes)
+		for i, p := range group {
+			packBN254FrVectorRegularLEInto(valuesPacked[i*vectorBytes:(i+1)*vectorBytes], p.Coefficients())
+		}
+		canonicalPacked, err := bridgeCanonicalizeQuotientVectors("bn254", valuesPacked, len(group), n, key.inputBitReversed, key.inverseCoset)
+		if err != nil {
+			return err
+		}
+		if len(canonicalPacked) != len(valuesPacked) {
+			return fmt.Errorf("webgpu plonk bn254: quotient canonicalize returned %d bytes, expected %d", len(canonicalPacked), len(valuesPacked))
+		}
+		for i, p := range group {
+			if err := unpackBN254FrVectorRegularLEInto(p.Coefficients(), canonicalPacked[i*vectorBytes:(i+1)*vectorBytes]); err != nil {
+				return err
+			}
+			p.Basis = iop.Canonical
+			p.Layout = iop.Regular
+		}
+	}
+	return nil
+}
+
+func canonicalizeQuotientFromCosetWithWebGPU(p *iop.Polynomial) error {
+	return canonicalizePolynomialsRegularWithWebGPU([]*iop.Polynomial{p}, len(p.Coefficients()))
+}
+
+func lagrangePolynomialsRegularWithWebGPU(polys []*iop.Polynomial, elementCount int) error {
+	n := elementCount
+	filtered := make([]*iop.Polynomial, 0, len(polys))
+	for _, p := range polys {
+		if p == nil {
+			continue
+		}
+		if p.Basis == iop.Lagrange {
+			p.ToRegular()
+			continue
+		}
+		if p.Basis != iop.Canonical || p.Layout != iop.Regular {
+			return fmt.Errorf("webgpu plonk bn254: expected canonical regular polynomial, got basis %d layout %d", p.Basis, p.Layout)
+		}
+		if len(p.Coefficients()) != n {
+			return fmt.Errorf("webgpu plonk bn254: lagrange polynomial has %d coefficients, expected %d", len(p.Coefficients()), n)
+		}
+		filtered = append(filtered, p)
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+
+	vectorBytes := n * bn254FrBytes
+	valuesPacked := make([]byte, len(filtered)*vectorBytes)
+	for i, p := range filtered {
+		packBN254FrVectorRegularLEInto(valuesPacked[i*vectorBytes:(i+1)*vectorBytes], p.Coefficients())
+	}
+	lagrangePacked, err := bridgeLagrangeQuotientVectors("bn254", valuesPacked, len(filtered), n)
+	if err != nil {
+		return err
+	}
+	if len(lagrangePacked) != len(valuesPacked) {
+		return fmt.Errorf("webgpu plonk bn254: quotient lagrange returned %d bytes, expected %d", len(lagrangePacked), len(valuesPacked))
+	}
+	for i, p := range filtered {
+		if err := unpackBN254FrVectorRegularLEInto(p.Coefficients(), lagrangePacked[i*vectorBytes:(i+1)*vectorBytes]); err != nil {
+			return err
+		}
+		p.Basis = iop.Lagrange
+		p.Layout = iop.Regular
 	}
 	return nil
 }
@@ -1157,7 +1253,7 @@ func (s *instance) computeLinearizedPolynomial() error {
 	bozeta := evaluateBlinded(s.x[id_O], s.bp[id_Bo], s.zeta)
 	bzuzeta := s.proof.ZShiftedOpening.ClaimedValue
 
-	s.linearizedPolynomial = s.innerComputeLinearizedPoly(
+	linearizedPolynomial, err := s.innerComputeLinearizedPoly(
 		blzeta,
 		brzeta,
 		bozeta,
@@ -1171,8 +1267,11 @@ func (s *instance) computeLinearizedPolynomial() error {
 		coefficients(s.cCommitments),
 		s.pk,
 	)
+	if err != nil {
+		return err
+	}
+	s.linearizedPolynomial = linearizedPolynomial
 
-	var err error
 	s.linearizedPolynomialDigest, err = s.msmG1("kzg", 0, s.linearizedPolynomial)
 	return err
 }
@@ -1344,17 +1443,21 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 	}
 
 	evalX := make([]*iop.Polynomial, len(s.x))
-	canonicalizeAndScale := func(p *iop.Polynomial, totalShift fr.Element) {
-		p.ToCanonical(s.domain0).ToRegular()
-		scalePowers(p, totalShift)
-	}
-	canonicalizeAndScaleGroup := func(ids []int, totalShift fr.Element) {
+	canonicalizeAndScaleGroup := func(ids []int, totalShift fr.Element) error {
+		polys := make([]*iop.Polynomial, 0, len(ids))
 		for _, id := range ids {
 			if id >= len(s.x) || id == id_ZS || s.x[id] == nil {
 				continue
 			}
-			canonicalizeAndScale(s.x[id], totalShift)
+			polys = append(polys, s.x[id])
 		}
+		if err := canonicalizePolynomialsRegularWithWebGPU(polys, int(s.domain0.Cardinality)); err != nil {
+			return err
+		}
+		for _, p := range polys {
+			scalePowers(p, totalShift)
+		}
+		return nil
 	}
 
 	for i := 0; i < rho; i++ {
@@ -1674,8 +1777,9 @@ func divideByZH(a *iop.Polynomial, domains [2]*fft.Domain) (*iop.Polynomial, err
 		r[i].Mul(&r[i], &xnMinusOneInverseLagrangeCoset[int(iRev)%rho])
 	}
 
-	// since a is in bit reverse order, ToRegular shouldn't do anything
-	a.ToCanonical(bigDomain).ToRegular()
+	if err := canonicalizeQuotientFromCosetWithWebGPU(a); err != nil {
+		return nil, err
+	}
 
 	return a, nil
 
@@ -1721,7 +1825,7 @@ func evaluateXnMinusOneDomainBigCoset(domains [2]*fft.Domain) []fr.Element {
 // - Z_{H}(ζ)*((H₀(X) + ζᵐ⁺²*H₁(X) + ζ²⁽ᵐ⁺²⁾*H₂(X))
 //
 // /!\ blindedZCanonical is modified
-func (s *instance) innerComputeLinearizedPoly(lZeta, rZeta, oZeta, alpha, beta, gamma, zeta, zu fr.Element, qcpZeta, blindedZCanonical []fr.Element, pi2Canonical [][]fr.Element, pk *BN254ProvingKey) []fr.Element {
+func (s *instance) innerComputeLinearizedPoly(lZeta, rZeta, oZeta, alpha, beta, gamma, zeta, zu fr.Element, qcpZeta, blindedZCanonical []fr.Element, pi2Canonical [][]fr.Element, pk *BN254ProvingKey) ([]fr.Element, error) {
 
 	// l(ζ)r(ζ)
 	var rl fr.Element
@@ -1769,7 +1873,9 @@ func (s *instance) innerComputeLinearizedPoly(lZeta, rZeta, oZeta, alpha, beta, 
 
 	s3canonical := s.trace.S3.Coefficients()
 
-	s.trace.Qk.ToCanonical(s.domain0).ToRegular()
+	if err := canonicalizePolynomialsRegularWithWebGPU([]*iop.Polynomial{s.trace.Qk}, int(s.domain0.Cardinality)); err != nil {
+		return nil, err
+	}
 
 	// len(h1)=len(h2)=len(blindedZCanonical)=len(h3)+1 when Statistical ZK is activated
 	// len(h1)=len(h2)=len(h3)=len(blindedZCanonical)-1 when Statistical ZK is deactivated
@@ -1830,7 +1936,7 @@ func (s *instance) innerComputeLinearizedPoly(lZeta, rZeta, oZeta, alpha, beta, 
 		}
 	}
 
-	return blindedZCanonical
+	return blindedZCanonical, nil
 }
 
 func bindPublicData(fs *fiatshamir.Transcript, challenge string, vk *native.VerifyingKey, publicInputs []fr.Element) error {

@@ -409,10 +409,19 @@ export interface NTTModule {
   forwardPackedRegular(values: Uint8Array): Promise<Uint8Array>;
   /** Run the inverse NTT over packed regular little-endian field elements. */
   inversePackedRegular(values: Uint8Array): Promise<Uint8Array>;
+  /** Run the inverse NTT over bit-reversed packed regular little-endian field elements. */
+  inverseBitReversePackedRegular(values: Uint8Array): Promise<Uint8Array>;
+  /** Convert packed regular little-endian values from Lagrange coset form to canonical regular form. */
+  inverseCosetPackedRegular(values: Uint8Array): Promise<Uint8Array>;
   /** Run the forward NTT over packed Montgomery-form field elements. */
   forwardPackedMont(values: Uint8Array): Promise<Uint8Array>;
   /** Run the inverse NTT over packed Montgomery-form field elements. */
   inversePackedMont(values: Uint8Array): Promise<Uint8Array>;
+  /**
+   * Convert packed regular little-endian values from bit-reversed Lagrange
+   * coset form to canonical regular form.
+   */
+  inverseCosetBitReversePackedRegular(values: Uint8Array): Promise<Uint8Array>;
   /** Precompute and cache domain metadata for a power-of-two domain size. */
   prewarmDomain(size: number): Promise<void>;
 }

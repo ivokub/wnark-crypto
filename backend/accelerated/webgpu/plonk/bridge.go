@@ -72,7 +72,55 @@ func bridgeTransformQuotientCoset(curve string, valuesPacked, scalingPacked []by
 	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
 }
 
+func bridgeCanonicalizeQuotientFromCoset(curve string, valuesPacked []byte, elementCount int) ([]byte, error) {
+	value, err := bridgeClient.CallPromise(
+		"canonicalizeQuotientFromCoset",
+		curve,
+		webgpubridge.JSUint8Array(valuesPacked),
+		elementCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
+}
+
+func bridgeCanonicalizeQuotientVectors(curve string, valuesPacked []byte, vectorCount, elementCount int, inputBitReversed, inverseCoset bool) ([]byte, error) {
+	value, err := bridgeClient.CallPromise(
+		"canonicalizeQuotientVectors",
+		curve,
+		webgpubridge.JSUint8Array(valuesPacked),
+		vectorCount,
+		elementCount,
+		inputBitReversed,
+		inverseCoset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
+}
+
+func bridgeLagrangeQuotientVectors(curve string, valuesPacked []byte, vectorCount, elementCount int) ([]byte, error) {
+	value, err := bridgeClient.CallPromise(
+		"lagrangeQuotientVectors",
+		curve,
+		webgpubridge.JSUint8Array(valuesPacked),
+		vectorCount,
+		elementCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
+}
+
 func bridgePrewarmQuotientTransformDomain(curve string, elementCount int) error {
 	_, err := bridgeClient.CallPromise("prewarmQuotientTransformDomain", curve, elementCount)
+	return err
+}
+
+func bridgePrewarmQuotientCanonicalizeDomain(curve string, elementCount int) error {
+	_, err := bridgeClient.CallPromise("prewarmQuotientCanonicalizeDomain", curve, elementCount)
 	return err
 }

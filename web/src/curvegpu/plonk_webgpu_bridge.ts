@@ -265,6 +265,82 @@ async function transformQuotientCoset(
   return out;
 }
 
+async function canonicalizeQuotientFromCoset(curve: SupportedCurveID, valuesPacked: Uint8Array, elementCount: number) {
+  return canonicalizeQuotientVectors(curve, valuesPacked, 1, elementCount, true, true);
+}
+
+async function lagrangeQuotientVectors(
+  curve: SupportedCurveID,
+  valuesPacked: Uint8Array,
+  vectorCount: number,
+  elementCount: number,
+) {
+  const bridge = assertBridge(curve);
+  const vectorBytes = elementCount * bridge.fr.byteSize;
+  if (!Number.isInteger(vectorCount) || vectorCount <= 0) {
+    throw new Error(`invalid PLONK quotient lagrange vector count ${vectorCount}`);
+  }
+  if (!Number.isInteger(elementCount) || elementCount <= 0 || (elementCount & (elementCount - 1)) !== 0) {
+    throw new Error(`invalid PLONK quotient lagrange element count ${elementCount}`);
+  }
+  if (valuesPacked.byteLength !== vectorCount * vectorBytes) {
+    throw new Error(`PLONK quotient lagrange expected ${vectorCount * vectorBytes} value bytes, got ${valuesPacked.byteLength}`);
+  }
+
+  const out = new Uint8Array(valuesPacked.byteLength);
+  await Promise.all(
+    Array.from({ length: vectorCount }, async (_, i) => {
+      const start = i * vectorBytes;
+      const end = start + vectorBytes;
+      const values = cloneBytes(valuesPacked.subarray(start, end));
+      out.set(await bridge.ntt.forwardPackedRegular(values), start);
+    }),
+  );
+  return out;
+}
+
+async function canonicalizeQuotientVectors(
+  curve: SupportedCurveID,
+  valuesPacked: Uint8Array,
+  vectorCount: number,
+  elementCount: number,
+  inputBitReversed: boolean,
+  inverseCoset: boolean,
+) {
+  const bridge = assertBridge(curve);
+  const vectorBytes = elementCount * bridge.fr.byteSize;
+  if (!Number.isInteger(vectorCount) || vectorCount <= 0) {
+    throw new Error(`invalid PLONK quotient canonicalize vector count ${vectorCount}`);
+  }
+  if (!Number.isInteger(elementCount) || elementCount <= 0 || (elementCount & (elementCount - 1)) !== 0) {
+    throw new Error(`invalid PLONK quotient canonicalize element count ${elementCount}`);
+  }
+  if (valuesPacked.byteLength !== vectorCount * vectorBytes) {
+    throw new Error(`PLONK quotient canonicalize expected ${vectorCount * vectorBytes} value bytes, got ${valuesPacked.byteLength}`);
+  }
+
+  const out = new Uint8Array(valuesPacked.byteLength);
+  await Promise.all(
+    Array.from({ length: vectorCount }, async (_, i) => {
+      const start = i * vectorBytes;
+      const end = start + vectorBytes;
+      const input = cloneBytes(valuesPacked.subarray(start, end));
+      let canonical: Uint8Array;
+      if (inverseCoset) {
+        canonical = inputBitReversed
+          ? await bridge.ntt.inverseCosetBitReversePackedRegular(input)
+          : await bridge.ntt.inverseCosetPackedRegular(input);
+      } else {
+        canonical = inputBitReversed
+          ? await bridge.ntt.inverseBitReversePackedRegular(input)
+          : await bridge.ntt.inversePackedRegular(input);
+      }
+      out.set(canonical, start);
+    }),
+  );
+  return out;
+}
+
 async function prewarmQuotientTransformDomain(curve: SupportedCurveID, elementCount: number) {
   const bridge = assertBridge(curve);
   if (!Number.isInteger(elementCount) || elementCount <= 0 || (elementCount & (elementCount - 1)) !== 0) {
@@ -278,6 +354,17 @@ async function prewarmQuotientTransformDomain(curve: SupportedCurveID, elementCo
   await transformQuotientCoset(curve, zeroVector, zeroVector, 1, elementCount);
 }
 
+async function prewarmQuotientCanonicalizeDomain(curve: SupportedCurveID, elementCount: number) {
+  const bridge = assertBridge(curve);
+  if (!Number.isInteger(elementCount) || elementCount <= 0 || (elementCount & (elementCount - 1)) !== 0) {
+    throw new Error(`invalid PLONK quotient canonicalize prewarm element count ${elementCount}`);
+  }
+  await bridge.ntt.prewarmDomain(elementCount);
+
+  const zeroVector = new Uint8Array(elementCount * bridge.fr.byteSize);
+  await canonicalizeQuotientFromCoset(curve, zeroVector, elementCount);
+}
+
 export function installPlonkWebGPUBridge(dependencies: BridgeDependencies): void {
   activeBridge = dependencies;
   (globalThis as typeof globalThis & { wnarkPlonkWebGPU?: unknown }).wnarkPlonkWebGPU = {
@@ -286,6 +373,10 @@ export function installPlonkWebGPUBridge(dependencies: BridgeDependencies): void
     msmG1,
     msmG1Batch,
     transformQuotientCoset,
+    canonicalizeQuotientFromCoset,
+    lagrangeQuotientVectors,
+    canonicalizeQuotientVectors,
     prewarmQuotientTransformDomain,
+    prewarmQuotientCanonicalizeDomain,
   };
 }

@@ -239,8 +239,13 @@ export function createNTTModule(
     inverse: boolean;
     inputRegular: boolean;
     outputRegular: boolean;
+    inputBitReversed?: boolean;
+    inverseCoset?: boolean;
   }): Promise<Uint8Array> {
-    const { values, inverse, inputRegular, outputRegular } = options;
+    const { values, inverse, inputRegular, outputRegular, inputBitReversed = false, inverseCoset = false } = options;
+    if (inverseCoset && !inverse) {
+      throw new Error(`${label}: inverseCoset requires inverse NTT`);
+    }
     const count = ensurePackedElements(values, elementBytes, `${label}.pipeline.values`);
     if (count === 0 || (count & (count - 1)) !== 0) {
       throw new Error(`${label}: NTT input length must be a non-zero power of two`);
@@ -304,15 +309,17 @@ export function createNTTModule(
         swap();
       }
 
-      await dispatch(
-        vectorKernel,
-        current,
-        zeroAux,
-        next,
-        Uint32Array.from([count, VECTOR_OP_BIT_REVERSE_COPY, Math.round(Math.log2(count)), 0, 0, 0, 0, 0]),
-        `${label}-bit-reverse`,
-      );
-      swap();
+      if (!inputBitReversed) {
+        await dispatch(
+          vectorKernel,
+          current,
+          zeroAux,
+          next,
+          Uint32Array.from([count, VECTOR_OP_BIT_REVERSE_COPY, Math.round(Math.log2(count)), 0, 0, 0, 0, 0]),
+          `${label}-bit-reverse`,
+        );
+        swap();
+      }
 
       const stages = inverse ? domain.inverseStageMont : domain.forwardStageMont;
       for (let stage = 0; stage < stages.length; stage += 1) {
@@ -352,6 +359,28 @@ export function createNTTModule(
             next,
             Uint32Array.from([count, VECTOR_OP_MUL_FACTORS, 0, 0, 0, 0, 0, 0]),
             `${label}-inverse-scale`,
+          );
+        } finally {
+          factorBuffer.destroy();
+        }
+        swap();
+      }
+
+      if (inverseCoset) {
+        const factorBuffer = createSimpleStorageBufferFromBytes(
+          context.device,
+          `${label}-inverse-coset-scale`,
+          domain.inverseCosetPowersPackedMont,
+          GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        );
+        try {
+          await dispatch(
+            vectorKernel,
+            current,
+            factorBuffer,
+            next,
+            Uint32Array.from([count, VECTOR_OP_MUL_FACTORS, 0, 0, 0, 0, 0, 0]),
+            `${label}-inverse-coset-scale`,
           );
         } finally {
           factorBuffer.destroy();
@@ -483,6 +512,34 @@ export function createNTTModule(
     },
     async inversePackedMont(values: Uint8Array): Promise<Uint8Array> {
       return runPipelinePacked({ values, inverse: true, inputRegular: false, outputRegular: false });
+    },
+    async inverseBitReversePackedRegular(values: Uint8Array): Promise<Uint8Array> {
+      return runPipelinePacked({
+        values,
+        inverse: true,
+        inputRegular: true,
+        outputRegular: true,
+        inputBitReversed: true,
+      });
+    },
+    async inverseCosetPackedRegular(values: Uint8Array): Promise<Uint8Array> {
+      return runPipelinePacked({
+        values,
+        inverse: true,
+        inputRegular: true,
+        outputRegular: true,
+        inverseCoset: true,
+      });
+    },
+    async inverseCosetBitReversePackedRegular(values: Uint8Array): Promise<Uint8Array> {
+      return runPipelinePacked({
+        values,
+        inverse: true,
+        inputRegular: true,
+        outputRegular: true,
+        inputBitReversed: true,
+        inverseCoset: true,
+      });
     },
     async forwardPackedRegular(values: Uint8Array): Promise<Uint8Array> {
       return runPipelinePacked({ values, inverse: false, inputRegular: true, outputRegular: true });
