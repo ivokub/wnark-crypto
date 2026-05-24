@@ -595,14 +595,6 @@ func (s *instance) completeQk() error {
 	return nil
 }
 
-// computeLagrangeOneOnCoset computes 1/n (x**n-1)/(x-1) on coset*ωⁱ
-func (s *instance) computeLagrangeOneOnCoset(cosetExpMinusOne fr.Element, index int) fr.Element {
-	var res fr.Element
-	res.Mul(&cosetExpMinusOne, &s.domain0.CardinalityInv).
-		Mul(&res, &s.precomputedDenominators[index])
-	return res
-}
-
 // commitToLRO commits to L, R, O polynomials using reduced-size MSMs.
 //
 // L, R, O live on a domain of size n = 2^k, but only offset = nbPublic + nbConstraints
@@ -732,6 +724,159 @@ func (s *instance) transformGroupToCoset(ids []int, scalingVector []fr.Element) 
 		p.Basis = iop.Lagrange
 		p.Layout = iop.Regular
 	}
+	return nil
+}
+
+func (s *instance) evaluateQuotientCoset(
+	evalX []*iop.Polynomial,
+	twiddles0 []fr.Element,
+	coset, cosetExpMinusOne, cs, css fr.Element,
+	buf []fr.Element,
+) error {
+	n := int(s.domain0.Cardinality)
+	coeffs := func(id int) ([]fr.Element, error) {
+		if id >= len(evalX) || evalX[id] == nil {
+			return nil, fmt.Errorf("webgpu plonk bn254: missing quotient eval vector %d", id)
+		}
+		c := evalX[id].Coefficients()
+		if len(c) != n {
+			return nil, fmt.Errorf("webgpu plonk bn254: quotient eval vector %d has %d elements, expected %d", id, len(c), n)
+		}
+		return c, nil
+	}
+
+	lCoeffs, err := coeffs(id_L)
+	if err != nil {
+		return err
+	}
+	rCoeffs, err := coeffs(id_R)
+	if err != nil {
+		return err
+	}
+	oCoeffs, err := coeffs(id_O)
+	if err != nil {
+		return err
+	}
+	zCoeffs, err := coeffs(id_Z)
+	if err != nil {
+		return err
+	}
+	qlCoeffs, err := coeffs(id_Ql)
+	if err != nil {
+		return err
+	}
+	qrCoeffs, err := coeffs(id_Qr)
+	if err != nil {
+		return err
+	}
+	qmCoeffs, err := coeffs(id_Qm)
+	if err != nil {
+		return err
+	}
+	qoCoeffs, err := coeffs(id_Qo)
+	if err != nil {
+		return err
+	}
+	qkCoeffs, err := coeffs(id_Qk)
+	if err != nil {
+		return err
+	}
+	s1Coeffs, err := coeffs(id_S1)
+	if err != nil {
+		return err
+	}
+	s2Coeffs, err := coeffs(id_S2)
+	if err != nil {
+		return err
+	}
+	s3Coeffs, err := coeffs(id_S3)
+	if err != nil {
+		return err
+	}
+
+	nbBsbGates := len(s.proof.Bsb22Commitments)
+	qcpCoeffs := make([][]fr.Element, nbBsbGates)
+	cCommitmentCoeffs := make([][]fr.Element, nbBsbGates)
+	for i := 0; i < nbBsbGates; i++ {
+		qcpCoeffs[i], err = coeffs(id_Qci + 2*i)
+		if err != nil {
+			return err
+		}
+		cCommitmentCoeffs[i], err = coeffs(id_Qci + 2*i + 1)
+		if err != nil {
+			return err
+		}
+	}
+
+	blCoeffs := s.bp[id_Bl].Coefficients()
+	brCoeffs := s.bp[id_Br].Coefficients()
+	boCoeffs := s.bp[id_Bo].Coefficients()
+	bzCoeffs := s.bp[id_Bz].Coefficients()
+
+	var one, lagrangeScale fr.Element
+	one.SetOne()
+	lagrangeScale.Mul(&cosetExpMinusOne, &s.domain0.CardinalityInv)
+
+	for i := 0; i < n; i++ {
+		twiddle := &twiddles0[i]
+		nextTwiddle := &twiddles0[(i+1)%n]
+
+		l := lCoeffs[i]
+		r := rCoeffs[i]
+		o := oCoeffs[i]
+		z := zCoeffs[i]
+		zs := zCoeffs[(i+1)%n]
+
+		var blind fr.Element
+		blind = evalSmallPolynomial(blCoeffs, twiddle)
+		l.Add(&l, &blind)
+		blind = evalSmallPolynomial(brCoeffs, twiddle)
+		r.Add(&r, &blind)
+		blind = evalSmallPolynomial(boCoeffs, twiddle)
+		o.Add(&o, &blind)
+		blind = evalSmallPolynomial(bzCoeffs, twiddle)
+		z.Add(&z, &blind)
+		blind = evalSmallPolynomial(bzCoeffs, nextTwiddle)
+		zs.Add(&zs, &blind)
+
+		var gate, tmp fr.Element
+		gate.Mul(&qlCoeffs[i], &l)
+		tmp.Mul(&qrCoeffs[i], &r)
+		gate.Add(&gate, &tmp)
+		tmp.Mul(&qmCoeffs[i], &l).Mul(&tmp, &r)
+		gate.Add(&gate, &tmp)
+		tmp.Mul(&qoCoeffs[i], &o)
+		gate.Add(&gate, &tmp).Add(&gate, &qkCoeffs[i])
+		for j := 0; j < nbBsbGates; j++ {
+			tmp.Mul(&qcpCoeffs[j][i], &cCommitmentCoeffs[j][i])
+			gate.Add(&gate, &tmp)
+		}
+
+		var id fr.Element
+		id.Mul(twiddle, &coset).Mul(&id, &s.beta)
+
+		var a, b, c, right, left fr.Element
+		a.Add(&s.gamma, &l).Add(&a, &id)
+		b.Mul(&id, &cs).Add(&b, &r).Add(&b, &s.gamma)
+		c.Mul(&id, &css).Add(&c, &o).Add(&c, &s.gamma)
+		right.Mul(&a, &b).Mul(&right, &c).Mul(&right, &z)
+
+		a.Mul(&s1Coeffs[i], &s.beta).Add(&a, &l).Add(&a, &s.gamma)
+		b.Mul(&s2Coeffs[i], &s.beta).Add(&b, &r).Add(&b, &s.gamma)
+		c.Mul(&s3Coeffs[i], &s.beta).Add(&c, &o).Add(&c, &s.gamma)
+		left.Mul(&a, &b).Mul(&left, &c).Mul(&left, &zs)
+
+		var ordering fr.Element
+		ordering.Sub(&left, &right)
+
+		var lone, local fr.Element
+		lone.Mul(&lagrangeScale, &s.precomputedDenominators[i])
+		local.Sub(&z, &one).Mul(&local, &lone)
+
+		local.Mul(&local, &s.alpha).Add(&local, &ordering).Mul(&local, &s.alpha).Add(&local, &gate)
+		buf[i] = local
+	}
+
 	return nil
 }
 
@@ -1089,27 +1234,6 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 		}
 	}
 
-	nbBsbGates := len(s.proof.Bsb22Commitments)
-
-	gateConstraint := func(u ...fr.Element) fr.Element {
-
-		var ic, tmp fr.Element
-
-		ic.Mul(&u[id_Ql], &u[id_L])
-		tmp.Mul(&u[id_Qr], &u[id_R])
-		ic.Add(&ic, &tmp)
-		tmp.Mul(&u[id_Qm], &u[id_L]).Mul(&tmp, &u[id_R])
-		ic.Add(&ic, &tmp)
-		tmp.Mul(&u[id_Qo], &u[id_O])
-		ic.Add(&ic, &tmp).Add(&ic, &u[id_Qk])
-		for i := 0; i < nbBsbGates; i++ {
-			tmp.Mul(&u[id_Qci+2*i], &u[id_Qci+2*i+1])
-			ic.Add(&ic, &tmp)
-		}
-
-		return ic
-	}
-
 	var cs, css fr.Element
 
 	// stores the current coset shifter
@@ -1122,41 +1246,6 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 	coset.SetOne()
 	one.SetOne()
 	bn := big.NewInt(int64(n))
-
-	orderingConstraint := func(index int, u ...fr.Element) fr.Element {
-
-		gamma := s.gamma
-
-		// ordering constraint
-		var a, b, c, r, l, id fr.Element
-
-		// evaluation of ID at coset*ωⁱ where i:=index
-		id.Mul(&twiddles0[index], &coset).Mul(&id, &s.beta)
-
-		a.Add(&gamma, &u[id_L]).Add(&a, &id)
-		b.Mul(&id, &cs).Add(&b, &u[id_R]).Add(&b, &gamma)
-		c.Mul(&id, &css).Add(&c, &u[id_O]).Add(&c, &gamma)
-		r.Mul(&a, &b).Mul(&r, &c).Mul(&r, &u[id_Z])
-
-		a.Add(&u[id_S1], &u[id_L]).Add(&a, &gamma)
-		b.Add(&u[id_S2], &u[id_R]).Add(&b, &gamma)
-		c.Add(&u[id_S3], &u[id_O]).Add(&c, &gamma)
-		l.Mul(&a, &b).Mul(&l, &c).Mul(&l, &u[id_ZS])
-
-		l.Sub(&l, &r)
-
-		return l
-	}
-
-	localConstraint := func(index int, u ...fr.Element) fr.Element {
-		// local constraint
-		var res, lone fr.Element
-		lone = s.computeLagrangeOneOnCoset(cosetExponentiatedToNMinusOne, index)
-		res.SetOne()
-		res.Sub(&u[id_Z], &res).Mul(&res, &lone)
-
-		return res
-	}
 
 	rho := int(s.domain1.Cardinality / n)
 	shifters := make([]fr.Element, rho)
@@ -1173,35 +1262,6 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 	// init the result polynomial & buffer
 	cres := make([]fr.Element, s.domain1.Cardinality)
 	buf := make([]fr.Element, n)
-
-	allConstraints := func(index int, u ...fr.Element) fr.Element {
-
-		// scale S1, S2, S3 by β
-		u[id_S1].Mul(&u[id_S1], &s.beta)
-		u[id_S2].Mul(&u[id_S2], &s.beta)
-		u[id_S3].Mul(&u[id_S3], &s.beta)
-
-		// blind L, R, O, Z, ZS
-		var y fr.Element
-		y = s.bp[id_Bl].Evaluate(twiddles0[index])
-		u[id_L].Add(&u[id_L], &y)
-		y = s.bp[id_Br].Evaluate(twiddles0[index])
-		u[id_R].Add(&u[id_R], &y)
-		y = s.bp[id_Bo].Evaluate(twiddles0[index])
-		u[id_O].Add(&u[id_O], &y)
-		y = s.bp[id_Bz].Evaluate(twiddles0[index])
-		u[id_Z].Add(&u[id_Z], &y)
-
-		// ZS is shifted by 1; need to get correct twiddle
-		y = s.bp[id_Bz].Evaluate(twiddles0[(index+1)%int(n)])
-		u[id_ZS].Add(&u[id_ZS], &y)
-
-		a := gateConstraint(u...)
-		b := orderingConstraint(index, u...)
-		c := localConstraint(index, u...)
-		c.Mul(&c, &s.alpha).Add(&c, &b).Mul(&c, &s.alpha).Add(&c, &a)
-		return c
-	}
 
 	// for the first iteration, the scalingVector is the coset table
 	scalingVector := cosetTable
@@ -1285,13 +1345,7 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 			if err := s.track(fmt.Sprintf("quotient_num_coset_%d_evaluate", i), func() error {
 				copy(evalX, s.x)
 				staticCache.cosets[i].applyToEval(evalX)
-				_, err := iop.Evaluate(
-					allConstraints,
-					buf,
-					iop.Form{Basis: iop.Lagrange, Layout: iop.Regular},
-					evalX...,
-				)
-				return err
+				return s.evaluateQuotientCoset(evalX, twiddles0, coset, cosetExponentiatedToNMinusOne, cs, css, buf)
 			}); err != nil {
 				return err
 			}
@@ -1377,6 +1431,14 @@ func scalePowers(p *iop.Polynomial, w fr.Element) {
 		cp[i].Mul(&cp[i], &acc)
 		acc.Mul(&acc, &w)
 	}
+}
+
+func evalSmallPolynomial(coeffs []fr.Element, point *fr.Element) fr.Element {
+	var res fr.Element
+	for i := len(coeffs); i > 0; i-- {
+		res.Mul(&res, point).Add(&res, &coeffs[i-1])
+	}
+	return res
 }
 
 func evaluateBlinded(p, bp *iop.Polynomial, zeta fr.Element) fr.Element {
