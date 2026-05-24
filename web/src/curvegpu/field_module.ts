@@ -176,6 +176,9 @@ export function createFieldModule(
     async mulBatch(a: readonly CurveGPUElementBytes[], b: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]> {
       return runBatch(OP_MUL, a, b);
     },
+    async mulPackedMont(a: Uint8Array, b: Uint8Array): Promise<Uint8Array> {
+      return runPacked(OP_MUL, a, b);
+    },
     async square(value: CurveGPUElementBytes): Promise<CurveGPUElementBytes> {
       return runUnary(OP_SQUARE, value);
     },

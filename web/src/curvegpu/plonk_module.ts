@@ -1,7 +1,9 @@
 import type {
   CurveGPUContext,
+  FieldModule,
   G1Module,
   G1MSMModule,
+  NTTModule,
   PlonkConstraintSystem,
   PlonkHandle,
   PlonkModule,
@@ -36,6 +38,8 @@ type PlonkModuleConfig = {
   curve: SupportedCurveID;
   modulusHex: string;
   frBytes: number;
+  fr: FieldModule;
+  ntt: NTTModule;
   g1: G1Module;
   g1msm: G1MSMModule;
 };
@@ -239,6 +243,8 @@ export function createPlonkModule(config: PlonkModuleConfig): PlonkModule {
     installPlonkWebGPUBridge({
       context: config.context,
       curve: config.curve,
+      fr: config.fr,
+      ntt: config.ntt,
       g1: config.g1,
       g1msm: config.g1msm,
     });

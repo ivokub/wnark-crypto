@@ -239,6 +239,8 @@ export interface FieldModule {
   /** Modular multiplication. */
   mul(a: CurveGPUElementBytes, b: CurveGPUElementBytes): Promise<CurveGPUElementBytes>;
   mulBatch(a: readonly CurveGPUElementBytes[], b: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]>;
+  /** Element-wise multiplication over packed Montgomery-form field elements. */
+  mulPackedMont(a: Uint8Array, b: Uint8Array): Promise<Uint8Array>;
   /** Modular squaring. */
   square(value: CurveGPUElementBytes): Promise<CurveGPUElementBytes>;
   squareBatch(values: readonly CurveGPUElementBytes[]): Promise<CurveGPUElementBytes[]>;
@@ -411,6 +413,8 @@ export interface NTTModule {
   forwardPackedMont(values: Uint8Array): Promise<Uint8Array>;
   /** Run the inverse NTT over packed Montgomery-form field elements. */
   inversePackedMont(values: Uint8Array): Promise<Uint8Array>;
+  /** Precompute and cache domain metadata for a power-of-two domain size. */
+  prewarmDomain(size: number): Promise<void>;
 }
 
 /**

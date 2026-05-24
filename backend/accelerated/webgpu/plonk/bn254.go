@@ -311,7 +311,10 @@ func (pk *BN254ProvingKey) prepareWithCS(spr *cs.SparseR1CS) error {
 	}
 	domain0, domain1 := domainsForSPR(spr)
 	trace := native.NewTrace(spr, domain0)
-	return pk.ensureStaticNumeratorCache(trace, domain0, domain1)
+	if err := pk.ensureStaticNumeratorCache(trace, domain0, domain1); err != nil {
+		return err
+	}
+	return bridgePrewarmQuotientTransformDomain("bn254", int(domain0.Cardinality))
 }
 
 func packBN254FrVectorRegularLEInto(dst []byte, values []fr.Element) []byte {
@@ -333,6 +336,29 @@ func writeBN254FrRegularLE(dst []byte, value *fr.Element) {
 	for i := 0; i < bn254FrBytes; i++ {
 		dst[i] = be[bn254FrBytes-1-i]
 	}
+}
+
+func readBN254FrRegularLE(src []byte) (fr.Element, error) {
+	if len(src) != bn254FrBytes {
+		return fr.Element{}, fmt.Errorf("webgpu plonk bn254: expected %d Fr bytes, got %d", bn254FrBytes, len(src))
+	}
+	var le [bn254FrBytes]byte
+	copy(le[:], src)
+	return fr.LittleEndian.Element(&le)
+}
+
+func unpackBN254FrVectorRegularLEInto(dst []fr.Element, src []byte) error {
+	if len(src) != len(dst)*bn254FrBytes {
+		return fmt.Errorf("webgpu plonk bn254: expected %d Fr vector bytes, got %d", len(dst)*bn254FrBytes, len(src))
+	}
+	for i := range dst {
+		value, err := readBN254FrRegularLE(src[i*bn254FrBytes : (i+1)*bn254FrBytes])
+		if err != nil {
+			return err
+		}
+		dst[i] = value
+	}
+	return nil
 }
 
 func packBN254G1AffineJacobianBatch(points []curve.G1Affine) []byte {
@@ -668,6 +694,45 @@ func (s *instance) msmG1(vectorName string, start int, scalars []fr.Element) (cu
 	scalarsPacked := packBN254FrVectorRegularLEInto(nil, scalars)
 	packed, err := bridgeMSMG1Slice(s.pk.handle, vectorName, start, len(scalars), scalarsPacked)
 	return decodeBN254G1AffineFromPacked(packed, err)
+}
+
+func (s *instance) transformGroupToCoset(ids []int, scalingVector []fr.Element) error {
+	polys := make([]*iop.Polynomial, 0, len(ids))
+	n := int(s.domain0.Cardinality)
+	for _, id := range ids {
+		if id >= len(s.x) || id == id_ZS || s.x[id] == nil {
+			continue
+		}
+		if len(s.x[id].Coefficients()) != n {
+			return fmt.Errorf("webgpu plonk bn254: quotient polynomial %d has %d coefficients, expected %d", id, len(s.x[id].Coefficients()), n)
+		}
+		polys = append(polys, s.x[id])
+	}
+	if len(polys) == 0 {
+		return nil
+	}
+
+	vectorBytes := n * bn254FrBytes
+	valuesPacked := make([]byte, len(polys)*vectorBytes)
+	for i, p := range polys {
+		packBN254FrVectorRegularLEInto(valuesPacked[i*vectorBytes:(i+1)*vectorBytes], p.Coefficients())
+	}
+	scalingPacked := packBN254FrVectorRegularLEInto(nil, scalingVector)
+	transformedPacked, err := bridgeTransformQuotientCoset("bn254", valuesPacked, scalingPacked, len(polys), n)
+	if err != nil {
+		return err
+	}
+	if len(transformedPacked) != len(valuesPacked) {
+		return fmt.Errorf("webgpu plonk bn254: quotient transform returned %d bytes, expected %d", len(transformedPacked), len(valuesPacked))
+	}
+	for i, p := range polys {
+		if err := unpackBN254FrVectorRegularLEInto(p.Coefficients(), transformedPacked[i*vectorBytes:(i+1)*vectorBytes]); err != nil {
+			return err
+		}
+		p.Basis = iop.Lagrange
+		p.Layout = iop.Regular
+	}
+	return nil
 }
 
 // deriveGammaAndBeta (copy constraint)
@@ -1140,9 +1205,6 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 
 	// for the first iteration, the scalingVector is the coset table
 	scalingVector := cosetTable
-	scalingVectorRev := make([]fr.Element, len(cosetTable))
-	copy(scalingVectorRev, cosetTable)
-	fft.BitReverse(scalingVectorRev) //nolint:staticcheck // method is backwards compatible
 
 	// pre-computed to compute the bit reverse index
 	// of the result polynomial
@@ -1152,72 +1214,85 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 	s.precomputedDenominators = make([]fr.Element, s.domain0.Cardinality)
 	bufBatchInvert := make([]fr.Element, s.domain0.Cardinality)
 
+	staticCache := s.pk.staticNumeratorCache
+	if staticCache == nil || len(staticCache.cosets) != rho {
+		return nil, errors.New("missing static numerator cache")
+	}
+
+	dynamicPolyIDs := []int{id_L, id_R, id_O, id_Z, id_Qk}
+	commitmentValuePolyIDs := make([]int, 0, len(s.commitmentInfo))
+	for i := range s.commitmentInfo {
+		commitmentValuePolyIDs = append(commitmentValuePolyIDs, id_Qci+2*i+1)
+	}
+
+	evalX := make([]*iop.Polynomial, len(s.x))
+	canonicalizeAndScale := func(p *iop.Polynomial, totalShift fr.Element) {
+		p.ToCanonical(s.domain0).ToRegular()
+		scalePowers(p, totalShift)
+	}
+	canonicalizeAndScaleGroup := func(ids []int, totalShift fr.Element) {
+		for _, id := range ids {
+			if id >= len(s.x) || id == id_ZS || s.x[id] == nil {
+				continue
+			}
+			canonicalizeAndScale(s.x[id], totalShift)
+		}
+	}
+
 	for i := 0; i < rho; i++ {
+		if err := s.track(fmt.Sprintf("quotient_num_coset_%d_total", i), func() error {
+			coset.Mul(&coset, &shifters[i])
+			cosetExponentiatedToNMinusOne.Exp(coset, bn).
+				Sub(&cosetExponentiatedToNMinusOne, &one)
 
-		coset.Mul(&coset, &shifters[i])
-		cosetExponentiatedToNMinusOne.Exp(coset, bn).
-			Sub(&cosetExponentiatedToNMinusOne, &one)
-
-		for j := 0; j < int(s.domain0.Cardinality); j++ {
-			s.precomputedDenominators[j].
-				Mul(&coset, &twiddles0[j]).
-				Sub(&s.precomputedDenominators[j], &one)
-		}
-		batchInvert(s.precomputedDenominators, bufBatchInvert)
-
-		// bl <- bl *( (s*ωⁱ)ⁿ-1 )s
-		for _, q := range s.bp {
-			cq := q.Coefficients()
-			acc := cosetExponentiatedToNMinusOne
-			for j := 0; j < len(cq); j++ {
-				cq[j].Mul(&cq[j], &acc)
-				acc.Mul(&acc, &shifters[i])
+			for j := 0; j < int(s.domain0.Cardinality); j++ {
+				s.precomputedDenominators[j].
+					Mul(&coset, &twiddles0[j]).
+					Sub(&s.precomputedDenominators[j], &one)
 			}
-		}
-		if i == 1 {
-			// we have to update the scalingVector; instead of scaling by
-			// cosets we scale by the twiddles of the large domain.
-			w := s.domain1.Generator
-			scalingVector = make([]fr.Element, n)
-			fft.BuildExpTable(w, scalingVector)
+			batchInvert(s.precomputedDenominators, bufBatchInvert)
 
-			// reuse memory
-			copy(scalingVectorRev, scalingVector)
-			fft.BitReverse(scalingVectorRev) //nolint:staticcheck // method is backwards compatible
-		}
-
-		// we do **a lot** of FFT here, but on the small domain.
-		// note that for all the polynomials in the proving key
-		// (Ql, Qr, Qm, Qo, S1, S2, S3, Qcp, Qc) and ID, LOne
-		// we could pre-compute these rho*2 FFTs and store them
-		// at the cost of a huge memory footprint.
-		batchApply(s.x, func(p *iop.Polynomial) {
-			// shift polynomials to be in the correct coset
-			p.ToCanonical(s.domain0)
-
-			// scale by shifter[i]
-			var w []fr.Element
-			if p.Layout == iop.Regular {
-				w = scalingVector
-			} else {
-				w = scalingVectorRev
+			// bl <- bl *( (s*ωⁱ)ⁿ-1 )s
+			for _, q := range s.bp {
+				cq := q.Coefficients()
+				acc := cosetExponentiatedToNMinusOne
+				for j := 0; j < len(cq); j++ {
+					cq[j].Mul(&cq[j], &acc)
+					acc.Mul(&acc, &shifters[i])
+				}
+			}
+			if i == 1 {
+				// we have to update the scalingVector; instead of scaling by
+				// cosets we scale by the twiddles of the large domain.
+				w := s.domain1.Generator
+				scalingVector = make([]fr.Element, n)
+				fft.BuildExpTable(w, scalingVector)
 			}
 
-			transformGroupToCoset(dynamicPolyIDs)
+			if err := s.track(fmt.Sprintf("quotient_num_coset_%d_transform_dynamic", i), func() error {
+				return s.transformGroupToCoset(dynamicPolyIDs, scalingVector)
+			}); err != nil {
+				return err
+			}
 			if len(commitmentValuePolyIDs) > 0 {
-				transformGroupToCoset(commitmentValuePolyIDs)
+				if err := s.track(fmt.Sprintf("quotient_num_coset_%d_transform_commitment_values", i), func() error {
+					return s.transformGroupToCoset(commitmentValuePolyIDs, scalingVector)
+				}); err != nil {
+					return err
 				}
 			}
 
-			copy(evalX, s.x)
-			staticCache.cosets[i].applyToEval(evalX)
-			_, err = iop.Evaluate(
-				allConstraints,
-				buf,
-				iop.Form{Basis: iop.Lagrange, Layout: iop.Regular},
-				evalX...,
-			)
-			if err != nil {
+			if err := s.track(fmt.Sprintf("quotient_num_coset_%d_evaluate", i), func() error {
+				copy(evalX, s.x)
+				staticCache.cosets[i].applyToEval(evalX)
+				_, err := iop.Evaluate(
+					allConstraints,
+					buf,
+					iop.Form{Basis: iop.Lagrange, Layout: iop.Regular},
+					evalX...,
+				)
+				return err
+			}); err != nil {
 				return err
 			}
 

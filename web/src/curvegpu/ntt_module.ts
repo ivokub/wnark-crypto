@@ -490,6 +490,7 @@ export function createNTTModule(
     async inversePackedRegular(values: Uint8Array): Promise<Uint8Array> {
       return runPipelinePacked({ values, inverse: true, inputRegular: true, outputRegular: true });
     },
+    prewarmDomain: prewarmGroth16QuotientDomain,
     prewarmGroth16QuotientDomain,
     async computeGroth16QuotientPackedRegular(a: Uint8Array, b: Uint8Array, c: Uint8Array): Promise<Uint8Array> {
       return computeGroth16QuotientPacked(a, b, c, false);

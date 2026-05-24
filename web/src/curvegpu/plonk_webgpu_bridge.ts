@@ -1,4 +1,4 @@
-import type { CurveGPUContext, G1Module, G1MSMModule, SupportedCurveID } from "./api.js";
+import type { CurveGPUContext, FieldModule, G1Module, G1MSMModule, NTTModule, SupportedCurveID } from "./api.js";
 
 const CURVE_CONFIG: Record<SupportedCurveID, {
   g1CoordinateBytes: number;
@@ -21,6 +21,8 @@ const CURVE_CONFIG: Record<SupportedCurveID, {
 type BridgeDependencies = {
   context: CurveGPUContext;
   curve: SupportedCurveID;
+  fr: FieldModule;
+  ntt: NTTModule;
   g1: G1Module;
   g1msm: G1MSMModule;
 };
@@ -150,11 +152,66 @@ async function msmG1(handle: string, vectorName: string, scalarsPacked: Uint8Arr
   return out;
 }
 
+async function transformQuotientCoset(
+  curve: SupportedCurveID,
+  valuesPacked: Uint8Array,
+  scalingPacked: Uint8Array,
+  vectorCount: number,
+  elementCount: number,
+) {
+  const bridge = assertBridge(curve);
+  const elementBytes = bridge.fr.byteSize;
+  const vectorBytes = elementCount * elementBytes;
+  if (!Number.isInteger(vectorCount) || vectorCount <= 0) {
+    throw new Error(`invalid PLONK quotient vector count ${vectorCount}`);
+  }
+  if (!Number.isInteger(elementCount) || elementCount <= 0 || (elementCount & (elementCount - 1)) !== 0) {
+    throw new Error(`invalid PLONK quotient element count ${elementCount}`);
+  }
+  if (valuesPacked.byteLength !== vectorCount * vectorBytes) {
+    throw new Error(`PLONK quotient transform expected ${vectorCount * vectorBytes} value bytes, got ${valuesPacked.byteLength}`);
+  }
+  if (scalingPacked.byteLength !== vectorBytes) {
+    throw new Error(`PLONK quotient transform expected ${vectorBytes} scaling bytes, got ${scalingPacked.byteLength}`);
+  }
+
+  const scalingMont = await bridge.fr.toMontgomeryPacked(cloneBytes(scalingPacked));
+  const out = new Uint8Array(valuesPacked.byteLength);
+  await Promise.all(
+    Array.from({ length: vectorCount }, async (_, i) => {
+      const start = i * vectorBytes;
+      const end = start + vectorBytes;
+      const valuesMont = await bridge.fr.toMontgomeryPacked(cloneBytes(valuesPacked.subarray(start, end)));
+      const coeffMont = await bridge.ntt.inversePackedMont(valuesMont);
+      const shiftedCoeffMont = await bridge.fr.mulPackedMont(coeffMont, scalingMont);
+      const shiftedEvalMont = await bridge.ntt.forwardPackedMont(shiftedCoeffMont);
+      const shiftedEvalRegular = await bridge.fr.fromMontgomeryPacked(shiftedEvalMont);
+      out.set(shiftedEvalRegular, start);
+    }),
+  );
+  return out;
+}
+
+async function prewarmQuotientTransformDomain(curve: SupportedCurveID, elementCount: number) {
+  const bridge = assertBridge(curve);
+  if (!Number.isInteger(elementCount) || elementCount <= 0 || (elementCount & (elementCount - 1)) !== 0) {
+    throw new Error(`invalid PLONK quotient prewarm element count ${elementCount}`);
+  }
+  await bridge.ntt.prewarmDomain(elementCount);
+
+  // Trigger the exact packed transform path once so first prove does not pay
+  // shader/domain lazy initialization in quotient_num_coset_0.
+  const zeroVector = new Uint8Array(elementCount * bridge.fr.byteSize);
+  await transformQuotientCoset(curve, zeroVector, zeroVector, 1, elementCount);
+}
+
 export function installPlonkWebGPUBridge(dependencies: BridgeDependencies): void {
   activeBridge = dependencies;
   (globalThis as typeof globalThis & { wnarkPlonkWebGPU?: unknown }).wnarkPlonkWebGPU = {
     init,
     prepareKey,
     msmG1,
+    transformQuotientCoset,
+    prewarmQuotientTransformDomain,
   };
 }
