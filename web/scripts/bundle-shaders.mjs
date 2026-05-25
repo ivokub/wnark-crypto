@@ -21,6 +21,7 @@ const SHADER_PATHS = [
   "/shaders/curves/bn254/fr_arith.wgsl",
   "/shaders/curves/bn254/fr_vector.wgsl",
   "/shaders/curves/bn254/fr_ntt.wgsl",
+  "/shaders/curves/bn254/fr_plonk_quotient.wgsl",
   "/shaders/curves/bn254/g1_io.wgsl",
   "/shaders/curves/bn254/g2_arith.wgsl",
   "/shaders/curves/bn254/g2_io.wgsl",

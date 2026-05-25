@@ -298,6 +298,9 @@ func (pk *BN254ProvingKey) prepareWithCS(spr *cs.SparseR1CS) error {
 	if err := bridgePrewarmQuotientTransformDomain("bn254", int(domain0.Cardinality)); err != nil {
 		return err
 	}
+	if err := bridgePrewarmQuotientEvaluateKernel("bn254"); err != nil {
+		return err
+	}
 	return bridgePrewarmQuotientCanonicalizeDomain("bn254", int(domain1.Cardinality))
 }
 
@@ -1034,6 +1037,121 @@ func (s *instance) evaluateQuotientCoset(
 	return nil
 }
 
+func (s *instance) transformAndEvaluateQuotientCosetWithWebGPU(
+	dynamicIDs []int,
+	scalingVector []fr.Element,
+	staticPolys staticNumeratorPolys,
+	twiddles0 []fr.Element,
+	coset, cosetExpMinusOne, cs, css fr.Element,
+	buf []fr.Element,
+) error {
+	n := int(s.domain0.Cardinality)
+	if len(dynamicIDs) != bn254PlonkQuotientDynamicVectorCount {
+		return fmt.Errorf("webgpu plonk bn254: quotient evaluator expected %d dynamic vectors, got %d", bn254PlonkQuotientDynamicVectorCount, len(dynamicIDs))
+	}
+	if len(scalingVector) != n {
+		return fmt.Errorf("webgpu plonk bn254: quotient scaling vector has %d elements, expected %d", len(scalingVector), n)
+	}
+	if len(twiddles0) != n {
+		return fmt.Errorf("webgpu plonk bn254: quotient twiddle vector has %d elements, expected %d", len(twiddles0), n)
+	}
+	if len(s.precomputedDenominators) != n {
+		return fmt.Errorf("webgpu plonk bn254: quotient denominator vector has %d elements, expected %d", len(s.precomputedDenominators), n)
+	}
+	if len(buf) != n {
+		return fmt.Errorf("webgpu plonk bn254: quotient output has %d elements, expected %d", len(buf), n)
+	}
+
+	vectorBytes := n * bn254FrBytes
+	dynamicPacked := make([]byte, len(dynamicIDs)*vectorBytes)
+	for i, id := range dynamicIDs {
+		if id >= len(s.x) || s.x[id] == nil {
+			return fmt.Errorf("webgpu plonk bn254: missing quotient dynamic polynomial %d", id)
+		}
+		coeffs := s.x[id].Coefficients()
+		if len(coeffs) != n {
+			return fmt.Errorf("webgpu plonk bn254: quotient dynamic polynomial %d has %d coefficients, expected %d", id, len(coeffs), n)
+		}
+		packBN254FrVectorRegularLEInto(dynamicPacked[i*vectorBytes:(i+1)*vectorBytes], coeffs)
+	}
+
+	staticVectors := []*iop.Polynomial{
+		staticPolys.ql,
+		staticPolys.qr,
+		staticPolys.qm,
+		staticPolys.qo,
+		staticPolys.s1,
+		staticPolys.s2,
+		staticPolys.s3,
+	}
+	staticPacked := make([]byte, len(staticVectors)*vectorBytes)
+	for i, p := range staticVectors {
+		if p == nil {
+			return fmt.Errorf("webgpu plonk bn254: missing quotient static polynomial %d", i)
+		}
+		coeffs := p.Coefficients()
+		if len(coeffs) != n {
+			return fmt.Errorf("webgpu plonk bn254: quotient static polynomial %d has %d coefficients, expected %d", i, len(coeffs), n)
+		}
+		packBN254FrVectorRegularLEInto(staticPacked[i*vectorBytes:(i+1)*vectorBytes], coeffs)
+	}
+
+	blinds := [][]fr.Element{
+		s.bp[id_Bl].Coefficients(),
+		s.bp[id_Br].Coefficients(),
+		s.bp[id_Bo].Coefficients(),
+		s.bp[id_Bz].Coefficients(),
+	}
+	blindCoeffCount := 0
+	for _, blind := range blinds {
+		if len(blind) > blindCoeffCount {
+			blindCoeffCount = len(blind)
+		}
+	}
+	blindsPacked := make([]byte, len(blinds)*blindCoeffCount*bn254FrBytes)
+	for i, blind := range blinds {
+		start := i * blindCoeffCount * bn254FrBytes
+		acc := cosetExpMinusOne
+		for j := range blind {
+			var scaled fr.Element
+			scaled.Mul(&blind[j], &acc)
+			writeBN254FrRegularLE(blindsPacked[start+j*bn254FrBytes:start+(j+1)*bn254FrBytes], &scaled)
+			acc.Mul(&acc, &coset)
+		}
+	}
+
+	var lagrangeScale fr.Element
+	lagrangeScale.Mul(&cosetExpMinusOne, &s.domain0.CardinalityInv)
+	scalarsPacked := packBN254FrVectorRegularLEInto(nil, []fr.Element{
+		coset,
+		lagrangeScale,
+		cs,
+		css,
+		s.beta,
+		s.gamma,
+		s.alpha,
+	})
+	outputPacked, err := bridgeTransformAndEvaluateQuotientCoset(
+		"bn254",
+		dynamicPacked,
+		packBN254FrVectorRegularLEInto(nil, scalingVector),
+		staticPacked,
+		packBN254FrVectorRegularLEInto(nil, twiddles0),
+		packBN254FrVectorRegularLEInto(nil, s.precomputedDenominators),
+		blindsPacked,
+		scalarsPacked,
+		n,
+		blindCoeffCount,
+	)
+	if err != nil {
+		return err
+	}
+	if len(outputPacked) != vectorBytes {
+		return fmt.Errorf("webgpu plonk bn254: quotient evaluator returned %d bytes, expected %d", len(outputPacked), vectorBytes)
+	}
+	return unpackBN254FrVectorRegularLEInto(buf, outputPacked)
+}
+
 // deriveGammaAndBeta (copy constraint)
 func (s *instance) deriveGammaAndBeta() error {
 	wWitness, ok := s.fullWitness.Vector().(fr.Vector)
@@ -1441,6 +1559,8 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 	for i := range s.commitmentInfo {
 		commitmentValuePolyIDs = append(commitmentValuePolyIDs, id_Qci+2*i+1)
 	}
+	useFusedQuotientEvaluator := len(commitmentValuePolyIDs) == 0
+	fusedScalingVector := make([]fr.Element, n)
 
 	evalX := make([]*iop.Polynomial, len(s.x))
 	canonicalizeAndScaleGroup := func(ids []int, totalShift fr.Element) error {
@@ -1473,42 +1593,66 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 			}
 			batchInvert(s.precomputedDenominators, bufBatchInvert)
 
-			// bl <- bl *( (s*ωⁱ)ⁿ-1 )s
-			for _, q := range s.bp {
-				cq := q.Coefficients()
-				acc := cosetExponentiatedToNMinusOne
-				for j := 0; j < len(cq); j++ {
-					cq[j].Mul(&cq[j], &acc)
-					acc.Mul(&acc, &shifters[i])
+			if useFusedQuotientEvaluator {
+				currentScalingVector := fusedScalingVector
+				if i == 0 {
+					currentScalingVector = cosetTable
+				} else {
+					fft.BuildExpTable(coset, fusedScalingVector)
 				}
-			}
-			if i == 1 {
-				// we have to update the scalingVector; instead of scaling by
-				// cosets we scale by the twiddles of the large domain.
-				w := s.domain1.Generator
-				scalingVector = make([]fr.Element, n)
-				fft.BuildExpTable(w, scalingVector)
-			}
-
-			if err := s.track(fmt.Sprintf("quotient_num_coset_%d_transform_dynamic", i), func() error {
-				return s.transformGroupToCoset(dynamicPolyIDs, scalingVector)
-			}); err != nil {
-				return err
-			}
-			if len(commitmentValuePolyIDs) > 0 {
-				if err := s.track(fmt.Sprintf("quotient_num_coset_%d_transform_commitment_values", i), func() error {
-					return s.transformGroupToCoset(commitmentValuePolyIDs, scalingVector)
+				if err := s.track(fmt.Sprintf("quotient_num_coset_%d_transform_evaluate", i), func() error {
+					return s.transformAndEvaluateQuotientCosetWithWebGPU(
+						dynamicPolyIDs,
+						currentScalingVector,
+						staticCache.cosets[i],
+						twiddles0,
+						coset,
+						cosetExponentiatedToNMinusOne,
+						cs,
+						css,
+						buf,
+					)
 				}); err != nil {
 					return err
 				}
-			}
+			} else {
+				// bl <- bl *( (s*ωⁱ)ⁿ-1 )s
+				for _, q := range s.bp {
+					cq := q.Coefficients()
+					acc := cosetExponentiatedToNMinusOne
+					for j := 0; j < len(cq); j++ {
+						cq[j].Mul(&cq[j], &acc)
+						acc.Mul(&acc, &shifters[i])
+					}
+				}
+				if i == 1 {
+					// we have to update the scalingVector; instead of scaling by
+					// cosets we scale by the twiddles of the large domain.
+					w := s.domain1.Generator
+					scalingVector = make([]fr.Element, n)
+					fft.BuildExpTable(w, scalingVector)
+				}
 
-			if err := s.track(fmt.Sprintf("quotient_num_coset_%d_evaluate", i), func() error {
-				copy(evalX, s.x)
-				staticCache.cosets[i].applyToEval(evalX)
-				return s.evaluateQuotientCoset(evalX, twiddles0, coset, cosetExponentiatedToNMinusOne, cs, css, buf)
-			}); err != nil {
-				return err
+				if err := s.track(fmt.Sprintf("quotient_num_coset_%d_transform_dynamic", i), func() error {
+					return s.transformGroupToCoset(dynamicPolyIDs, scalingVector)
+				}); err != nil {
+					return err
+				}
+				if len(commitmentValuePolyIDs) > 0 {
+					if err := s.track(fmt.Sprintf("quotient_num_coset_%d_transform_commitment_values", i), func() error {
+						return s.transformGroupToCoset(commitmentValuePolyIDs, scalingVector)
+					}); err != nil {
+						return err
+					}
+				}
+
+				if err := s.track(fmt.Sprintf("quotient_num_coset_%d_evaluate", i), func() error {
+					copy(evalX, s.x)
+					staticCache.cosets[i].applyToEval(evalX)
+					return s.evaluateQuotientCoset(evalX, twiddles0, coset, cosetExponentiatedToNMinusOne, cs, css, buf)
+				}); err != nil {
+					return err
+				}
 			}
 
 			for j := 0; j < int(n); j++ {
@@ -1516,13 +1660,15 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 				cres[bits.Reverse64(uint64(rho*j+i))>>mm] = buf[j]
 			}
 
-			cosetExponentiatedToNMinusOne.
-				Inverse(&cosetExponentiatedToNMinusOne)
-			// bl <- bl *( (s*ωⁱ)ⁿ-1 )**-1
-			for _, q := range s.bp {
-				cq := q.Coefficients()
-				for j := 0; j < len(cq); j++ {
-					cq[j].Mul(&cq[j], &cosetExponentiatedToNMinusOne)
+			if !useFusedQuotientEvaluator {
+				cosetExponentiatedToNMinusOne.
+					Inverse(&cosetExponentiatedToNMinusOne)
+				// bl <- bl *( (s*ωⁱ)ⁿ-1 )**-1
+				for _, q := range s.bp {
+					cq := q.Coefficients()
+					for j := 0; j < len(cq); j++ {
+						cq[j].Mul(&cq[j], &cosetExponentiatedToNMinusOne)
+					}
 				}
 			}
 
@@ -1534,26 +1680,41 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 
 	// scale everything back
 	var totalShift fr.Element
-	s.x[id_ZS] = nil
-	s.x[id_Qk] = nil
+	if err := s.track("quotient_num_final_canonicalize", func() error {
+		s.x[id_ZS] = nil
+		s.x[id_Qk] = nil
 
-		totalShift.Set(&shifters[0])
-		for i := 1; i < len(shifters); i++ {
-			totalShift.Mul(&totalShift, &shifters[i])
+		if useFusedQuotientEvaluator {
+			totalShift.SetOne()
+		} else {
+			totalShift.Set(&shifters[0])
+			for i := 1; i < len(shifters); i++ {
+				totalShift.Mul(&totalShift, &shifters[i])
+			}
+			totalShift.Inverse(&totalShift)
 		}
-		totalShift.Inverse(&totalShift)
 
-		canonicalizeAndScaleGroup(dynamicPolyIDs, totalShift)
+		if err := s.track("quotient_num_final_canonicalize_dynamic", func() error {
+			return canonicalizeAndScaleGroup(dynamicPolyIDs, totalShift)
+		}); err != nil {
+			return err
+		}
 		if len(commitmentValuePolyIDs) > 0 {
-			canonicalizeAndScaleGroup(commitmentValuePolyIDs, totalShift)
+			if err := s.track("quotient_num_final_canonicalize_commitment_values", func() error {
+				return canonicalizeAndScaleGroup(commitmentValuePolyIDs, totalShift)
+			}); err != nil {
+				return err
+			}
 		}
 		return nil
 	}); err != nil {
 		return nil, err
 	}
 
-	for _, q := range s.bp {
-		scalePowers(q, totalShift)
+	if !useFusedQuotientEvaluator {
+		for _, q := range s.bp {
+			scalePowers(q, totalShift)
+		}
 	}
 
 	res := iop.NewPolynomial(&cres, iop.Form{Basis: iop.LagrangeCoset, Layout: iop.BitReverse})
