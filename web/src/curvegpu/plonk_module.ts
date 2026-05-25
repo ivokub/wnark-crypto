@@ -14,6 +14,7 @@ import type {
   PlonkVerificationKey,
   SupportedCurveID,
 } from "./api.js";
+import type { PlonkQuotientModule } from "./plonk_quotient_module.js";
 import { installPlonkWebGPUBridge } from "./plonk_webgpu_bridge.js";
 
 type GoInstance = {
@@ -40,6 +41,7 @@ type PlonkModuleConfig = {
   frBytes: number;
   fr: FieldModule;
   ntt: NTTModule;
+  quotient: PlonkQuotientModule;
   g1: G1Module;
   g1msm: G1MSMModule;
 };
@@ -245,6 +247,7 @@ export function createPlonkModule(config: PlonkModuleConfig): PlonkModule {
       curve: config.curve,
       fr: config.fr,
       ntt: config.ntt,
+      quotient: config.quotient,
       g1: config.g1,
       g1msm: config.g1msm,
     });

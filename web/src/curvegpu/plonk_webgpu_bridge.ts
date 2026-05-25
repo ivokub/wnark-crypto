@@ -1,13 +1,5 @@
 import type { CurveGPUContext, FieldModule, G1Module, G1MSMModule, NTTModule, SupportedCurveID } from "./api.js";
-import {
-  createSimpleStorageBuffer,
-  createSimpleStorageBufferFromBytes,
-  createSimpleUniformBuffer,
-  loadShaderParts,
-  readbackSimpleBuffer,
-} from "./runtime_common.js";
-
-declare const GPUShaderStage: { COMPUTE: number };
+import type { PlonkQuotientModule } from "./plonk_quotient_module.js";
 
 const CURVE_CONFIG: Record<SupportedCurveID, {
   g1CoordinateBytes: number;
@@ -34,6 +26,7 @@ type BridgeDependencies = {
   ntt: NTTModule;
   g1: G1Module;
   g1msm: G1MSMModule;
+  quotient: PlonkQuotientModule;
 };
 
 type CachedKey = {
@@ -44,30 +37,9 @@ type CachedKey = {
   kzgLagrangeCount: number;
 };
 
-type PlonkQuotientKernel = {
-  device: GPUDevice;
-  pipeline: GPUComputePipeline;
-  bindGroupLayout: GPUBindGroupLayout;
-  workgroupSize: number;
-};
-
 let activeBridge: BridgeDependencies | null = null;
 let nextHandle = 1;
 const keyCache = new Map<string, CachedKey>();
-let bn254QuotientKernel: PlonkQuotientKernel | null = null;
-
-const PLONK_QUOTIENT_DYNAMIC_VECTOR_COUNT = 5;
-const PLONK_QUOTIENT_STATIC_VECTOR_COUNT = 7;
-const PLONK_QUOTIENT_VECTOR_COUNT = 14;
-const PLONK_QUOTIENT_BLIND_COUNT = 4;
-const PLONK_QUOTIENT_SCALAR_COUNT = 7;
-const PLONK_QUOTIENT_WORKGROUP_SIZE = 64;
-const BN254_PLONK_QUOTIENT_SHADER_PARTS = [
-  "/shaders/curves/bn254/fr_arith.wgsl#section=fr_types",
-  "/shaders/curves/bn254/fr_arith.wgsl#section=fr_constants",
-  "/shaders/curves/bn254/fr_arith.wgsl#section=fr_core",
-  "/shaders/curves/bn254/fr_plonk_quotient.wgsl",
-];
 
 function cloneBytes(bytes: Uint8Array): Uint8Array {
   return new Uint8Array(bytes);
@@ -89,52 +61,6 @@ function getKey(handle: string): CachedKey {
     throw new Error(`unknown PLONK key handle ${handle}`);
   }
   return entry;
-}
-
-async function getBN254QuotientKernel(bridge: BridgeDependencies): Promise<PlonkQuotientKernel> {
-  if (bridge.curve !== "bn254") {
-    throw new Error(`PLONK quotient WebGPU evaluator only supports bn254, got ${bridge.curve}`);
-  }
-  const device = bridge.context.device;
-  if (bn254QuotientKernel?.device === device) {
-    return bn254QuotientKernel;
-  }
-
-  const bindGroupLayout = device.createBindGroupLayout({
-    label: "plonk-bn254-quotient-bgl",
-    entries: [
-      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
-      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
-      { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
-      { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
-      { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-    ],
-  });
-  const pipelineLayout = device.createPipelineLayout({
-    label: "plonk-bn254-quotient-pl",
-    bindGroupLayouts: [bindGroupLayout],
-  });
-  const code = await loadShaderParts(BN254_PLONK_QUOTIENT_SHADER_PARTS);
-  const shader = device.createShaderModule({
-    label: "plonk-bn254-quotient-shader",
-    code,
-  });
-  const pipeline = await device.createComputePipelineAsync({
-    label: "plonk-bn254-quotient",
-    layout: pipelineLayout,
-    compute: {
-      module: shader,
-      entryPoint: "fr_plonk_quotient_main",
-      constants: { WORKGROUP_SIZE: PLONK_QUOTIENT_WORKGROUP_SIZE },
-    },
-  });
-  bn254QuotientKernel = {
-    device,
-    pipeline,
-    bindGroupLayout,
-    workgroupSize: PLONK_QUOTIENT_WORKGROUP_SIZE,
-  };
-  return bn254QuotientKernel;
 }
 
 function unpackG1JacobianPoint(curve: SupportedCurveID, packedPoint: Uint8Array) {
@@ -417,58 +343,6 @@ async function canonicalizeQuotientVectors(
   return out;
 }
 
-async function runQuotientKernelMont(
-  bridge: BridgeDependencies,
-  vectorsMontPacked: Uint8Array,
-  blindsMontPacked: Uint8Array,
-  scalarsMontPacked: Uint8Array,
-  elementCount: number,
-  blindCoeffCount: number,
-) {
-  const elementBytes = bridge.fr.byteSize;
-  const vectorBytes = elementCount * elementBytes;
-  const device = bridge.context.device;
-  const kernel = await getBN254QuotientKernel(bridge);
-  const vectorsBuffer = createSimpleStorageBufferFromBytes(device, "plonk-quotient-vectors", vectorsMontPacked);
-  const blindsBuffer = createSimpleStorageBufferFromBytes(device, "plonk-quotient-blinds", blindsMontPacked);
-  const scalarsBuffer = createSimpleStorageBufferFromBytes(device, "plonk-quotient-scalars", scalarsMontPacked);
-  const outputBuffer = createSimpleStorageBuffer(device, "plonk-quotient-output", vectorBytes);
-  const paramsBuffer = createSimpleUniformBuffer(
-    device,
-    "plonk-quotient-params",
-    new Uint32Array([elementCount, blindCoeffCount, 0, 0]),
-  );
-
-  try {
-    const bindGroup = device.createBindGroup({
-      label: "plonk-quotient-bg",
-      layout: kernel.bindGroupLayout,
-      entries: [
-        { binding: 0, resource: { buffer: vectorsBuffer } },
-        { binding: 1, resource: { buffer: blindsBuffer } },
-        { binding: 2, resource: { buffer: scalarsBuffer } },
-        { binding: 3, resource: { buffer: outputBuffer } },
-        { binding: 4, resource: { buffer: paramsBuffer } },
-      ],
-    });
-    const encoder = device.createCommandEncoder({ label: "plonk-quotient-encoder" });
-    const pass = encoder.beginComputePass({ label: "plonk-quotient-pass" });
-    pass.setPipeline(kernel.pipeline);
-    pass.setBindGroup(0, bindGroup);
-    pass.dispatchWorkgroups(Math.ceil(elementCount / kernel.workgroupSize), 1, 1);
-    pass.end();
-    device.queue.submit([encoder.finish()]);
-    await device.queue.onSubmittedWorkDone();
-    return await readbackSimpleBuffer(device, outputBuffer, vectorBytes, "plonk-quotient");
-  } finally {
-    vectorsBuffer.destroy();
-    blindsBuffer.destroy();
-    scalarsBuffer.destroy();
-    outputBuffer.destroy();
-    paramsBuffer.destroy();
-  }
-}
-
 async function transformAndEvaluateQuotientCoset(
   curve: SupportedCurveID,
   dynamicValuesPacked: Uint8Array,
@@ -480,69 +354,21 @@ async function transformAndEvaluateQuotientCoset(
   scalarsPacked: Uint8Array,
   elementCount: number,
   blindCoeffCount: number,
+  commitmentCount: number,
 ) {
   const bridge = assertBridge(curve);
-  const elementBytes = bridge.fr.byteSize;
-  const vectorBytes = elementCount * elementBytes;
-  if (!Number.isInteger(elementCount) || elementCount <= 0 || (elementCount & (elementCount - 1)) !== 0) {
-    throw new Error(`invalid PLONK quotient evaluate element count ${elementCount}`);
-  }
-  if (!Number.isInteger(blindCoeffCount) || blindCoeffCount < 0) {
-    throw new Error(`invalid PLONK quotient blind coefficient count ${blindCoeffCount}`);
-  }
-  if (dynamicValuesPacked.byteLength !== PLONK_QUOTIENT_DYNAMIC_VECTOR_COUNT * vectorBytes) {
-    throw new Error(
-      `PLONK quotient transform/evaluate expected ${PLONK_QUOTIENT_DYNAMIC_VECTOR_COUNT * vectorBytes} dynamic bytes, got ${dynamicValuesPacked.byteLength}`,
-    );
-  }
-  if (scalingPacked.byteLength !== vectorBytes) {
-    throw new Error(`PLONK quotient transform/evaluate expected ${vectorBytes} scaling bytes, got ${scalingPacked.byteLength}`);
-  }
-  if (staticValuesPacked.byteLength !== PLONK_QUOTIENT_STATIC_VECTOR_COUNT * vectorBytes) {
-    throw new Error(
-      `PLONK quotient transform/evaluate expected ${PLONK_QUOTIENT_STATIC_VECTOR_COUNT * vectorBytes} static bytes, got ${staticValuesPacked.byteLength}`,
-    );
-  }
-  if (twiddlesPacked.byteLength !== vectorBytes) {
-    throw new Error(`PLONK quotient transform/evaluate expected ${vectorBytes} twiddle bytes, got ${twiddlesPacked.byteLength}`);
-  }
-  if (denominatorsPacked.byteLength !== vectorBytes) {
-    throw new Error(`PLONK quotient transform/evaluate expected ${vectorBytes} denominator bytes, got ${denominatorsPacked.byteLength}`);
-  }
-  const blindBytes = PLONK_QUOTIENT_BLIND_COUNT * blindCoeffCount * elementBytes;
-  if (blindsPacked.byteLength !== blindBytes) {
-    throw new Error(`PLONK quotient transform/evaluate expected ${blindBytes} blinding bytes, got ${blindsPacked.byteLength}`);
-  }
-  const scalarBytes = PLONK_QUOTIENT_SCALAR_COUNT * elementBytes;
-  if (scalarsPacked.byteLength !== scalarBytes) {
-    throw new Error(`PLONK quotient transform/evaluate expected ${scalarBytes} scalar bytes, got ${scalarsPacked.byteLength}`);
-  }
-
-  const vectorsMontPacked = new Uint8Array(PLONK_QUOTIENT_VECTOR_COUNT * vectorBytes);
-  const scalingMont = await bridge.fr.toMontgomeryPacked(cloneBytes(scalingPacked));
-  await Promise.all(
-    Array.from({ length: PLONK_QUOTIENT_DYNAMIC_VECTOR_COUNT }, async (_, i) => {
-      const start = i * vectorBytes;
-      const end = start + vectorBytes;
-      const valuesMont = await bridge.fr.toMontgomeryPacked(cloneBytes(dynamicValuesPacked.subarray(start, end)));
-      const coeffMont = await bridge.ntt.inversePackedMont(valuesMont);
-      const shiftedCoeffMont = await bridge.fr.mulPackedMont(coeffMont, scalingMont);
-      vectorsMontPacked.set(await bridge.ntt.forwardPackedMont(shiftedCoeffMont), start);
-    }),
-  );
-
-  const [staticMont, twiddlesMont, denominatorsMont, blindsMont, scalarsMont] = await Promise.all([
-    bridge.fr.toMontgomeryPacked(cloneBytes(staticValuesPacked)),
-    bridge.fr.toMontgomeryPacked(cloneBytes(twiddlesPacked)),
-    bridge.fr.toMontgomeryPacked(cloneBytes(denominatorsPacked)),
-    bridge.fr.toMontgomeryPacked(cloneBytes(blindsPacked)),
-    bridge.fr.toMontgomeryPacked(cloneBytes(scalarsPacked)),
-  ]);
-
-  vectorsMontPacked.set(staticMont, PLONK_QUOTIENT_DYNAMIC_VECTOR_COUNT * vectorBytes);
-  vectorsMontPacked.set(twiddlesMont, (PLONK_QUOTIENT_DYNAMIC_VECTOR_COUNT + PLONK_QUOTIENT_STATIC_VECTOR_COUNT) * vectorBytes);
-  vectorsMontPacked.set(denominatorsMont, (PLONK_QUOTIENT_DYNAMIC_VECTOR_COUNT + PLONK_QUOTIENT_STATIC_VECTOR_COUNT + 1) * vectorBytes);
-  return runQuotientKernelMont(bridge, vectorsMontPacked, blindsMont, scalarsMont, elementCount, blindCoeffCount);
+  return bridge.quotient.transformAndEvaluateQuotientCoset({
+    dynamicValuesPacked,
+    scalingPacked,
+    staticValuesPacked,
+    twiddlesPacked,
+    denominatorsPacked,
+    blindsPacked,
+    scalarsPacked,
+    elementCount,
+    blindCoeffCount,
+    commitmentCount,
+  });
 }
 
 async function prewarmQuotientTransformDomain(curve: SupportedCurveID, elementCount: number) {
@@ -569,9 +395,9 @@ async function prewarmQuotientCanonicalizeDomain(curve: SupportedCurveID, elemen
   await canonicalizeQuotientFromCoset(curve, zeroVector, elementCount);
 }
 
-async function prewarmQuotientEvaluateKernel(curve: SupportedCurveID) {
+async function prewarmQuotientEvaluateKernel(curve: SupportedCurveID, commitmentCount = 0) {
   const bridge = assertBridge(curve);
-  await getBN254QuotientKernel(bridge);
+  await bridge.quotient.prewarmPlonkQuotientEvaluateKernel(commitmentCount);
 }
 
 export function installPlonkWebGPUBridge(dependencies: BridgeDependencies): void {
