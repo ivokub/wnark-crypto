@@ -333,15 +333,18 @@ override WORKGROUP_SIZE: u32 = 64;
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn fr_ntt_stage_main(@builtin(global_invocation_id) id: vec3<u32>) {
   let pair = id.x;
+  let vector = id.y;
   let half_count = params.count / 2u;
-  if (pair >= half_count) {
+  let batch_count = max(params._pad0, 1u);
+  if (pair >= half_count || vector >= batch_count) {
     return;
   }
 
   let m = params.m;
   let j = pair % m;
   let block = pair / m;
-  let left_index = block * 2u * m + j;
+  let vector_base = vector * params.count;
+  let left_index = vector_base + block * 2u * m + j;
   let right_index = left_index + m;
 
   let left = fr_load_from(0u, left_index);

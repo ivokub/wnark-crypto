@@ -40,6 +40,8 @@ export type PlonkTransformAndEvaluateQuotientCosetInput = {
   elementCount: number;
   blindCoeffCount: number;
   commitmentCount: number;
+  dynamicTransformCacheKey?: number;
+  staticMontCacheKey?: number;
 };
 
 export type PlonkQuotientModule = {
@@ -53,6 +55,14 @@ function cloneBytes(bytes: Uint8Array): Uint8Array {
   return new Uint8Array(bytes);
 }
 
+function repeatPackedVector(value: Uint8Array, count: number): Uint8Array {
+  const out = new Uint8Array(value.byteLength * count);
+  for (let i = 0; i < count; i += 1) {
+    out.set(value, i * value.byteLength);
+  }
+  return out;
+}
+
 export function createPlonkQuotientModule(config: {
   context: CurveGPUContext;
   curve: SupportedCurveID;
@@ -61,6 +71,22 @@ export function createPlonkQuotientModule(config: {
 }): PlonkQuotientModule {
   const { context, curve, fr, ntt } = config;
   const quotientKernels = new Map<number, PlonkQuotientKernel>();
+  let dynamicTransformCache:
+    | {
+        key: number;
+        elementCount: number;
+        dynamicVectorCount: number;
+        coeffMont: Uint8Array;
+      }
+    | null = null;
+  const staticMontCache = new Map<
+    number,
+    {
+      elementCount: number;
+      staticVectorCount: number;
+      mont: Uint8Array;
+    }
+  >();
 
   async function getQuotientKernel(commitmentCount: number): Promise<PlonkQuotientKernel> {
     if (curve !== "bn254") {
@@ -180,6 +206,8 @@ export function createPlonkQuotientModule(config: {
       elementCount,
       blindCoeffCount,
       commitmentCount,
+      dynamicTransformCacheKey = 0,
+      staticMontCacheKey = 0,
     } = input;
     const elementBytes = fr.byteSize;
     const vectorBytes = elementCount * elementBytes;
@@ -196,17 +224,30 @@ export function createPlonkQuotientModule(config: {
     const dynamicVectorCount = PLONK_QUOTIENT_BASE_DYNAMIC_VECTOR_COUNT + commitmentCount;
     const staticVectorCount = PLONK_QUOTIENT_BASE_STATIC_VECTOR_COUNT + commitmentCount;
     const vectorCount = dynamicVectorCount + staticVectorCount + 2;
-    if (dynamicValuesPacked.byteLength !== dynamicVectorCount * vectorBytes) {
+    const expectedDynamicBytes = dynamicVectorCount * vectorBytes;
+    const canReuseDynamicCache =
+      dynamicTransformCacheKey > 0 &&
+      dynamicTransformCache?.key === dynamicTransformCacheKey &&
+      dynamicTransformCache.elementCount === elementCount &&
+      dynamicTransformCache.dynamicVectorCount === dynamicVectorCount;
+    const cachedDynamicCoeffMont = canReuseDynamicCache ? dynamicTransformCache?.coeffMont : undefined;
+    if (dynamicValuesPacked.byteLength !== expectedDynamicBytes && !(dynamicValuesPacked.byteLength === 0 && canReuseDynamicCache)) {
       throw new Error(
-        `PLONK quotient transform/evaluate expected ${dynamicVectorCount * vectorBytes} dynamic bytes, got ${dynamicValuesPacked.byteLength}`,
+        `PLONK quotient transform/evaluate expected ${expectedDynamicBytes} dynamic bytes, got ${dynamicValuesPacked.byteLength}`,
       );
     }
     if (scalingPacked.byteLength !== vectorBytes) {
       throw new Error(`PLONK quotient transform/evaluate expected ${vectorBytes} scaling bytes, got ${scalingPacked.byteLength}`);
     }
-    if (staticValuesPacked.byteLength !== staticVectorCount * vectorBytes) {
+    const expectedStaticBytes = staticVectorCount * vectorBytes;
+    const cachedStatic = staticMontCacheKey > 0 ? staticMontCache.get(staticMontCacheKey) : undefined;
+    const canReuseStaticCache =
+      staticMontCacheKey > 0 &&
+      cachedStatic?.elementCount === elementCount &&
+      cachedStatic.staticVectorCount === staticVectorCount;
+    if (staticValuesPacked.byteLength !== expectedStaticBytes && !(staticValuesPacked.byteLength === 0 && canReuseStaticCache)) {
       throw new Error(
-        `PLONK quotient transform/evaluate expected ${staticVectorCount * vectorBytes} static bytes, got ${staticValuesPacked.byteLength}`,
+        `PLONK quotient transform/evaluate expected ${expectedStaticBytes} static bytes, got ${staticValuesPacked.byteLength}`,
       );
     }
     if (twiddlesPacked.byteLength !== vectorBytes) {
@@ -225,20 +266,42 @@ export function createPlonkQuotientModule(config: {
     }
 
     const vectorsMontPacked = new Uint8Array(vectorCount * vectorBytes);
+    const dynamicCoeffMont =
+      cachedDynamicCoeffMont
+        ? cachedDynamicCoeffMont
+        : await (async (): Promise<Uint8Array> => {
+            const dynamicMont = await fr.toMontgomeryPacked(cloneBytes(dynamicValuesPacked));
+            const coeffMont = await ntt.inversePackedMontBatch(dynamicMont, elementCount, dynamicVectorCount);
+            if (dynamicTransformCacheKey > 0) {
+              dynamicTransformCache = {
+                key: dynamicTransformCacheKey,
+                elementCount,
+                dynamicVectorCount,
+                coeffMont,
+              };
+            }
+            return coeffMont;
+          })();
     const scalingMont = await fr.toMontgomeryPacked(cloneBytes(scalingPacked));
-    await Promise.all(
-      Array.from({ length: dynamicVectorCount }, async (_, i) => {
-        const start = i * vectorBytes;
-        const end = start + vectorBytes;
-        const valuesMont = await fr.toMontgomeryPacked(cloneBytes(dynamicValuesPacked.subarray(start, end)));
-        const coeffMont = await ntt.inversePackedMont(valuesMont);
-        const shiftedCoeffMont = await fr.mulPackedMont(coeffMont, scalingMont);
-        vectorsMontPacked.set(await ntt.forwardPackedMont(shiftedCoeffMont), start);
-      }),
-    );
+    const scalingMontBatch = repeatPackedVector(scalingMont, dynamicVectorCount);
+    const shiftedCoeffMont = await fr.mulPackedMont(dynamicCoeffMont, scalingMontBatch);
+    vectorsMontPacked.set(await ntt.forwardPackedMontBatch(shiftedCoeffMont, elementCount, dynamicVectorCount));
 
+    const cachedStaticMont = canReuseStaticCache ? cachedStatic?.mont : undefined;
+    const staticMontPromise = cachedStaticMont
+      ? Promise.resolve(cachedStaticMont)
+      : fr.toMontgomeryPacked(cloneBytes(staticValuesPacked)).then((mont) => {
+          if (staticMontCacheKey > 0) {
+            staticMontCache.set(staticMontCacheKey, {
+              elementCount,
+              staticVectorCount,
+              mont,
+            });
+          }
+          return mont;
+        });
     const [staticMont, twiddlesMont, denominatorsMont, blindsMont, scalarsMont] = await Promise.all([
-      fr.toMontgomeryPacked(cloneBytes(staticValuesPacked)),
+      staticMontPromise,
       fr.toMontgomeryPacked(cloneBytes(twiddlesPacked)),
       fr.toMontgomeryPacked(cloneBytes(denominatorsPacked)),
       fr.toMontgomeryPacked(cloneBytes(blindsPacked)),

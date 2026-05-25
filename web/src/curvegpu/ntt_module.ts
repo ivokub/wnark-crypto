@@ -97,6 +97,14 @@ function repeatPackedElement(value: Uint8Array, count: number): Uint8Array {
   return out;
 }
 
+function repeatPackedVector(value: Uint8Array, count: number): Uint8Array {
+  const out = new Uint8Array(value.byteLength * count);
+  for (let i = 0; i < count; i += 1) {
+    out.set(value, i * value.byteLength);
+  }
+  return out;
+}
+
 function buildPowerVectorPackedRegular(base: bigint, count: number, modulus: bigint, elementBytes: number): Uint8Array {
   const out = new Uint8Array(count * elementBytes);
   let acc = 1n;
@@ -234,25 +242,43 @@ export function createNTTModule(
     });
   }
 
-  async function runPipelinePacked(options: {
+  async function runPipelinePackedBatch(options: {
     values: Uint8Array;
+    vectorSize: number;
+    vectorCount: number;
     inverse: boolean;
     inputRegular: boolean;
     outputRegular: boolean;
     inputBitReversed?: boolean;
     inverseCoset?: boolean;
   }): Promise<Uint8Array> {
-    const { values, inverse, inputRegular, outputRegular, inputBitReversed = false, inverseCoset = false } = options;
+    const {
+      values,
+      vectorSize,
+      vectorCount,
+      inverse,
+      inputRegular,
+      outputRegular,
+      inputBitReversed = false,
+      inverseCoset = false,
+    } = options;
     if (inverseCoset && !inverse) {
       throw new Error(`${label}: inverseCoset requires inverse NTT`);
     }
-    const count = ensurePackedElements(values, elementBytes, `${label}.pipeline.values`);
-    if (count === 0 || (count & (count - 1)) !== 0) {
+    if (!Number.isInteger(vectorSize) || vectorSize <= 0 || (vectorSize & (vectorSize - 1)) !== 0) {
       throw new Error(`${label}: NTT input length must be a non-zero power of two`);
     }
+    if (!Number.isInteger(vectorCount) || vectorCount <= 0) {
+      throw new Error(`${label}: NTT vector count must be positive`);
+    }
+    const totalCount = ensurePackedElements(values, elementBytes, `${label}.pipeline.values`);
+    const expectedCount = vectorSize * vectorCount;
+    if (totalCount !== expectedCount) {
+      throw new Error(`${label}: expected ${expectedCount} packed elements, got ${totalCount}`);
+    }
 
-    const totalBytes = count * elementBytes;
-    const domain = await prepareDomain(count);
+    const totalBytes = totalCount * elementBytes;
+    const domain = await prepareDomain(vectorSize);
     const [fieldKernel, vectorKernel, nttKernel] = await Promise.all([getFieldKernel(), getVectorKernel(), getNTTKernel()]);
     const zeroAux = createSimpleStorageBufferFromBytes(
       context.device,
@@ -284,7 +310,30 @@ export function createNTTModule(
       const uniform = createSimpleUniformBuffer(context.device, `${opLabel}-params`, uniformWords);
       try {
         const bindGroup = createSimpleBindGroup(context.device, kernel, `${opLabel}-bg`, inputA, inputB, output, uniform);
-        await submitSimpleKernel(context.device, kernel, bindGroup, Math.ceil(count / kernel.workgroupSize), opLabel);
+        await submitSimpleKernel(context.device, kernel, bindGroup, Math.ceil(totalCount / kernel.workgroupSize), opLabel);
+      } finally {
+        uniform.destroy();
+      }
+    };
+
+    const dispatchNTTStage = async (
+      inputA: GPUBuffer,
+      twiddles: GPUBuffer,
+      output: GPUBuffer,
+      uniformWords: Uint32Array,
+      opLabel: string,
+    ): Promise<void> => {
+      const uniform = createSimpleUniformBuffer(context.device, `${opLabel}-params`, uniformWords);
+      try {
+        const bindGroup = createSimpleBindGroup(context.device, nttKernel, `${opLabel}-bg`, inputA, twiddles, output, uniform);
+        const encoder = context.device.createCommandEncoder({ label: `${opLabel}-encoder` });
+        const pass = encoder.beginComputePass({ label: `${opLabel}-pass` });
+        pass.setPipeline(nttKernel.pipeline);
+        pass.setBindGroup(0, bindGroup);
+        pass.dispatchWorkgroups(Math.ceil((vectorSize / 2) / nttKernel.workgroupSize), vectorCount, 1);
+        pass.end();
+        context.device.queue.submit([encoder.finish()]);
+        await context.device.queue.onSubmittedWorkDone();
       } finally {
         uniform.destroy();
       }
@@ -303,7 +352,7 @@ export function createNTTModule(
           current,
           zeroAux,
           next,
-          Uint32Array.from([count, FIELD_OP_TO_MONT, 0, 0, 0, 0, 0, 0]),
+          Uint32Array.from([totalCount, FIELD_OP_TO_MONT, 0, 0, 0, 0, 0, 0]),
           `${label}-to-mont`,
         );
         swap();
@@ -315,7 +364,7 @@ export function createNTTModule(
           current,
           zeroAux,
           next,
-          Uint32Array.from([count, VECTOR_OP_BIT_REVERSE_COPY, Math.round(Math.log2(count)), 0, 0, 0, 0, 0]),
+          Uint32Array.from([totalCount, VECTOR_OP_BIT_REVERSE_COPY, Math.round(Math.log2(vectorSize)), vectorSize, 0, 0, 0, 0]),
           `${label}-bit-reverse`,
         );
         swap();
@@ -330,12 +379,11 @@ export function createNTTModule(
           GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         );
         try {
-          await dispatch(
-            nttKernel,
+          await dispatchNTTStage(
             current,
             twiddleBuffer,
             next,
-            Uint32Array.from([count, 1 << stage, inverse ? 1 : 0, 0, 0, 0, 0, 0]),
+            Uint32Array.from([vectorSize, 1 << stage, vectorCount, inverse ? 1 : 0, 0, 0, 0, 0]),
             `${label}-stage-${stage}-${inverse ? "inv" : "fwd"}`,
           );
         } finally {
@@ -345,10 +393,12 @@ export function createNTTModule(
       }
 
       if (inverse) {
+        const inverseScaleFactorsPackedMont =
+          vectorCount === 1 ? domain.inverseScaleFactorsPackedMont : repeatPackedVector(domain.inverseScaleFactorsPackedMont, vectorCount);
         const factorBuffer = createSimpleStorageBufferFromBytes(
           context.device,
           `${label}-inverse-scale`,
-          domain.inverseScaleFactorsPackedMont,
+          inverseScaleFactorsPackedMont,
           GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         );
         try {
@@ -357,7 +407,7 @@ export function createNTTModule(
             current,
             factorBuffer,
             next,
-            Uint32Array.from([count, VECTOR_OP_MUL_FACTORS, 0, 0, 0, 0, 0, 0]),
+            Uint32Array.from([totalCount, VECTOR_OP_MUL_FACTORS, 0, 0, 0, 0, 0, 0]),
             `${label}-inverse-scale`,
           );
         } finally {
@@ -367,10 +417,12 @@ export function createNTTModule(
       }
 
       if (inverseCoset) {
+        const inverseCosetPowersPackedMont =
+          vectorCount === 1 ? domain.inverseCosetPowersPackedMont : repeatPackedVector(domain.inverseCosetPowersPackedMont, vectorCount);
         const factorBuffer = createSimpleStorageBufferFromBytes(
           context.device,
           `${label}-inverse-coset-scale`,
-          domain.inverseCosetPowersPackedMont,
+          inverseCosetPowersPackedMont,
           GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         );
         try {
@@ -379,7 +431,7 @@ export function createNTTModule(
             current,
             factorBuffer,
             next,
-            Uint32Array.from([count, VECTOR_OP_MUL_FACTORS, 0, 0, 0, 0, 0, 0]),
+            Uint32Array.from([totalCount, VECTOR_OP_MUL_FACTORS, 0, 0, 0, 0, 0, 0]),
             `${label}-inverse-coset-scale`,
           );
         } finally {
@@ -394,7 +446,7 @@ export function createNTTModule(
           current,
           zeroAux,
           next,
-          Uint32Array.from([count, FIELD_OP_FROM_MONT, 0, 0, 0, 0, 0, 0]),
+          Uint32Array.from([totalCount, FIELD_OP_FROM_MONT, 0, 0, 0, 0, 0, 0]),
           `${label}-from-mont`,
         );
         swap();
@@ -406,6 +458,22 @@ export function createNTTModule(
       current.destroy();
       next.destroy();
     }
+  }
+
+  async function runPipelinePacked(options: {
+    values: Uint8Array;
+    inverse: boolean;
+    inputRegular: boolean;
+    outputRegular: boolean;
+    inputBitReversed?: boolean;
+    inverseCoset?: boolean;
+  }): Promise<Uint8Array> {
+    const count = ensurePackedElements(options.values, elementBytes, `${label}.pipeline.values`);
+    return runPipelinePackedBatch({
+      ...options,
+      vectorSize: count,
+      vectorCount: 1,
+    });
   }
 
   async function computeGroth16QuotientPacked(
@@ -512,6 +580,12 @@ export function createNTTModule(
     },
     async inversePackedMont(values: Uint8Array): Promise<Uint8Array> {
       return runPipelinePacked({ values, inverse: true, inputRegular: false, outputRegular: false });
+    },
+    async forwardPackedMontBatch(values: Uint8Array, vectorSize: number, vectorCount: number): Promise<Uint8Array> {
+      return runPipelinePackedBatch({ values, vectorSize, vectorCount, inverse: false, inputRegular: false, outputRegular: false });
+    },
+    async inversePackedMontBatch(values: Uint8Array, vectorSize: number, vectorCount: number): Promise<Uint8Array> {
+      return runPipelinePackedBatch({ values, vectorSize, vectorCount, inverse: true, inputRegular: false, outputRegular: false });
     },
     async inverseBitReversePackedRegular(values: Uint8Array): Promise<Uint8Array> {
       return runPipelinePacked({

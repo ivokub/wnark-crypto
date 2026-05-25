@@ -417,6 +417,10 @@ export interface NTTModule {
   forwardPackedMont(values: Uint8Array): Promise<Uint8Array>;
   /** Run the inverse NTT over packed Montgomery-form field elements. */
   inversePackedMont(values: Uint8Array): Promise<Uint8Array>;
+  /** Run forward NTTs over packed Montgomery-form vectors of equal size. */
+  forwardPackedMontBatch(values: Uint8Array, vectorSize: number, vectorCount: number): Promise<Uint8Array>;
+  /** Run inverse NTTs over packed Montgomery-form vectors of equal size. */
+  inversePackedMontBatch(values: Uint8Array, vectorSize: number, vectorCount: number): Promise<Uint8Array>;
   /**
    * Convert packed regular little-endian values from bit-reversed Lagrange
    * coset form to canonical regular form.

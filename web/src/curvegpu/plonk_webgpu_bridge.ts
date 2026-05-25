@@ -355,6 +355,8 @@ async function transformAndEvaluateQuotientCoset(
   elementCount: number,
   blindCoeffCount: number,
   commitmentCount: number,
+  dynamicTransformCacheKey: number,
+  staticMontCacheKey: number,
 ) {
   const bridge = assertBridge(curve);
   return bridge.quotient.transformAndEvaluateQuotientCoset({
@@ -368,6 +370,8 @@ async function transformAndEvaluateQuotientCoset(
     elementCount,
     blindCoeffCount,
     commitmentCount,
+    dynamicTransformCacheKey,
+    staticMontCacheKey,
   });
 }
 

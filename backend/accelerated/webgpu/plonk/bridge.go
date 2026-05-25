@@ -118,7 +118,7 @@ func bridgeLagrangeQuotientVectors(curve string, valuesPacked []byte, vectorCoun
 func bridgeTransformAndEvaluateQuotientCoset(
 	curve string,
 	dynamicValuesPacked, scalingPacked, staticValuesPacked, twiddlesPacked, denominatorsPacked, blindsPacked, scalarsPacked []byte,
-	elementCount, blindCoeffCount, commitmentCount int,
+	elementCount, blindCoeffCount, commitmentCount, dynamicTransformCacheKey, staticMontCacheKey int,
 ) ([]byte, error) {
 	value, err := bridgeClient.CallPromise(
 		"transformAndEvaluateQuotientCoset",
@@ -133,6 +133,8 @@ func bridgeTransformAndEvaluateQuotientCoset(
 		elementCount,
 		blindCoeffCount,
 		commitmentCount,
+		dynamicTransformCacheKey,
+		staticMontCacheKey,
 	)
 	if err != nil {
 		return nil, err

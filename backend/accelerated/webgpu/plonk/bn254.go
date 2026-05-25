@@ -68,7 +68,14 @@ const (
 	bn254FrBytes           = fr.Bytes
 	bn254G1CoordinateBytes = bn254fp.Bytes
 	bn254G1PointBytes      = 3 * bn254G1CoordinateBytes
+
+	bn254PlonkQuotientBaseDynamicVectorCount = 5
+	bn254PlonkQuotientBaseStaticVectorCount  = 7
+	bn254PlonkQuotientEvalBlindCount         = 4
 )
+
+var bn254QuotientTransformCacheKey int
+var bn254QuotientStaticMontCacheKey int
 
 type BN254ProvingKey struct {
 	native.ProvingKey
@@ -77,11 +84,13 @@ type BN254ProvingKey struct {
 }
 
 type staticNumeratorCache struct {
-	domain0Cardinality uint64
-	domain1Cardinality uint64
-	qcpCount           int
-	canonical          staticNumeratorPolys
-	cosets             []staticNumeratorPolys
+	domain0Cardinality        uint64
+	domain1Cardinality        uint64
+	qcpCount                  int
+	canonical                 staticNumeratorPolys
+	cosets                    []staticNumeratorPolys
+	webgpuStaticMontKeys      []int
+	webgpuStaticMontPopulated []bool
 }
 
 type staticNumeratorPolys struct {
@@ -144,6 +153,20 @@ func (pk *BN254ProvingKey) ensureStaticNumeratorCache(trace *native.Trace, domai
 		pk.staticNumeratorCache.domain0Cardinality == domain0.Cardinality &&
 		pk.staticNumeratorCache.domain1Cardinality == domain1.Cardinality &&
 		pk.staticNumeratorCache.qcpCount == qcpCount {
+		if len(pk.staticNumeratorCache.webgpuStaticMontKeys) != len(pk.staticNumeratorCache.cosets) {
+			pk.staticNumeratorCache.webgpuStaticMontKeys = make([]int, len(pk.staticNumeratorCache.cosets))
+			for i := range pk.staticNumeratorCache.webgpuStaticMontKeys {
+				bn254QuotientStaticMontCacheKey++
+				if bn254QuotientStaticMontCacheKey <= 0 {
+					bn254QuotientStaticMontCacheKey = 1
+				}
+				pk.staticNumeratorCache.webgpuStaticMontKeys[i] = bn254QuotientStaticMontCacheKey
+			}
+			pk.staticNumeratorCache.webgpuStaticMontPopulated = make([]bool, len(pk.staticNumeratorCache.cosets))
+		}
+		if len(pk.staticNumeratorCache.webgpuStaticMontPopulated) != len(pk.staticNumeratorCache.cosets) {
+			pk.staticNumeratorCache.webgpuStaticMontPopulated = make([]bool, len(pk.staticNumeratorCache.cosets))
+		}
 		pk.staticNumeratorCache.canonical.applyToTrace(trace)
 		return nil
 	}
@@ -155,6 +178,14 @@ func (pk *BN254ProvingKey) ensureStaticNumeratorCache(trace *native.Trace, domai
 
 	rho := int(domain1.Cardinality / domain0.Cardinality)
 	cosets := make([]staticNumeratorPolys, rho)
+	webgpuStaticMontKeys := make([]int, rho)
+	for i := range webgpuStaticMontKeys {
+		bn254QuotientStaticMontCacheKey++
+		if bn254QuotientStaticMontCacheKey <= 0 {
+			bn254QuotientStaticMontCacheKey = 1
+		}
+		webgpuStaticMontKeys[i] = bn254QuotientStaticMontCacheKey
+	}
 
 	cosetTable, err := domain0.CosetTable()
 	if err != nil {
@@ -176,11 +207,13 @@ func (pk *BN254ProvingKey) ensureStaticNumeratorCache(trace *native.Trace, domai
 	}
 
 	pk.staticNumeratorCache = &staticNumeratorCache{
-		domain0Cardinality: domain0.Cardinality,
-		domain1Cardinality: domain1.Cardinality,
-		qcpCount:           qcpCount,
-		canonical:          canonical,
-		cosets:             cosets,
+		domain0Cardinality:        domain0.Cardinality,
+		domain1Cardinality:        domain1.Cardinality,
+		qcpCount:                  qcpCount,
+		canonical:                 canonical,
+		cosets:                    cosets,
+		webgpuStaticMontKeys:      webgpuStaticMontKeys,
+		webgpuStaticMontPopulated: make([]bool, rho),
 	}
 	pk.staticNumeratorCache.canonical.applyToTrace(trace)
 	return nil
@@ -890,6 +923,10 @@ func (s *instance) transformAndEvaluateQuotientCosetWithWebGPU(
 	staticPolys staticNumeratorPolys,
 	twiddles0 []fr.Element,
 	coset, cosetExpMinusOne, cs, css fr.Element,
+	reuseDynamicTransformCache bool,
+	reuseStaticMontCache bool,
+	dynamicTransformCacheKey int,
+	staticMontCacheKey int,
 	buf []fr.Element,
 ) error {
 	n := int(s.domain0.Cardinality)
@@ -914,38 +951,44 @@ func (s *instance) transformAndEvaluateQuotientCosetWithWebGPU(
 	}
 
 	vectorBytes := n * bn254FrBytes
-	dynamicPacked := make([]byte, len(dynamicIDs)*vectorBytes)
-	for i, id := range dynamicIDs {
-		if id >= len(s.x) || s.x[id] == nil {
-			return fmt.Errorf("webgpu plonk bn254: missing quotient dynamic polynomial %d", id)
+	dynamicPacked := []byte(nil)
+	if !reuseDynamicTransformCache {
+		dynamicPacked = make([]byte, len(dynamicIDs)*vectorBytes)
+		for i, id := range dynamicIDs {
+			if id >= len(s.x) || s.x[id] == nil {
+				return fmt.Errorf("webgpu plonk bn254: missing quotient dynamic polynomial %d", id)
+			}
+			coeffs := s.x[id].Coefficients()
+			if len(coeffs) != n {
+				return fmt.Errorf("webgpu plonk bn254: quotient dynamic polynomial %d has %d coefficients, expected %d", id, len(coeffs), n)
+			}
+			packBN254FrVectorRegularLEInto(dynamicPacked[i*vectorBytes:(i+1)*vectorBytes], coeffs)
 		}
-		coeffs := s.x[id].Coefficients()
-		if len(coeffs) != n {
-			return fmt.Errorf("webgpu plonk bn254: quotient dynamic polynomial %d has %d coefficients, expected %d", id, len(coeffs), n)
-		}
-		packBN254FrVectorRegularLEInto(dynamicPacked[i*vectorBytes:(i+1)*vectorBytes], coeffs)
 	}
 
-	staticVectors := []*iop.Polynomial{
-		staticPolys.ql,
-		staticPolys.qr,
-		staticPolys.qm,
-		staticPolys.qo,
-		staticPolys.s1,
-		staticPolys.s2,
-		staticPolys.s3,
-	}
-	staticVectors = append(staticVectors, staticPolys.qcp...)
-	staticPacked := make([]byte, len(staticVectors)*vectorBytes)
-	for i, p := range staticVectors {
-		if p == nil {
-			return fmt.Errorf("webgpu plonk bn254: missing quotient static polynomial %d", i)
+	staticPacked := []byte(nil)
+	if !reuseStaticMontCache {
+		staticVectors := []*iop.Polynomial{
+			staticPolys.ql,
+			staticPolys.qr,
+			staticPolys.qm,
+			staticPolys.qo,
+			staticPolys.s1,
+			staticPolys.s2,
+			staticPolys.s3,
 		}
-		coeffs := p.Coefficients()
-		if len(coeffs) != n {
-			return fmt.Errorf("webgpu plonk bn254: quotient static polynomial %d has %d coefficients, expected %d", i, len(coeffs), n)
+		staticVectors = append(staticVectors, staticPolys.qcp...)
+		staticPacked = make([]byte, len(staticVectors)*vectorBytes)
+		for i, p := range staticVectors {
+			if p == nil {
+				return fmt.Errorf("webgpu plonk bn254: missing quotient static polynomial %d", i)
+			}
+			coeffs := p.Coefficients()
+			if len(coeffs) != n {
+				return fmt.Errorf("webgpu plonk bn254: quotient static polynomial %d has %d coefficients, expected %d", i, len(coeffs), n)
+			}
+			packBN254FrVectorRegularLEInto(staticPacked[i*vectorBytes:(i+1)*vectorBytes], coeffs)
 		}
-		packBN254FrVectorRegularLEInto(staticPacked[i*vectorBytes:(i+1)*vectorBytes], coeffs)
 	}
 
 	blinds := [][]fr.Element{
@@ -995,6 +1038,8 @@ func (s *instance) transformAndEvaluateQuotientCosetWithWebGPU(
 		n,
 		blindCoeffCount,
 		commitmentCount,
+		dynamicTransformCacheKey,
+		staticMontCacheKey,
 	)
 	if err != nil {
 		return err
@@ -1411,6 +1456,12 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 	}
 	quotientDynamicPolyIDs := append(append([]int(nil), dynamicPolyIDs...), commitmentValuePolyIDs...)
 	fusedScalingVector := make([]fr.Element, n)
+	bn254QuotientTransformCacheKey++
+	dynamicTransformCacheKey := bn254QuotientTransformCacheKey
+	if dynamicTransformCacheKey <= 0 {
+		bn254QuotientTransformCacheKey = 1
+		dynamicTransformCacheKey = 1
+	}
 
 	canonicalizeGroup := func(ids []int) error {
 		polys := make([]*iop.Polynomial, 0, len(ids))
@@ -1445,6 +1496,12 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 			} else {
 				fft.BuildExpTable(coset, fusedScalingVector)
 			}
+			staticMontCacheKey := 0
+			reuseStaticMontCache := false
+			if i < len(staticCache.webgpuStaticMontKeys) {
+				staticMontCacheKey = staticCache.webgpuStaticMontKeys[i]
+				reuseStaticMontCache = staticCache.webgpuStaticMontPopulated[i]
+			}
 			if err := s.track(fmt.Sprintf("quotient_num_coset_%d_transform_evaluate", i), func() error {
 				return s.transformAndEvaluateQuotientCosetWithWebGPU(
 					quotientDynamicPolyIDs,
@@ -1455,10 +1512,17 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 					cosetExponentiatedToNMinusOne,
 					cs,
 					css,
+					i > 0,
+					reuseStaticMontCache,
+					dynamicTransformCacheKey,
+					staticMontCacheKey,
 					buf,
 				)
 			}); err != nil {
 				return err
+			}
+			if i < len(staticCache.webgpuStaticMontPopulated) {
+				staticCache.webgpuStaticMontPopulated[i] = true
 			}
 
 			for j := 0; j < int(n); j++ {

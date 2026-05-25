@@ -368,6 +368,12 @@ fn fr_dispatch(index: u32) -> Fr {
     return fr_mul(fr_load_from(0u, index), fr_load_from(1u, index));
   }
   if (params.opcode == FR_VECTOR_OP_BIT_REVERSE_COPY) {
+    if (params._pad0 != 0u) {
+      let vector_size = params._pad0;
+      let vector_base = (index / vector_size) * vector_size;
+      let lane = index % vector_size;
+      return fr_load_from(0u, vector_base + reverse_bits(lane, params.log_count));
+    }
     return fr_load_from(0u, reverse_bits(index, params.log_count));
   }
   return fr_zero();
