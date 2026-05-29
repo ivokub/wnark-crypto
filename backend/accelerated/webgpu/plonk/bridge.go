@@ -142,6 +142,34 @@ func bridgeTransformAndEvaluateQuotientCoset(
 	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
 }
 
+func bridgeTransformAndEvaluateQuotientCosets(
+	curve string,
+	dynamicValuesPacked, scalingPacked, staticValuesPacked, staticMontCacheKeysPacked, twiddlesPacked, denominatorsPacked, blindsPacked, scalarsPacked []byte,
+	elementCount, blindCoeffCount, commitmentCount, dynamicTransformCacheKey, cosetCount int,
+) ([]byte, error) {
+	value, err := bridgeClient.CallPromise(
+		"transformAndEvaluateQuotientCosets",
+		curve,
+		webgpubridge.JSUint8Array(dynamicValuesPacked),
+		webgpubridge.JSUint8Array(scalingPacked),
+		webgpubridge.JSUint8Array(staticValuesPacked),
+		webgpubridge.JSUint8Array(staticMontCacheKeysPacked),
+		webgpubridge.JSUint8Array(twiddlesPacked),
+		webgpubridge.JSUint8Array(denominatorsPacked),
+		webgpubridge.JSUint8Array(blindsPacked),
+		webgpubridge.JSUint8Array(scalarsPacked),
+		elementCount,
+		blindCoeffCount,
+		commitmentCount,
+		dynamicTransformCacheKey,
+		cosetCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
+}
+
 func bridgePrewarmQuotientTransformDomain(curve string, elementCount int) error {
 	_, err := bridgeClient.CallPromise("prewarmQuotientTransformDomain", curve, elementCount)
 	return err

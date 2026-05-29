@@ -72,6 +72,7 @@ const (
 	bn254PlonkQuotientBaseDynamicVectorCount = 5
 	bn254PlonkQuotientBaseStaticVectorCount  = 7
 	bn254PlonkQuotientEvalBlindCount         = 4
+	bn254PlonkQuotientEvalScalarCount        = 7
 )
 
 var bn254QuotientTransformCacheKey int
@@ -1463,6 +1464,178 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 		dynamicTransformCacheKey = 1
 	}
 
+	vectorBytes := int(n) * bn254FrBytes
+	commitmentCount := len(quotientDynamicPolyIDs) - bn254PlonkQuotientBaseDynamicVectorCount
+	if commitmentCount < 0 {
+		return nil, fmt.Errorf("webgpu plonk bn254: quotient evaluator expected at least %d dynamic vectors, got %d", bn254PlonkQuotientBaseDynamicVectorCount, len(quotientDynamicPolyIDs))
+	}
+	staticVectorCount := bn254PlonkQuotientBaseStaticVectorCount + commitmentCount
+	dynamicPacked := make([]byte, len(quotientDynamicPolyIDs)*vectorBytes)
+	for i, id := range quotientDynamicPolyIDs {
+		if id >= len(s.x) || s.x[id] == nil {
+			return nil, fmt.Errorf("webgpu plonk bn254: missing quotient dynamic polynomial %d", id)
+		}
+		coeffs := s.x[id].Coefficients()
+		if len(coeffs) != int(n) {
+			return nil, fmt.Errorf("webgpu plonk bn254: quotient dynamic polynomial %d has %d coefficients, expected %d", id, len(coeffs), n)
+		}
+		packBN254FrVectorRegularLEInto(dynamicPacked[i*vectorBytes:(i+1)*vectorBytes], coeffs)
+	}
+
+	packStaticPolys := func(dst []byte, polys staticNumeratorPolys) error {
+		if len(polys.qcp) != commitmentCount {
+			return fmt.Errorf("webgpu plonk bn254: quotient evaluator expected %d qcp vectors, got %d", commitmentCount, len(polys.qcp))
+		}
+		staticVectors := polys.polynomials()
+		if len(staticVectors) != staticVectorCount {
+			return fmt.Errorf("webgpu plonk bn254: quotient evaluator expected %d static vectors, got %d", staticVectorCount, len(staticVectors))
+		}
+		for i, p := range staticVectors {
+			if p == nil {
+				return fmt.Errorf("webgpu plonk bn254: missing quotient static polynomial %d", i)
+			}
+			coeffs := p.Coefficients()
+			if len(coeffs) != int(n) {
+				return fmt.Errorf("webgpu plonk bn254: quotient static polynomial %d has %d coefficients, expected %d", i, len(coeffs), n)
+			}
+			packBN254FrVectorRegularLEInto(dst[i*vectorBytes:(i+1)*vectorBytes], coeffs)
+		}
+		return nil
+	}
+
+	staticMontCacheKeysPacked := make([]byte, rho*4)
+	reuseStaticMontCache := true
+	if len(staticCache.webgpuStaticMontKeys) != rho || len(staticCache.webgpuStaticMontPopulated) != rho {
+		return nil, errors.New("webgpu plonk bn254: invalid static numerator WebGPU cache metadata")
+	}
+	for i := 0; i < rho; i++ {
+		key := staticCache.webgpuStaticMontKeys[i]
+		if key <= 0 || int(uint32(key)) != key {
+			return nil, fmt.Errorf("webgpu plonk bn254: invalid static numerator WebGPU cache key %d", key)
+		}
+		if !staticCache.webgpuStaticMontPopulated[i] {
+			reuseStaticMontCache = false
+		}
+		binary.LittleEndian.PutUint32(staticMontCacheKeysPacked[i*4:(i+1)*4], uint32(key))
+	}
+
+	staticPacked := []byte(nil)
+	if !reuseStaticMontCache {
+		staticPacked = make([]byte, rho*staticVectorCount*vectorBytes)
+		for i := 0; i < rho; i++ {
+			start := i * staticVectorCount * vectorBytes
+			if err := packStaticPolys(staticPacked[start:start+staticVectorCount*vectorBytes], staticCache.cosets[i]); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	blinds := [][]fr.Element{
+		s.bp[id_Bl].Coefficients(),
+		s.bp[id_Br].Coefficients(),
+		s.bp[id_Bo].Coefficients(),
+		s.bp[id_Bz].Coefficients(),
+	}
+	blindCoeffCount := 0
+	for _, blind := range blinds {
+		if len(blind) > blindCoeffCount {
+			blindCoeffCount = len(blind)
+		}
+	}
+
+	twiddlesPacked := packBN254FrVectorRegularLEInto(nil, twiddles0)
+	scalingPacked := make([]byte, rho*vectorBytes)
+	denominatorsPacked := make([]byte, rho*vectorBytes)
+	blindBytes := len(blinds) * blindCoeffCount * bn254FrBytes
+	blindsPacked := make([]byte, rho*blindBytes)
+	scalarBytes := bn254PlonkQuotientEvalScalarCount * bn254FrBytes
+	scalarsPacked := make([]byte, rho*scalarBytes)
+
+	var outputPacked []byte
+	if err := s.track("quotient_num_all_cosets_transform_evaluate", func() error {
+		for i := 0; i < rho; i++ {
+			coset.Mul(&coset, &shifters[i])
+			cosetExponentiatedToNMinusOne.Exp(coset, bn).
+				Sub(&cosetExponentiatedToNMinusOne, &one)
+
+			for j := 0; j < int(s.domain0.Cardinality); j++ {
+				s.precomputedDenominators[j].
+					Mul(&coset, &twiddles0[j]).
+					Sub(&s.precomputedDenominators[j], &one)
+			}
+			batchInvert(s.precomputedDenominators, bufBatchInvert)
+			packBN254FrVectorRegularLEInto(denominatorsPacked[i*vectorBytes:(i+1)*vectorBytes], s.precomputedDenominators)
+
+			currentScalingVector := fusedScalingVector
+			if i == 0 {
+				currentScalingVector = cosetTable
+			} else {
+				fft.BuildExpTable(coset, fusedScalingVector)
+			}
+			packBN254FrVectorRegularLEInto(scalingPacked[i*vectorBytes:(i+1)*vectorBytes], currentScalingVector)
+
+			blindStart := i * blindBytes
+			for blindIndex, blind := range blinds {
+				start := blindStart + blindIndex*blindCoeffCount*bn254FrBytes
+				acc := cosetExponentiatedToNMinusOne
+				for j := range blind {
+					var scaled fr.Element
+					scaled.Mul(&blind[j], &acc)
+					writeBN254FrRegularLE(blindsPacked[start+j*bn254FrBytes:start+(j+1)*bn254FrBytes], &scaled)
+					acc.Mul(&acc, &coset)
+				}
+			}
+
+			var lagrangeScale fr.Element
+			lagrangeScale.Mul(&cosetExponentiatedToNMinusOne, &s.domain0.CardinalityInv)
+			packBN254FrVectorRegularLEInto(scalarsPacked[i*scalarBytes:(i+1)*scalarBytes], []fr.Element{
+				coset,
+				lagrangeScale,
+				cs,
+				css,
+				s.beta,
+				s.gamma,
+				s.alpha,
+			})
+		}
+
+		var err error
+		outputPacked, err = bridgeTransformAndEvaluateQuotientCosets(
+			"bn254",
+			dynamicPacked,
+			scalingPacked,
+			staticPacked,
+			staticMontCacheKeysPacked,
+			twiddlesPacked,
+			denominatorsPacked,
+			blindsPacked,
+			scalarsPacked,
+			int(n),
+			blindCoeffCount,
+			commitmentCount,
+			dynamicTransformCacheKey,
+			rho,
+		)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	if len(outputPacked) != rho*vectorBytes {
+		return nil, fmt.Errorf("webgpu plonk bn254: quotient all-coset evaluator returned %d bytes, expected %d", len(outputPacked), rho*vectorBytes)
+	}
+	for i := range staticCache.webgpuStaticMontPopulated {
+		staticCache.webgpuStaticMontPopulated[i] = true
+	}
+	for i := 0; i < rho; i++ {
+		if err := unpackBN254FrVectorRegularLEInto(buf, outputPacked[i*vectorBytes:(i+1)*vectorBytes]); err != nil {
+			return nil, err
+		}
+		for j := 0; j < int(n); j++ {
+			// we build the polynomial in bit reverse order
+			cres[bits.Reverse64(uint64(rho*j+i))>>mm] = buf[j]
+		}
+	}
+
 	canonicalizeGroup := func(ids []int) error {
 		polys := make([]*iop.Polynomial, 0, len(ids))
 		for _, id := range ids {
@@ -1475,65 +1648,6 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 			return err
 		}
 		return nil
-	}
-
-	for i := 0; i < rho; i++ {
-		if err := s.track(fmt.Sprintf("quotient_num_coset_%d_total", i), func() error {
-			coset.Mul(&coset, &shifters[i])
-			cosetExponentiatedToNMinusOne.Exp(coset, bn).
-				Sub(&cosetExponentiatedToNMinusOne, &one)
-
-			for j := 0; j < int(s.domain0.Cardinality); j++ {
-				s.precomputedDenominators[j].
-					Mul(&coset, &twiddles0[j]).
-					Sub(&s.precomputedDenominators[j], &one)
-			}
-			batchInvert(s.precomputedDenominators, bufBatchInvert)
-
-			currentScalingVector := fusedScalingVector
-			if i == 0 {
-				currentScalingVector = cosetTable
-			} else {
-				fft.BuildExpTable(coset, fusedScalingVector)
-			}
-			staticMontCacheKey := 0
-			reuseStaticMontCache := false
-			if i < len(staticCache.webgpuStaticMontKeys) {
-				staticMontCacheKey = staticCache.webgpuStaticMontKeys[i]
-				reuseStaticMontCache = staticCache.webgpuStaticMontPopulated[i]
-			}
-			if err := s.track(fmt.Sprintf("quotient_num_coset_%d_transform_evaluate", i), func() error {
-				return s.transformAndEvaluateQuotientCosetWithWebGPU(
-					quotientDynamicPolyIDs,
-					currentScalingVector,
-					staticCache.cosets[i],
-					twiddles0,
-					coset,
-					cosetExponentiatedToNMinusOne,
-					cs,
-					css,
-					i > 0,
-					reuseStaticMontCache,
-					dynamicTransformCacheKey,
-					staticMontCacheKey,
-					buf,
-				)
-			}); err != nil {
-				return err
-			}
-			if i < len(staticCache.webgpuStaticMontPopulated) {
-				staticCache.webgpuStaticMontPopulated[i] = true
-			}
-
-			for j := 0; j < int(n); j++ {
-				// we build the polynomial in bit reverse order
-				cres[bits.Reverse64(uint64(rho*j+i))>>mm] = buf[j]
-			}
-
-			return nil
-		}); err != nil {
-			return nil, err
-		}
 	}
 
 	if err := s.track("quotient_num_final_canonicalize", func() error {

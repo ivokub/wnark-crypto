@@ -44,10 +44,16 @@ export type PlonkTransformAndEvaluateQuotientCosetInput = {
   staticMontCacheKey?: number;
 };
 
+export type PlonkTransformAndEvaluateQuotientCosetsInput = PlonkTransformAndEvaluateQuotientCosetInput & {
+  staticMontCacheKeysPacked: Uint8Array;
+  cosetCount: number;
+};
+
 export type PlonkQuotientModule = {
   readonly context: CurveGPUContext;
   readonly curve: SupportedCurveID;
   transformAndEvaluateQuotientCoset(input: PlonkTransformAndEvaluateQuotientCosetInput): Promise<Uint8Array>;
+  transformAndEvaluateQuotientCosets(input: PlonkTransformAndEvaluateQuotientCosetsInput): Promise<Uint8Array>;
   prewarmPlonkQuotientEvaluateKernel(commitmentCount?: number): Promise<void>;
 };
 
@@ -61,6 +67,26 @@ function repeatPackedVector(value: Uint8Array, count: number): Uint8Array {
     out.set(value, i * value.byteLength);
   }
   return out;
+}
+
+function repeatEachPackedVector(values: Uint8Array, vectorBytes: number, repeatCount: number): Uint8Array {
+  const vectorCount = values.byteLength / vectorBytes;
+  const out = new Uint8Array(values.byteLength * repeatCount);
+  for (let i = 0; i < vectorCount; i += 1) {
+    const vector = values.subarray(i * vectorBytes, (i + 1) * vectorBytes);
+    for (let j = 0; j < repeatCount; j += 1) {
+      out.set(vector, (i * repeatCount + j) * vectorBytes);
+    }
+  }
+  return out;
+}
+
+function unpackU32LE(bytes: Uint8Array, count: number, label: string): number[] {
+  if (bytes.byteLength !== count * 4) {
+    throw new Error(`${label}: expected ${count * 4} bytes, got ${bytes.byteLength}`);
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return Array.from({ length: count }, (_, i) => view.getUint32(i * 4, true));
 }
 
 export function createPlonkQuotientModule(config: {
@@ -149,19 +175,21 @@ export function createPlonkQuotientModule(config: {
     elementCount: number,
     blindCoeffCount: number,
     commitmentCount: number,
+    cosetCount = 1,
   ) {
     const elementBytes = fr.byteSize;
     const vectorBytes = elementCount * elementBytes;
+    const outputBytes = cosetCount * vectorBytes;
     const device = context.device;
     const kernel = await getQuotientKernel(commitmentCount);
     const vectorsBuffer = createSimpleStorageBufferFromBytes(device, "plonk-quotient-vectors", vectorsMontPacked);
     const blindsBuffer = createSimpleStorageBufferFromBytes(device, "plonk-quotient-blinds", blindsMontPacked);
     const scalarsBuffer = createSimpleStorageBufferFromBytes(device, "plonk-quotient-scalars", scalarsMontPacked);
-    const outputBuffer = createSimpleStorageBuffer(device, "plonk-quotient-output", vectorBytes);
+    const outputBuffer = createSimpleStorageBuffer(device, "plonk-quotient-output", outputBytes);
     const paramsBuffer = createSimpleUniformBuffer(
       device,
       "plonk-quotient-params",
-      new Uint32Array([elementCount, blindCoeffCount, 0, 0]),
+      new Uint32Array([elementCount, blindCoeffCount, cosetCount, 0]),
     );
 
     try {
@@ -180,11 +208,11 @@ export function createPlonkQuotientModule(config: {
       const pass = encoder.beginComputePass({ label: "plonk-quotient-pass" });
       pass.setPipeline(kernel.pipeline);
       pass.setBindGroup(0, bindGroup);
-      pass.dispatchWorkgroups(Math.ceil(elementCount / kernel.workgroupSize), 1, 1);
+      pass.dispatchWorkgroups(Math.ceil(elementCount / kernel.workgroupSize), cosetCount, 1);
       pass.end();
       device.queue.submit([encoder.finish()]);
       await device.queue.onSubmittedWorkDone();
-      return await readbackSimpleBuffer(device, outputBuffer, vectorBytes, "plonk-quotient");
+      return await readbackSimpleBuffer(device, outputBuffer, outputBytes, "plonk-quotient");
     } finally {
       vectorsBuffer.destroy();
       blindsBuffer.destroy();
@@ -314,10 +342,166 @@ export function createPlonkQuotientModule(config: {
     return runQuotientKernelMont(vectorsMontPacked, blindsMont, scalarsMont, elementCount, blindCoeffCount, commitmentCount);
   }
 
+  async function transformAndEvaluateQuotientCosets(input: PlonkTransformAndEvaluateQuotientCosetsInput): Promise<Uint8Array> {
+    const {
+      dynamicValuesPacked,
+      scalingPacked,
+      staticValuesPacked,
+      staticMontCacheKeysPacked,
+      twiddlesPacked,
+      denominatorsPacked,
+      blindsPacked,
+      scalarsPacked,
+      elementCount,
+      blindCoeffCount,
+      commitmentCount,
+      dynamicTransformCacheKey = 0,
+      cosetCount,
+    } = input;
+    const elementBytes = fr.byteSize;
+    const vectorBytes = elementCount * elementBytes;
+    if (!Number.isInteger(elementCount) || elementCount <= 0 || (elementCount & (elementCount - 1)) !== 0) {
+      throw new Error(`invalid PLONK quotient evaluate element count ${elementCount}`);
+    }
+    if (!Number.isInteger(blindCoeffCount) || blindCoeffCount < 0) {
+      throw new Error(`invalid PLONK quotient blind coefficient count ${blindCoeffCount}`);
+    }
+    if (!Number.isInteger(commitmentCount) || commitmentCount < 0) {
+      throw new Error(`invalid PLONK quotient commitment count ${commitmentCount}`);
+    }
+    if (!Number.isInteger(cosetCount) || cosetCount <= 0) {
+      throw new Error(`invalid PLONK quotient coset count ${cosetCount}`);
+    }
+
+    const dynamicVectorCount = PLONK_QUOTIENT_BASE_DYNAMIC_VECTOR_COUNT + commitmentCount;
+    const staticVectorCount = PLONK_QUOTIENT_BASE_STATIC_VECTOR_COUNT + commitmentCount;
+    const vectorCount = dynamicVectorCount + staticVectorCount + 2;
+    const expectedDynamicBytes = dynamicVectorCount * vectorBytes;
+    if (dynamicValuesPacked.byteLength !== expectedDynamicBytes) {
+      throw new Error(
+        `PLONK quotient cosets expected ${expectedDynamicBytes} dynamic bytes, got ${dynamicValuesPacked.byteLength}`,
+      );
+    }
+    if (scalingPacked.byteLength !== cosetCount * vectorBytes) {
+      throw new Error(`PLONK quotient cosets expected ${cosetCount * vectorBytes} scaling bytes, got ${scalingPacked.byteLength}`);
+    }
+    const expectedStaticBytes = cosetCount * staticVectorCount * vectorBytes;
+    const staticMontCacheKeys = unpackU32LE(staticMontCacheKeysPacked, cosetCount, "PLONK quotient static cache keys");
+    const canReuseStaticCache =
+      staticValuesPacked.byteLength === 0 &&
+      staticMontCacheKeys.every((key) => {
+        const cached = key > 0 ? staticMontCache.get(key) : undefined;
+        return cached?.elementCount === elementCount && cached.staticVectorCount === staticVectorCount;
+      });
+    if (staticValuesPacked.byteLength !== expectedStaticBytes && !canReuseStaticCache) {
+      throw new Error(
+        `PLONK quotient cosets expected ${expectedStaticBytes} static bytes, got ${staticValuesPacked.byteLength}`,
+      );
+    }
+    if (twiddlesPacked.byteLength !== vectorBytes) {
+      throw new Error(`PLONK quotient cosets expected ${vectorBytes} twiddle bytes, got ${twiddlesPacked.byteLength}`);
+    }
+    if (denominatorsPacked.byteLength !== cosetCount * vectorBytes) {
+      throw new Error(
+        `PLONK quotient cosets expected ${cosetCount * vectorBytes} denominator bytes, got ${denominatorsPacked.byteLength}`,
+      );
+    }
+    const blindBytes = PLONK_QUOTIENT_BLIND_COUNT * blindCoeffCount * elementBytes;
+    if (blindsPacked.byteLength !== cosetCount * blindBytes) {
+      throw new Error(`PLONK quotient cosets expected ${cosetCount * blindBytes} blinding bytes, got ${blindsPacked.byteLength}`);
+    }
+    const scalarBytes = PLONK_QUOTIENT_SCALAR_COUNT * elementBytes;
+    if (scalarsPacked.byteLength !== cosetCount * scalarBytes) {
+      throw new Error(`PLONK quotient cosets expected ${cosetCount * scalarBytes} scalar bytes, got ${scalarsPacked.byteLength}`);
+    }
+
+    const dynamicMont = await fr.toMontgomeryPacked(cloneBytes(dynamicValuesPacked));
+    const dynamicCoeffMont = await ntt.inversePackedMontBatch(dynamicMont, elementCount, dynamicVectorCount);
+    if (dynamicTransformCacheKey > 0) {
+      dynamicTransformCache = {
+        key: dynamicTransformCacheKey,
+        elementCount,
+        dynamicVectorCount,
+        coeffMont: dynamicCoeffMont,
+      };
+    }
+    const scalingMont = await fr.toMontgomeryPacked(cloneBytes(scalingPacked));
+    const shiftedCoeffMont = await fr.mulPackedMont(
+      repeatPackedVector(dynamicCoeffMont, cosetCount),
+      repeatEachPackedVector(scalingMont, vectorBytes, dynamicVectorCount),
+    );
+    const dynamicCosetsMont = await ntt.forwardPackedMontBatch(shiftedCoeffMont, elementCount, dynamicVectorCount * cosetCount);
+
+    const staticMont = canReuseStaticCache
+      ? (() => {
+          const out = new Uint8Array(cosetCount * staticVectorCount * vectorBytes);
+          for (let i = 0; i < cosetCount; i += 1) {
+            const cached = staticMontCache.get(staticMontCacheKeys[i]);
+            if (!cached) {
+              throw new Error(`PLONK quotient missing static cache key ${staticMontCacheKeys[i]}`);
+            }
+            out.set(cached.mont, i * staticVectorCount * vectorBytes);
+          }
+          return out;
+        })()
+      : await fr.toMontgomeryPacked(cloneBytes(staticValuesPacked));
+    if (!canReuseStaticCache) {
+      for (let i = 0; i < cosetCount; i += 1) {
+        const key = staticMontCacheKeys[i];
+        if (key > 0) {
+          const start = i * staticVectorCount * vectorBytes;
+          staticMontCache.set(key, {
+            elementCount,
+            staticVectorCount,
+            mont: cloneBytes(staticMont.subarray(start, start + staticVectorCount * vectorBytes)),
+          });
+        }
+      }
+    }
+
+    const [twiddlesMont, denominatorsMont, blindsMont, scalarsMont] = await Promise.all([
+      fr.toMontgomeryPacked(cloneBytes(twiddlesPacked)),
+      fr.toMontgomeryPacked(cloneBytes(denominatorsPacked)),
+      fr.toMontgomeryPacked(cloneBytes(blindsPacked)),
+      fr.toMontgomeryPacked(cloneBytes(scalarsPacked)),
+    ]);
+
+    const vectorsMontPacked = new Uint8Array(cosetCount * vectorCount * vectorBytes);
+    for (let i = 0; i < cosetCount; i += 1) {
+      const vectorsStart = i * vectorCount * vectorBytes;
+      const dynamicStart = i * dynamicVectorCount * vectorBytes;
+      vectorsMontPacked.set(
+        dynamicCosetsMont.subarray(dynamicStart, dynamicStart + dynamicVectorCount * vectorBytes),
+        vectorsStart,
+      );
+      const staticStart = i * staticVectorCount * vectorBytes;
+      vectorsMontPacked.set(
+        staticMont.subarray(staticStart, staticStart + staticVectorCount * vectorBytes),
+        vectorsStart + dynamicVectorCount * vectorBytes,
+      );
+      vectorsMontPacked.set(twiddlesMont, vectorsStart + (dynamicVectorCount + staticVectorCount) * vectorBytes);
+      const denominatorStart = i * vectorBytes;
+      vectorsMontPacked.set(
+        denominatorsMont.subarray(denominatorStart, denominatorStart + vectorBytes),
+        vectorsStart + (dynamicVectorCount + staticVectorCount + 1) * vectorBytes,
+      );
+    }
+    return runQuotientKernelMont(
+      vectorsMontPacked,
+      blindsMont,
+      scalarsMont,
+      elementCount,
+      blindCoeffCount,
+      commitmentCount,
+      cosetCount,
+    );
+  }
+
   return {
     context,
     curve,
     transformAndEvaluateQuotientCoset,
+    transformAndEvaluateQuotientCosets,
     async prewarmPlonkQuotientEvaluateKernel(commitmentCount = 0): Promise<void> {
       await getQuotientKernel(commitmentCount);
     },

@@ -375,6 +375,40 @@ async function transformAndEvaluateQuotientCoset(
   });
 }
 
+async function transformAndEvaluateQuotientCosets(
+  curve: SupportedCurveID,
+  dynamicValuesPacked: Uint8Array,
+  scalingPacked: Uint8Array,
+  staticValuesPacked: Uint8Array,
+  staticMontCacheKeysPacked: Uint8Array,
+  twiddlesPacked: Uint8Array,
+  denominatorsPacked: Uint8Array,
+  blindsPacked: Uint8Array,
+  scalarsPacked: Uint8Array,
+  elementCount: number,
+  blindCoeffCount: number,
+  commitmentCount: number,
+  dynamicTransformCacheKey: number,
+  cosetCount: number,
+) {
+  const bridge = assertBridge(curve);
+  return bridge.quotient.transformAndEvaluateQuotientCosets({
+    dynamicValuesPacked,
+    scalingPacked,
+    staticValuesPacked,
+    staticMontCacheKeysPacked,
+    twiddlesPacked,
+    denominatorsPacked,
+    blindsPacked,
+    scalarsPacked,
+    elementCount,
+    blindCoeffCount,
+    commitmentCount,
+    dynamicTransformCacheKey,
+    cosetCount,
+  });
+}
+
 async function prewarmQuotientTransformDomain(curve: SupportedCurveID, elementCount: number) {
   const bridge = assertBridge(curve);
   if (!Number.isInteger(elementCount) || elementCount <= 0 || (elementCount & (elementCount - 1)) !== 0) {
@@ -413,6 +447,7 @@ export function installPlonkWebGPUBridge(dependencies: BridgeDependencies): void
     msmG1Batch,
     transformQuotientCoset,
     transformAndEvaluateQuotientCoset,
+    transformAndEvaluateQuotientCosets,
     canonicalizeQuotientFromCoset,
     lagrangeQuotientVectors,
     canonicalizeQuotientVectors,
