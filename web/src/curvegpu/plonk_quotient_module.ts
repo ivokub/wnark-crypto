@@ -47,6 +47,19 @@ export type PlonkTransformAndEvaluateQuotientCosetInput = {
 export type PlonkTransformAndEvaluateQuotientCosetsInput = PlonkTransformAndEvaluateQuotientCosetInput & {
   staticMontCacheKeysPacked: Uint8Array;
   cosetCount: number;
+  auxMontCacheKey?: number;
+};
+
+export type PlonkPreloadQuotientStaticAndAuxInput = {
+  staticValuesPacked: Uint8Array;
+  staticMontCacheKeysPacked: Uint8Array;
+  scalingPacked: Uint8Array;
+  twiddlesPacked: Uint8Array;
+  denominatorsPacked: Uint8Array;
+  elementCount: number;
+  staticVectorCount: number;
+  cosetCount: number;
+  auxMontCacheKey: number;
 };
 
 export type PlonkQuotientModule = {
@@ -54,6 +67,7 @@ export type PlonkQuotientModule = {
   readonly curve: SupportedCurveID;
   transformAndEvaluateQuotientCoset(input: PlonkTransformAndEvaluateQuotientCosetInput): Promise<Uint8Array>;
   transformAndEvaluateQuotientCosets(input: PlonkTransformAndEvaluateQuotientCosetsInput): Promise<Uint8Array>;
+  preloadQuotientStaticAndAux(input: PlonkPreloadQuotientStaticAndAuxInput): Promise<void>;
   prewarmPlonkQuotientEvaluateKernel(commitmentCount?: number): Promise<void>;
 };
 
@@ -111,6 +125,16 @@ export function createPlonkQuotientModule(config: {
       elementCount: number;
       staticVectorCount: number;
       mont: Uint8Array;
+    }
+  >();
+  const auxMontCache = new Map<
+    number,
+    {
+      elementCount: number;
+      cosetCount: number;
+      scalingMont: Uint8Array;
+      twiddlesMont: Uint8Array;
+      denominatorsMont: Uint8Array;
     }
   >();
 
@@ -357,6 +381,7 @@ export function createPlonkQuotientModule(config: {
       commitmentCount,
       dynamicTransformCacheKey = 0,
       cosetCount,
+      auxMontCacheKey = 0,
     } = input;
     const elementBytes = fr.byteSize;
     const vectorBytes = elementCount * elementBytes;
@@ -372,6 +397,9 @@ export function createPlonkQuotientModule(config: {
     if (!Number.isInteger(cosetCount) || cosetCount <= 0) {
       throw new Error(`invalid PLONK quotient coset count ${cosetCount}`);
     }
+    if (!Number.isInteger(auxMontCacheKey) || auxMontCacheKey < 0) {
+      throw new Error(`invalid PLONK quotient aux cache key ${auxMontCacheKey}`);
+    }
 
     const dynamicVectorCount = PLONK_QUOTIENT_BASE_DYNAMIC_VECTOR_COUNT + commitmentCount;
     const staticVectorCount = PLONK_QUOTIENT_BASE_STATIC_VECTOR_COUNT + commitmentCount;
@@ -382,7 +410,15 @@ export function createPlonkQuotientModule(config: {
         `PLONK quotient cosets expected ${expectedDynamicBytes} dynamic bytes, got ${dynamicValuesPacked.byteLength}`,
       );
     }
-    if (scalingPacked.byteLength !== cosetCount * vectorBytes) {
+    const cachedAux = auxMontCacheKey > 0 ? auxMontCache.get(auxMontCacheKey) : undefined;
+    const canReuseAuxCache =
+      scalingPacked.byteLength === 0 &&
+      twiddlesPacked.byteLength === 0 &&
+      denominatorsPacked.byteLength === 0 &&
+      cachedAux !== undefined &&
+      cachedAux.elementCount === elementCount &&
+      cachedAux.cosetCount === cosetCount;
+    if (scalingPacked.byteLength !== cosetCount * vectorBytes && !canReuseAuxCache) {
       throw new Error(`PLONK quotient cosets expected ${cosetCount * vectorBytes} scaling bytes, got ${scalingPacked.byteLength}`);
     }
     const expectedStaticBytes = cosetCount * staticVectorCount * vectorBytes;
@@ -398,10 +434,10 @@ export function createPlonkQuotientModule(config: {
         `PLONK quotient cosets expected ${expectedStaticBytes} static bytes, got ${staticValuesPacked.byteLength}`,
       );
     }
-    if (twiddlesPacked.byteLength !== vectorBytes) {
+    if (twiddlesPacked.byteLength !== vectorBytes && !canReuseAuxCache) {
       throw new Error(`PLONK quotient cosets expected ${vectorBytes} twiddle bytes, got ${twiddlesPacked.byteLength}`);
     }
-    if (denominatorsPacked.byteLength !== cosetCount * vectorBytes) {
+    if (denominatorsPacked.byteLength !== cosetCount * vectorBytes && !canReuseAuxCache) {
       throw new Error(
         `PLONK quotient cosets expected ${cosetCount * vectorBytes} denominator bytes, got ${denominatorsPacked.byteLength}`,
       );
@@ -425,7 +461,30 @@ export function createPlonkQuotientModule(config: {
         coeffMont: dynamicCoeffMont,
       };
     }
-    const scalingMont = await fr.toMontgomeryPacked(cloneBytes(scalingPacked));
+    let scalingMont: Uint8Array;
+    let twiddlesMont: Uint8Array;
+    let denominatorsMont: Uint8Array;
+    if (canReuseAuxCache) {
+      if (!cachedAux) {
+        throw new Error(`PLONK quotient missing aux cache key ${auxMontCacheKey}`);
+      }
+      ({ scalingMont, twiddlesMont, denominatorsMont } = cachedAux);
+    } else {
+      [scalingMont, twiddlesMont, denominatorsMont] = await Promise.all([
+        fr.toMontgomeryPacked(cloneBytes(scalingPacked)),
+        fr.toMontgomeryPacked(cloneBytes(twiddlesPacked)),
+        fr.toMontgomeryPacked(cloneBytes(denominatorsPacked)),
+      ]);
+      if (auxMontCacheKey > 0) {
+        auxMontCache.set(auxMontCacheKey, {
+          elementCount,
+          cosetCount,
+          scalingMont: cloneBytes(scalingMont),
+          twiddlesMont: cloneBytes(twiddlesMont),
+          denominatorsMont: cloneBytes(denominatorsMont),
+        });
+      }
+    }
     const shiftedCoeffMont = await fr.mulPackedMont(
       repeatPackedVector(dynamicCoeffMont, cosetCount),
       repeatEachPackedVector(scalingMont, vectorBytes, dynamicVectorCount),
@@ -459,9 +518,7 @@ export function createPlonkQuotientModule(config: {
       }
     }
 
-    const [twiddlesMont, denominatorsMont, blindsMont, scalarsMont] = await Promise.all([
-      fr.toMontgomeryPacked(cloneBytes(twiddlesPacked)),
-      fr.toMontgomeryPacked(cloneBytes(denominatorsPacked)),
+    const [blindsMont, scalarsMont] = await Promise.all([
       fr.toMontgomeryPacked(cloneBytes(blindsPacked)),
       fr.toMontgomeryPacked(cloneBytes(scalarsPacked)),
     ]);
@@ -497,11 +554,84 @@ export function createPlonkQuotientModule(config: {
     );
   }
 
+  async function preloadQuotientStaticAndAux(input: PlonkPreloadQuotientStaticAndAuxInput): Promise<void> {
+    const {
+      staticValuesPacked,
+      staticMontCacheKeysPacked,
+      scalingPacked,
+      twiddlesPacked,
+      denominatorsPacked,
+      elementCount,
+      staticVectorCount,
+      cosetCount,
+      auxMontCacheKey,
+    } = input;
+    const elementBytes = fr.byteSize;
+    const vectorBytes = elementCount * elementBytes;
+    if (!Number.isInteger(elementCount) || elementCount <= 0 || (elementCount & (elementCount - 1)) !== 0) {
+      throw new Error(`invalid PLONK quotient preload element count ${elementCount}`);
+    }
+    if (!Number.isInteger(staticVectorCount) || staticVectorCount <= 0) {
+      throw new Error(`invalid PLONK quotient preload static vector count ${staticVectorCount}`);
+    }
+    if (!Number.isInteger(cosetCount) || cosetCount <= 0) {
+      throw new Error(`invalid PLONK quotient preload coset count ${cosetCount}`);
+    }
+    if (!Number.isInteger(auxMontCacheKey) || auxMontCacheKey <= 0) {
+      throw new Error(`invalid PLONK quotient preload aux cache key ${auxMontCacheKey}`);
+    }
+
+    const expectedStaticBytes = cosetCount * staticVectorCount * vectorBytes;
+    if (staticValuesPacked.byteLength !== expectedStaticBytes) {
+      throw new Error(`PLONK quotient preload expected ${expectedStaticBytes} static bytes, got ${staticValuesPacked.byteLength}`);
+    }
+    if (scalingPacked.byteLength !== cosetCount * vectorBytes) {
+      throw new Error(`PLONK quotient preload expected ${cosetCount * vectorBytes} scaling bytes, got ${scalingPacked.byteLength}`);
+    }
+    if (twiddlesPacked.byteLength !== vectorBytes) {
+      throw new Error(`PLONK quotient preload expected ${vectorBytes} twiddle bytes, got ${twiddlesPacked.byteLength}`);
+    }
+    if (denominatorsPacked.byteLength !== cosetCount * vectorBytes) {
+      throw new Error(
+        `PLONK quotient preload expected ${cosetCount * vectorBytes} denominator bytes, got ${denominatorsPacked.byteLength}`,
+      );
+    }
+
+    const staticMontCacheKeys = unpackU32LE(staticMontCacheKeysPacked, cosetCount, "PLONK quotient preload static cache keys");
+    const [staticMont, scalingMont, twiddlesMont, denominatorsMont] = await Promise.all([
+      fr.toMontgomeryPacked(cloneBytes(staticValuesPacked)),
+      fr.toMontgomeryPacked(cloneBytes(scalingPacked)),
+      fr.toMontgomeryPacked(cloneBytes(twiddlesPacked)),
+      fr.toMontgomeryPacked(cloneBytes(denominatorsPacked)),
+    ]);
+
+    for (let i = 0; i < cosetCount; i += 1) {
+      const key = staticMontCacheKeys[i];
+      if (key <= 0) {
+        throw new Error(`invalid PLONK quotient preload static cache key ${key}`);
+      }
+      const start = i * staticVectorCount * vectorBytes;
+      staticMontCache.set(key, {
+        elementCount,
+        staticVectorCount,
+        mont: cloneBytes(staticMont.subarray(start, start + staticVectorCount * vectorBytes)),
+      });
+    }
+    auxMontCache.set(auxMontCacheKey, {
+      elementCount,
+      cosetCount,
+      scalingMont: cloneBytes(scalingMont),
+      twiddlesMont: cloneBytes(twiddlesMont),
+      denominatorsMont: cloneBytes(denominatorsMont),
+    });
+  }
+
   return {
     context,
     curve,
     transformAndEvaluateQuotientCoset,
     transformAndEvaluateQuotientCosets,
+    preloadQuotientStaticAndAux,
     async prewarmPlonkQuotientEvaluateKernel(commitmentCount = 0): Promise<void> {
       await getQuotientKernel(commitmentCount);
     },

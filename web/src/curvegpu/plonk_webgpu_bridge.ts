@@ -390,6 +390,7 @@ async function transformAndEvaluateQuotientCosets(
   commitmentCount: number,
   dynamicTransformCacheKey: number,
   cosetCount: number,
+  auxMontCacheKey: number,
 ) {
   const bridge = assertBridge(curve);
   return bridge.quotient.transformAndEvaluateQuotientCosets({
@@ -406,6 +407,33 @@ async function transformAndEvaluateQuotientCosets(
     commitmentCount,
     dynamicTransformCacheKey,
     cosetCount,
+    auxMontCacheKey,
+  });
+}
+
+async function preloadQuotientStaticAndAux(
+  curve: SupportedCurveID,
+  staticValuesPacked: Uint8Array,
+  staticMontCacheKeysPacked: Uint8Array,
+  scalingPacked: Uint8Array,
+  twiddlesPacked: Uint8Array,
+  denominatorsPacked: Uint8Array,
+  elementCount: number,
+  staticVectorCount: number,
+  cosetCount: number,
+  auxMontCacheKey: number,
+) {
+  const bridge = assertBridge(curve);
+  return bridge.quotient.preloadQuotientStaticAndAux({
+    staticValuesPacked,
+    staticMontCacheKeysPacked,
+    scalingPacked,
+    twiddlesPacked,
+    denominatorsPacked,
+    elementCount,
+    staticVectorCount,
+    cosetCount,
+    auxMontCacheKey,
   });
 }
 
@@ -448,6 +476,7 @@ export function installPlonkWebGPUBridge(dependencies: BridgeDependencies): void
     transformQuotientCoset,
     transformAndEvaluateQuotientCoset,
     transformAndEvaluateQuotientCosets,
+    preloadQuotientStaticAndAux,
     canonicalizeQuotientFromCoset,
     lagrangeQuotientVectors,
     canonicalizeQuotientVectors,

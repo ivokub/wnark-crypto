@@ -145,7 +145,7 @@ func bridgeTransformAndEvaluateQuotientCoset(
 func bridgeTransformAndEvaluateQuotientCosets(
 	curve string,
 	dynamicValuesPacked, scalingPacked, staticValuesPacked, staticMontCacheKeysPacked, twiddlesPacked, denominatorsPacked, blindsPacked, scalarsPacked []byte,
-	elementCount, blindCoeffCount, commitmentCount, dynamicTransformCacheKey, cosetCount int,
+	elementCount, blindCoeffCount, commitmentCount, dynamicTransformCacheKey, cosetCount, auxMontCacheKey int,
 ) ([]byte, error) {
 	value, err := bridgeClient.CallPromise(
 		"transformAndEvaluateQuotientCosets",
@@ -163,11 +163,33 @@ func bridgeTransformAndEvaluateQuotientCosets(
 		commitmentCount,
 		dynamicTransformCacheKey,
 		cosetCount,
+		auxMontCacheKey,
 	)
 	if err != nil {
 		return nil, err
 	}
 	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
+}
+
+func bridgePreloadQuotientStaticAndAux(
+	curve string,
+	staticValuesPacked, staticMontCacheKeysPacked, scalingPacked, twiddlesPacked, denominatorsPacked []byte,
+	elementCount, staticVectorCount, cosetCount, auxMontCacheKey int,
+) error {
+	_, err := bridgeClient.CallPromise(
+		"preloadQuotientStaticAndAux",
+		curve,
+		webgpubridge.JSUint8Array(staticValuesPacked),
+		webgpubridge.JSUint8Array(staticMontCacheKeysPacked),
+		webgpubridge.JSUint8Array(scalingPacked),
+		webgpubridge.JSUint8Array(twiddlesPacked),
+		webgpubridge.JSUint8Array(denominatorsPacked),
+		elementCount,
+		staticVectorCount,
+		cosetCount,
+		auxMontCacheKey,
+	)
+	return err
 }
 
 func bridgePrewarmQuotientTransformDomain(curve string, elementCount int) error {
