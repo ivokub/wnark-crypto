@@ -10,7 +10,12 @@ import (
 
 var bridgeClient = webgpubridge.NewClient("wnarkGroth16WebGPU", "webgpu groth16")
 
-type bridgeMSMBatchResult = webgpubridge.MSMBatchResult
+type bridgeMSMBatchResult struct {
+	G1ABytes []byte
+	G1BBytes []byte
+	G1KBytes []byte
+	G2BBytes []byte
+}
 
 func jsUint8Array(src []byte) js.Value {
 	return webgpubridge.JSUint8Array(src)
@@ -29,17 +34,53 @@ func bridgePrepareKey(curve string, payload js.Value) (string, error) {
 }
 
 func bridgeMSMG1(handle, vectorName string, scalarsPacked []byte) ([]byte, error) {
-	return bridgeClient.MSMG1(handle, vectorName, scalarsPacked)
+	value, err := bridgeClient.CallPromise("msmG1", handle, vectorName, webgpubridge.JSUint8Array(scalarsPacked))
+	if err != nil {
+		return nil, err
+	}
+	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
 }
 
 func bridgeMSMBatch(handle string, g1A, g1B, g1K []byte) (bridgeMSMBatchResult, error) {
-	return bridgeClient.MSMBatch(handle, g1A, g1B, g1K)
+	payload := webgpubridge.JSObject()
+	payload.Set("g1A", webgpubridge.JSUint8Array(g1A))
+	payload.Set("g1B", webgpubridge.JSUint8Array(g1B))
+	payload.Set("g1K", webgpubridge.JSUint8Array(g1K))
+	value, err := bridgeClient.CallPromise("msmBatch", handle, payload)
+	if err != nil {
+		return bridgeMSMBatchResult{}, err
+	}
+	result := bridgeMSMBatchResult{}
+	if result.G1ABytes, err = webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value.Get("g1A")); err != nil {
+		return bridgeMSMBatchResult{}, err
+	}
+	if result.G1BBytes, err = webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value.Get("g1B")); err != nil {
+		return bridgeMSMBatchResult{}, err
+	}
+	if result.G1KBytes, err = webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value.Get("g1K")); err != nil {
+		return bridgeMSMBatchResult{}, err
+	}
+	if result.G2BBytes, err = webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value.Get("g2B")); err != nil {
+		return bridgeMSMBatchResult{}, err
+	}
+	return result, nil
 }
 
 func bridgeComputeHZMSMG1(handle string, aPacked, bPacked, cPacked []byte) ([]byte, error) {
-	return bridgeClient.ComputeHZMSMG1(handle, aPacked, bPacked, cPacked)
+	value, err := bridgeClient.CallPromise(
+		"computeHZMSMG1",
+		handle,
+		webgpubridge.JSUint8Array(aPacked),
+		webgpubridge.JSUint8Array(bPacked),
+		webgpubridge.JSUint8Array(cPacked),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
 }
 
 func bridgePrewarmQuotientDomain(curve string, domainSize int) error {
-	return bridgeClient.PrewarmQuotientDomain(curve, domainSize)
+	_, err := bridgeClient.CallPromise("prewarmQuotientDomain", curve, domainSize)
+	return err
 }
