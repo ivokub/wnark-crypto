@@ -1734,54 +1734,50 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 	scalarBytes := bn254PlonkQuotientEvalScalarCount * bn254FrBytes
 	scalarsPacked := make([]byte, rho*scalarBytes)
 
-	var outputPacked []byte
-	if err := s.track("quotient_num_all_cosets_transform_evaluate", func() error {
-		for i := 0; i < rho; i++ {
-			coset := quotientAux.cosets[i]
-			cosetExpMinusOne := quotientAux.cosetExpMinusOnes[i]
-			blindStart := i * blindBytes
-			for blindIndex, blind := range blinds {
-				start := blindStart + blindIndex*blindCoeffCount*bn254FrBytes
-				acc := cosetExpMinusOne
-				for j := range blind {
-					var scaled fr.Element
-					scaled.Mul(&blind[j], &acc)
-					writeBN254FrRegularLE(blindsPacked[start+j*bn254FrBytes:start+(j+1)*bn254FrBytes], &scaled)
-					acc.Mul(&acc, &coset)
-				}
+	for i := 0; i < rho; i++ {
+		coset := quotientAux.cosets[i]
+		cosetExpMinusOne := quotientAux.cosetExpMinusOnes[i]
+		blindStart := i * blindBytes
+		for blindIndex, blind := range blinds {
+			start := blindStart + blindIndex*blindCoeffCount*bn254FrBytes
+			acc := cosetExpMinusOne
+			for j := range blind {
+				var scaled fr.Element
+				scaled.Mul(&blind[j], &acc)
+				writeBN254FrRegularLE(blindsPacked[start+j*bn254FrBytes:start+(j+1)*bn254FrBytes], &scaled)
+				acc.Mul(&acc, &coset)
 			}
-
-			packBN254FrVectorRegularLEInto(scalarsPacked[i*scalarBytes:(i+1)*scalarBytes], []fr.Element{
-				coset,
-				quotientAux.lagrangeScales[i],
-				quotientAux.cs,
-				quotientAux.css,
-				s.beta,
-				s.gamma,
-				s.alpha,
-			})
 		}
 
-		var err error
-		outputPacked, err = bridgeTransformAndEvaluateQuotientCosets(
-			"bn254",
-			dynamicPacked,
-			scalingPacked,
-			staticPacked,
-			staticMontCacheKeysPacked,
-			twiddlesPacked,
-			denominatorsPacked,
-			blindsPacked,
-			scalarsPacked,
-			int(n),
-			blindCoeffCount,
-			commitmentCount,
-			dynamicTransformCacheKey,
-			rho,
-			auxMontCacheKey,
-		)
-		return err
-	}); err != nil {
+		packBN254FrVectorRegularLEInto(scalarsPacked[i*scalarBytes:(i+1)*scalarBytes], []fr.Element{
+			coset,
+			quotientAux.lagrangeScales[i],
+			quotientAux.cs,
+			quotientAux.css,
+			s.beta,
+			s.gamma,
+			s.alpha,
+		})
+	}
+
+	outputPacked, err := bridgeTransformAndEvaluateQuotientCosets(
+		"bn254",
+		dynamicPacked,
+		scalingPacked,
+		staticPacked,
+		staticMontCacheKeysPacked,
+		twiddlesPacked,
+		denominatorsPacked,
+		blindsPacked,
+		scalarsPacked,
+		int(n),
+		blindCoeffCount,
+		commitmentCount,
+		dynamicTransformCacheKey,
+		rho,
+		auxMontCacheKey,
+	)
+	if err != nil {
 		return nil, err
 	}
 	if len(outputPacked) != rho*vectorBytes {
@@ -1815,25 +1811,16 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 		return nil
 	}
 
-	if err := s.track("quotient_num_final_canonicalize", func() error {
-		s.x[id_ZS] = nil
-		s.x[id_Qk] = nil
+	s.x[id_ZS] = nil
+	s.x[id_Qk] = nil
 
-		if err := s.track("quotient_num_final_canonicalize_dynamic", func() error {
-			return canonicalizeGroup(dynamicPolyIDs)
-		}); err != nil {
-			return err
-		}
-		if len(commitmentValuePolyIDs) > 0 {
-			if err := s.track("quotient_num_final_canonicalize_commitment_values", func() error {
-				return canonicalizeGroup(commitmentValuePolyIDs)
-			}); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
+	if err := canonicalizeGroup(dynamicPolyIDs); err != nil {
 		return nil, err
+	}
+	if len(commitmentValuePolyIDs) > 0 {
+		if err := canonicalizeGroup(commitmentValuePolyIDs); err != nil {
+			return nil, err
+		}
 	}
 
 	res := iop.NewPolynomial(&cres, iop.Form{Basis: iop.LagrangeCoset, Layout: iop.BitReverse})
