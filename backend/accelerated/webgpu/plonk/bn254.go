@@ -419,7 +419,7 @@ func (pk *BN254ProvingKey) ensurePrepared() error {
 	if pk.handle != "" {
 		return nil
 	}
-	if err := bridgeInit("bn254"); err != nil {
+	if err := bridgeClient.Init("bn254"); err != nil {
 		return err
 	}
 	payload := jsObject()
@@ -427,7 +427,7 @@ func (pk *BN254ProvingKey) ensurePrepared() error {
 	payload.Set("kzgCount", len(pk.Kzg.G1))
 	payload.Set("kzgLagrange", jsUint8Array(packBN254G1AffineJacobianBatch(pk.KzgLagrange.G1)))
 	payload.Set("kzgLagrangeCount", len(pk.KzgLagrange.G1))
-	handle, err := bridgePrepareKey("bn254", payload)
+	handle, err := bridgeClient.PrepareKey("bn254", payload)
 	if err != nil {
 		return err
 	}
@@ -447,13 +447,13 @@ func (pk *BN254ProvingKey) prepareWithCS(spr *cs.SparseR1CS) error {
 	if err := pk.preloadQuotientStaticCaches(trace, domain0, domain1); err != nil {
 		return err
 	}
-	if err := bridgePrewarmQuotientTransformDomain("bn254", int(domain0.Cardinality)); err != nil {
+	if err := bridgeClient.PrewarmQuotientTransformDomain("bn254", int(domain0.Cardinality)); err != nil {
 		return err
 	}
-	if err := bridgePrewarmQuotientEvaluateKernel("bn254", len(trace.Qcp)); err != nil {
+	if err := bridgeClient.PrewarmQuotientEvaluateKernel("bn254", len(trace.Qcp)); err != nil {
 		return err
 	}
-	return bridgePrewarmQuotientCanonicalizeDomain("bn254", int(domain1.Cardinality))
+	return bridgeClient.PrewarmQuotientCanonicalizeDomain("bn254", int(domain1.Cardinality))
 }
 
 func (pk *BN254ProvingKey) preloadQuotientStaticCaches(trace *native.Trace, domain0, domain1 *fft.Domain) error {
@@ -488,7 +488,7 @@ func (pk *BN254ProvingKey) preloadQuotientStaticCaches(trace *native.Trace, doma
 		return err
 	}
 
-	if err := bridgePreloadQuotientStaticAndAux(
+	if err := bridgeClient.PreloadQuotientStaticAndAux(
 		"bn254",
 		staticPacked,
 		staticMontCacheKeysPacked,
@@ -674,7 +674,7 @@ func canonicalizePolynomialsRegularWithWebGPU(polys []*iop.Polynomial, elementCo
 		for i, p := range group {
 			packBN254FrVectorRegularLEInto(valuesPacked[i*vectorBytes:(i+1)*vectorBytes], p.Coefficients())
 		}
-		canonicalPacked, err := bridgeCanonicalizeQuotientVectors("bn254", valuesPacked, len(group), n, key.inputBitReversed, key.inverseCoset)
+		canonicalPacked, err := bridgeClient.CanonicalizeQuotientVectors("bn254", valuesPacked, len(group), n, key.inputBitReversed, key.inverseCoset)
 		if err != nil {
 			return err
 		}
@@ -724,7 +724,7 @@ func lagrangePolynomialsRegularWithWebGPU(polys []*iop.Polynomial, elementCount 
 	for i, p := range filtered {
 		packBN254FrVectorRegularLEInto(valuesPacked[i*vectorBytes:(i+1)*vectorBytes], p.Coefficients())
 	}
-	lagrangePacked, err := bridgeLagrangeQuotientVectors("bn254", valuesPacked, len(filtered), n)
+	lagrangePacked, err := bridgeClient.LagrangeQuotientVectors("bn254", valuesPacked, len(filtered), n)
 	if err != nil {
 		return err
 	}
@@ -1083,7 +1083,7 @@ func (s *instance) commitToLRO() error {
 
 func (s *instance) msmG1(vectorName string, start int, scalars []fr.Element) (curve.G1Affine, error) {
 	scalarsPacked := packBN254FrVectorRegularLEInto(nil, scalars)
-	packed, err := bridgeMSMG1Slice(s.pk.handle, vectorName, start, len(scalars), scalarsPacked)
+	packed, err := bridgeClient.MSMG1Slice(s.pk.handle, vectorName, start, len(scalars), scalarsPacked)
 	return decodeBN254G1AffineFromPacked(packed, err)
 }
 
@@ -1101,7 +1101,7 @@ func (s *instance) msmG1Batch(vectorName string, start int, scalarVectors ...[]f
 	if err != nil {
 		return nil, err
 	}
-	packed, err := bridgeMSMG1Batch(s.pk.handle, vectorName, start, termCount, len(scalarVectors), scalarsPacked)
+	packed, err := bridgeClient.MSMG1Batch(s.pk.handle, vectorName, start, termCount, len(scalarVectors), scalarsPacked)
 	return decodeBN254G1AffineBatchFromPacked(packed, len(scalarVectors), err)
 }
 
@@ -1574,7 +1574,7 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 		})
 	}
 
-	outputPacked, err := bridgeTransformAndEvaluateQuotientCosets(
+	outputPacked, err := bridgeClient.TransformAndEvaluateQuotientCosets(
 		"bn254",
 		dynamicPacked,
 		scalingPacked,

@@ -88,7 +88,7 @@ func proveBN254(r1cs *cs.R1CS, pk *BN254ProvingKey, fullWitness witness.Witness,
 		}
 
 		scalars := packBN254FrVectorRegularLEInto(nil, privateCommittedValues[i])
-		commitmentPacked, err := bridgeMSMG1(pk.handle, "commitmentBasis"+strconv.Itoa(i), scalars)
+		commitmentPacked, err := bridgeClient.MSMG1(pk.handle, "commitmentBasis"+strconv.Itoa(i), scalars)
 		if err != nil {
 			return fmt.Errorf("webgpu groth16 bn254: commitment %d MSM: %w", i, err)
 		}
@@ -126,7 +126,7 @@ func proveBN254(r1cs *cs.R1CS, pk *BN254ProvingKey, fullWitness witness.Witness,
 				return nil, fmt.Errorf("webgpu groth16 bn254: commitment hint %d was not evaluated", i)
 			}
 			scalars := packBN254FrVectorRegularLEInto(nil, privateCommittedValues[i])
-			pokPacked, err := bridgeMSMG1(pk.handle, "commitmentBasisExpSigma"+strconv.Itoa(i), scalars)
+			pokPacked, err := bridgeClient.MSMG1(pk.handle, "commitmentBasisExpSigma"+strconv.Itoa(i), scalars)
 			if err != nil {
 				return nil, fmt.Errorf("webgpu groth16 bn254: commitment %d pok MSM: %w", i, err)
 			}
@@ -150,7 +150,7 @@ func proveBN254(r1cs *cs.R1CS, pk *BN254ProvingKey, fullWitness witness.Witness,
 	pk.scratch0 = packBN254FrVectorMontLEPaddedInto(pk.scratch0, solution.A, domainSize)
 	pk.scratch1 = packBN254FrVectorMontLEPaddedInto(pk.scratch1, solution.B, domainSize)
 	pk.scratch2 = packBN254FrVectorMontLEPaddedInto(pk.scratch2, solution.C, domainSize)
-	zPacked, err := bridgeComputeHZMSMG1(pk.handle, pk.scratch0, pk.scratch1, pk.scratch2)
+	zPacked, err := bridgeClient.ComputeHZMSMG1(pk.handle, pk.scratch0, pk.scratch1, pk.scratch2)
 	if err != nil {
 		return nil, fmt.Errorf("webgpu groth16 bn254: quotient H + msm G1.Z: %w", err)
 	}
@@ -159,7 +159,7 @@ func proveBN254(r1cs *cs.R1CS, pk *BN254ProvingKey, fullWitness witness.Witness,
 	pk.scratch0, _ = packBN254FrVectorFilteredInto(pk.scratch0, wireValues, pk.g1AIndices, len(pk.InfinityA))
 	pk.scratch1, _ = packBN254FrVectorFilteredInto(pk.scratch1, wireValues, pk.g1BIndices, len(pk.InfinityB))
 	pk.scratch2 = packBN254FrVectorRegularLEFilteredOutInto(pk.scratch2, wireValues[publicVariables:], publicVariables, commitmentWireIndexesToRemove(commitmentInfo))
-	batchMSM, err := bridgeMSMBatch(pk.handle, pk.scratch0, pk.scratch1, pk.scratch2)
+	batchMSM, err := bridgeClient.MSMBatch(pk.handle, pk.scratch0, pk.scratch1, pk.scratch2)
 	if err != nil {
 		return nil, fmt.Errorf("webgpu groth16 bn254: batched MSMs: %w", err)
 	}
@@ -237,7 +237,7 @@ func (pk *BN254ProvingKey) ensurePrepared() error {
 	if pk.handle != "" && pk.quotientWarmed {
 		return nil
 	}
-	if err := bridgeInit("bn254"); err != nil {
+	if err := bridgeClient.Init("bn254"); err != nil {
 		return err
 	}
 
@@ -262,7 +262,7 @@ func (pk *BN254ProvingKey) ensurePrepared() error {
 			payload.Set("commitmentBasisExpSigma"+suffix+"Count", len(pk.CommitmentKeys[i].BasisExpSigma))
 		}
 
-		handle, err := bridgePrepareKey("bn254", payload)
+		handle, err := bridgeClient.PrepareKey("bn254", payload)
 		if err != nil {
 			return err
 		}
@@ -271,7 +271,7 @@ func (pk *BN254ProvingKey) ensurePrepared() error {
 		pk.g1BIndices = computeKeptIndices(pk.InfinityB)
 	}
 	if !pk.quotientWarmed {
-		if err := bridgePrewarmQuotientDomain("bn254", int(pk.Domain.Cardinality)); err != nil {
+		if err := bridgeClient.PrewarmQuotientDomain("bn254", int(pk.Domain.Cardinality)); err != nil {
 			return err
 		}
 		pk.quotientWarmed = true

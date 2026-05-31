@@ -8,7 +8,11 @@ import (
 	webgpubridge "github.com/ivokub/wnark-crypto/backend/accelerated/webgpu/internal/bridge"
 )
 
-var bridgeClient = webgpubridge.NewClient("wnarkPlonkWebGPU", "webgpu plonk")
+var bridgeClient = PlonkBridgeClient{Client: webgpubridge.NewClient("wnarkPlonkWebGPU", "webgpu plonk")}
+
+type PlonkBridgeClient struct {
+	webgpubridge.Client
+}
 
 func jsUint8Array(src []byte) js.Value {
 	return webgpubridge.JSUint8Array(src)
@@ -18,16 +22,8 @@ func jsObject() js.Value {
 	return webgpubridge.JSObject()
 }
 
-func bridgeInit(curve string) error {
-	return bridgeClient.Init(curve)
-}
-
-func bridgePrepareKey(curve string, payload js.Value) (string, error) {
-	return bridgeClient.PrepareKey(curve, payload)
-}
-
-func bridgeMSMG1Slice(handle, vectorName string, start, count int, scalarsPacked []byte) ([]byte, error) {
-	value, err := bridgeClient.CallPromise(
+func (c PlonkBridgeClient) MSMG1Slice(handle, vectorName string, start, count int, scalarsPacked []byte) ([]byte, error) {
+	value, err := c.CallPromise(
 		"msmG1",
 		handle,
 		vectorName,
@@ -38,11 +34,11 @@ func bridgeMSMG1Slice(handle, vectorName string, start, count int, scalarsPacked
 	if err != nil {
 		return nil, err
 	}
-	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
+	return webgpubridge.GoBytes(c.ErrorPrefix, value)
 }
 
-func bridgeMSMG1Batch(handle, vectorName string, start, termsPerInstance, instanceCount int, scalarsPacked []byte) ([]byte, error) {
-	value, err := bridgeClient.CallPromise(
+func (c PlonkBridgeClient) MSMG1Batch(handle, vectorName string, start, termsPerInstance, instanceCount int, scalarsPacked []byte) ([]byte, error) {
+	value, err := c.CallPromise(
 		"msmG1Batch",
 		handle,
 		vectorName,
@@ -54,11 +50,11 @@ func bridgeMSMG1Batch(handle, vectorName string, start, termsPerInstance, instan
 	if err != nil {
 		return nil, err
 	}
-	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
+	return webgpubridge.GoBytes(c.ErrorPrefix, value)
 }
 
-func bridgeCanonicalizeQuotientVectors(curve string, valuesPacked []byte, vectorCount, elementCount int, inputBitReversed, inverseCoset bool) ([]byte, error) {
-	value, err := bridgeClient.CallPromise(
+func (c PlonkBridgeClient) CanonicalizeQuotientVectors(curve string, valuesPacked []byte, vectorCount, elementCount int, inputBitReversed, inverseCoset bool) ([]byte, error) {
+	value, err := c.CallPromise(
 		"canonicalizeQuotientVectors",
 		curve,
 		webgpubridge.JSUint8Array(valuesPacked),
@@ -70,11 +66,11 @@ func bridgeCanonicalizeQuotientVectors(curve string, valuesPacked []byte, vector
 	if err != nil {
 		return nil, err
 	}
-	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
+	return webgpubridge.GoBytes(c.ErrorPrefix, value)
 }
 
-func bridgeLagrangeQuotientVectors(curve string, valuesPacked []byte, vectorCount, elementCount int) ([]byte, error) {
-	value, err := bridgeClient.CallPromise(
+func (c PlonkBridgeClient) LagrangeQuotientVectors(curve string, valuesPacked []byte, vectorCount, elementCount int) ([]byte, error) {
+	value, err := c.CallPromise(
 		"lagrangeQuotientVectors",
 		curve,
 		webgpubridge.JSUint8Array(valuesPacked),
@@ -84,15 +80,15 @@ func bridgeLagrangeQuotientVectors(curve string, valuesPacked []byte, vectorCoun
 	if err != nil {
 		return nil, err
 	}
-	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
+	return webgpubridge.GoBytes(c.ErrorPrefix, value)
 }
 
-func bridgeTransformAndEvaluateQuotientCosets(
+func (c PlonkBridgeClient) TransformAndEvaluateQuotientCosets(
 	curve string,
 	dynamicValuesPacked, scalingPacked, staticValuesPacked, staticMontCacheKeysPacked, twiddlesPacked, denominatorsPacked, blindsPacked, scalarsPacked []byte,
 	elementCount, blindCoeffCount, commitmentCount, dynamicTransformCacheKey, cosetCount, auxMontCacheKey int,
 ) ([]byte, error) {
-	value, err := bridgeClient.CallPromise(
+	value, err := c.CallPromise(
 		"transformAndEvaluateQuotientCosets",
 		curve,
 		webgpubridge.JSUint8Array(dynamicValuesPacked),
@@ -113,15 +109,15 @@ func bridgeTransformAndEvaluateQuotientCosets(
 	if err != nil {
 		return nil, err
 	}
-	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
+	return webgpubridge.GoBytes(c.ErrorPrefix, value)
 }
 
-func bridgePreloadQuotientStaticAndAux(
+func (c PlonkBridgeClient) PreloadQuotientStaticAndAux(
 	curve string,
 	staticValuesPacked, staticMontCacheKeysPacked, scalingPacked, twiddlesPacked, denominatorsPacked []byte,
 	elementCount, staticVectorCount, cosetCount, auxMontCacheKey int,
 ) error {
-	_, err := bridgeClient.CallPromise(
+	_, err := c.CallPromise(
 		"preloadQuotientStaticAndAux",
 		curve,
 		webgpubridge.JSUint8Array(staticValuesPacked),
@@ -137,17 +133,17 @@ func bridgePreloadQuotientStaticAndAux(
 	return err
 }
 
-func bridgePrewarmQuotientTransformDomain(curve string, elementCount int) error {
-	_, err := bridgeClient.CallPromise("prewarmQuotientTransformDomain", curve, elementCount)
+func (c PlonkBridgeClient) PrewarmQuotientTransformDomain(curve string, elementCount int) error {
+	_, err := c.CallPromise("prewarmQuotientTransformDomain", curve, elementCount)
 	return err
 }
 
-func bridgePrewarmQuotientCanonicalizeDomain(curve string, elementCount int) error {
-	_, err := bridgeClient.CallPromise("prewarmQuotientCanonicalizeDomain", curve, elementCount)
+func (c PlonkBridgeClient) PrewarmQuotientCanonicalizeDomain(curve string, elementCount int) error {
+	_, err := c.CallPromise("prewarmQuotientCanonicalizeDomain", curve, elementCount)
 	return err
 }
 
-func bridgePrewarmQuotientEvaluateKernel(curve string, commitmentCount int) error {
-	_, err := bridgeClient.CallPromise("prewarmQuotientEvaluateKernel", curve, commitmentCount)
+func (c PlonkBridgeClient) PrewarmQuotientEvaluateKernel(curve string, commitmentCount int) error {
+	_, err := c.CallPromise("prewarmQuotientEvaluateKernel", curve, commitmentCount)
 	return err
 }
