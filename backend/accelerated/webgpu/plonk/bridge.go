@@ -57,34 +57,6 @@ func bridgeMSMG1Batch(handle, vectorName string, start, termsPerInstance, instan
 	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
 }
 
-func bridgeTransformQuotientCoset(curve string, valuesPacked, scalingPacked []byte, vectorCount, elementCount int) ([]byte, error) {
-	value, err := bridgeClient.CallPromise(
-		"transformQuotientCoset",
-		curve,
-		webgpubridge.JSUint8Array(valuesPacked),
-		webgpubridge.JSUint8Array(scalingPacked),
-		vectorCount,
-		elementCount,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
-}
-
-func bridgeCanonicalizeQuotientFromCoset(curve string, valuesPacked []byte, elementCount int) ([]byte, error) {
-	value, err := bridgeClient.CallPromise(
-		"canonicalizeQuotientFromCoset",
-		curve,
-		webgpubridge.JSUint8Array(valuesPacked),
-		elementCount,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
-}
-
 func bridgeCanonicalizeQuotientVectors(curve string, valuesPacked []byte, vectorCount, elementCount int, inputBitReversed, inverseCoset bool) ([]byte, error) {
 	value, err := bridgeClient.CallPromise(
 		"canonicalizeQuotientVectors",
@@ -108,33 +80,6 @@ func bridgeLagrangeQuotientVectors(curve string, valuesPacked []byte, vectorCoun
 		webgpubridge.JSUint8Array(valuesPacked),
 		vectorCount,
 		elementCount,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return webgpubridge.GoBytes(bridgeClient.ErrorPrefix, value)
-}
-
-func bridgeTransformAndEvaluateQuotientCoset(
-	curve string,
-	dynamicValuesPacked, scalingPacked, staticValuesPacked, twiddlesPacked, denominatorsPacked, blindsPacked, scalarsPacked []byte,
-	elementCount, blindCoeffCount, commitmentCount, dynamicTransformCacheKey, staticMontCacheKey int,
-) ([]byte, error) {
-	value, err := bridgeClient.CallPromise(
-		"transformAndEvaluateQuotientCoset",
-		curve,
-		webgpubridge.JSUint8Array(dynamicValuesPacked),
-		webgpubridge.JSUint8Array(scalingPacked),
-		webgpubridge.JSUint8Array(staticValuesPacked),
-		webgpubridge.JSUint8Array(twiddlesPacked),
-		webgpubridge.JSUint8Array(denominatorsPacked),
-		webgpubridge.JSUint8Array(blindsPacked),
-		webgpubridge.JSUint8Array(scalarsPacked),
-		elementCount,
-		blindCoeffCount,
-		commitmentCount,
-		dynamicTransformCacheKey,
-		staticMontCacheKey,
 	)
 	if err != nil {
 		return nil, err

@@ -71,7 +71,6 @@ const (
 
 	bn254PlonkQuotientBaseDynamicVectorCount = 5
 	bn254PlonkQuotientBaseStaticVectorCount  = 7
-	bn254PlonkQuotientEvalBlindCount         = 4
 	bn254PlonkQuotientEvalScalarCount        = 7
 )
 
@@ -398,19 +397,6 @@ func (p staticNumeratorPolys) applyToTrace(trace *native.Trace) {
 	trace.S2 = p.s2
 	trace.S3 = p.s3
 	trace.Qcp = p.qcp
-}
-
-func (p staticNumeratorPolys) applyToEval(dst []*iop.Polynomial) {
-	dst[id_Ql] = p.ql
-	dst[id_Qr] = p.qr
-	dst[id_Qm] = p.qm
-	dst[id_Qo] = p.qo
-	dst[id_S1] = p.s1
-	dst[id_S2] = p.s2
-	dst[id_S3] = p.s3
-	for i := range p.qcp {
-		dst[id_Qci+2*i] = p.qcp[i]
-	}
 }
 
 func transformPolynomialsToCoset(polys []*iop.Polynomial, domain *fft.Domain, scalingVector []fr.Element) error {
@@ -1119,178 +1105,6 @@ func (s *instance) msmG1Batch(vectorName string, start int, scalarVectors ...[]f
 	return decodeBN254G1AffineBatchFromPacked(packed, len(scalarVectors), err)
 }
 
-func (s *instance) transformGroupToCoset(ids []int, scalingVector []fr.Element) error {
-	polys := make([]*iop.Polynomial, 0, len(ids))
-	n := int(s.domain0.Cardinality)
-	for _, id := range ids {
-		if id >= len(s.x) || id == id_ZS || s.x[id] == nil {
-			continue
-		}
-		if len(s.x[id].Coefficients()) != n {
-			return fmt.Errorf("webgpu plonk bn254: quotient polynomial %d has %d coefficients, expected %d", id, len(s.x[id].Coefficients()), n)
-		}
-		polys = append(polys, s.x[id])
-	}
-	if len(polys) == 0 {
-		return nil
-	}
-
-	vectorBytes := n * bn254FrBytes
-	valuesPacked := make([]byte, len(polys)*vectorBytes)
-	for i, p := range polys {
-		packBN254FrVectorRegularLEInto(valuesPacked[i*vectorBytes:(i+1)*vectorBytes], p.Coefficients())
-	}
-	scalingPacked := packBN254FrVectorRegularLEInto(nil, scalingVector)
-	transformedPacked, err := bridgeTransformQuotientCoset("bn254", valuesPacked, scalingPacked, len(polys), n)
-	if err != nil {
-		return err
-	}
-	if len(transformedPacked) != len(valuesPacked) {
-		return fmt.Errorf("webgpu plonk bn254: quotient transform returned %d bytes, expected %d", len(transformedPacked), len(valuesPacked))
-	}
-	for i, p := range polys {
-		if err := unpackBN254FrVectorRegularLEInto(p.Coefficients(), transformedPacked[i*vectorBytes:(i+1)*vectorBytes]); err != nil {
-			return err
-		}
-		p.Basis = iop.Lagrange
-		p.Layout = iop.Regular
-	}
-	return nil
-}
-
-func (s *instance) transformAndEvaluateQuotientCosetWithWebGPU(
-	dynamicIDs []int,
-	scalingVector []fr.Element,
-	staticPolys staticNumeratorPolys,
-	twiddles0 []fr.Element,
-	coset, cosetExpMinusOne, cs, css fr.Element,
-	reuseDynamicTransformCache bool,
-	reuseStaticMontCache bool,
-	dynamicTransformCacheKey int,
-	staticMontCacheKey int,
-	buf []fr.Element,
-) error {
-	n := int(s.domain0.Cardinality)
-	if len(dynamicIDs) < bn254PlonkQuotientBaseDynamicVectorCount {
-		return fmt.Errorf("webgpu plonk bn254: quotient evaluator expected at least %d dynamic vectors, got %d", bn254PlonkQuotientBaseDynamicVectorCount, len(dynamicIDs))
-	}
-	commitmentCount := len(dynamicIDs) - bn254PlonkQuotientBaseDynamicVectorCount
-	if len(staticPolys.qcp) != commitmentCount {
-		return fmt.Errorf("webgpu plonk bn254: quotient evaluator expected %d qcp vectors, got %d", commitmentCount, len(staticPolys.qcp))
-	}
-	if len(scalingVector) != n {
-		return fmt.Errorf("webgpu plonk bn254: quotient scaling vector has %d elements, expected %d", len(scalingVector), n)
-	}
-	if len(twiddles0) != n {
-		return fmt.Errorf("webgpu plonk bn254: quotient twiddle vector has %d elements, expected %d", len(twiddles0), n)
-	}
-	if len(s.precomputedDenominators) != n {
-		return fmt.Errorf("webgpu plonk bn254: quotient denominator vector has %d elements, expected %d", len(s.precomputedDenominators), n)
-	}
-	if len(buf) != n {
-		return fmt.Errorf("webgpu plonk bn254: quotient output has %d elements, expected %d", len(buf), n)
-	}
-
-	vectorBytes := n * bn254FrBytes
-	dynamicPacked := []byte(nil)
-	if !reuseDynamicTransformCache {
-		dynamicPacked = make([]byte, len(dynamicIDs)*vectorBytes)
-		for i, id := range dynamicIDs {
-			if id >= len(s.x) || s.x[id] == nil {
-				return fmt.Errorf("webgpu plonk bn254: missing quotient dynamic polynomial %d", id)
-			}
-			coeffs := s.x[id].Coefficients()
-			if len(coeffs) != n {
-				return fmt.Errorf("webgpu plonk bn254: quotient dynamic polynomial %d has %d coefficients, expected %d", id, len(coeffs), n)
-			}
-			packBN254FrVectorRegularLEInto(dynamicPacked[i*vectorBytes:(i+1)*vectorBytes], coeffs)
-		}
-	}
-
-	staticPacked := []byte(nil)
-	if !reuseStaticMontCache {
-		staticVectors := []*iop.Polynomial{
-			staticPolys.ql,
-			staticPolys.qr,
-			staticPolys.qm,
-			staticPolys.qo,
-			staticPolys.s1,
-			staticPolys.s2,
-			staticPolys.s3,
-		}
-		staticVectors = append(staticVectors, staticPolys.qcp...)
-		staticPacked = make([]byte, len(staticVectors)*vectorBytes)
-		for i, p := range staticVectors {
-			if p == nil {
-				return fmt.Errorf("webgpu plonk bn254: missing quotient static polynomial %d", i)
-			}
-			coeffs := p.Coefficients()
-			if len(coeffs) != n {
-				return fmt.Errorf("webgpu plonk bn254: quotient static polynomial %d has %d coefficients, expected %d", i, len(coeffs), n)
-			}
-			packBN254FrVectorRegularLEInto(staticPacked[i*vectorBytes:(i+1)*vectorBytes], coeffs)
-		}
-	}
-
-	blinds := [][]fr.Element{
-		s.bp[id_Bl].Coefficients(),
-		s.bp[id_Br].Coefficients(),
-		s.bp[id_Bo].Coefficients(),
-		s.bp[id_Bz].Coefficients(),
-	}
-	blindCoeffCount := 0
-	for _, blind := range blinds {
-		if len(blind) > blindCoeffCount {
-			blindCoeffCount = len(blind)
-		}
-	}
-	blindsPacked := make([]byte, len(blinds)*blindCoeffCount*bn254FrBytes)
-	for i, blind := range blinds {
-		start := i * blindCoeffCount * bn254FrBytes
-		acc := cosetExpMinusOne
-		for j := range blind {
-			var scaled fr.Element
-			scaled.Mul(&blind[j], &acc)
-			writeBN254FrRegularLE(blindsPacked[start+j*bn254FrBytes:start+(j+1)*bn254FrBytes], &scaled)
-			acc.Mul(&acc, &coset)
-		}
-	}
-
-	var lagrangeScale fr.Element
-	lagrangeScale.Mul(&cosetExpMinusOne, &s.domain0.CardinalityInv)
-	scalarsPacked := packBN254FrVectorRegularLEInto(nil, []fr.Element{
-		coset,
-		lagrangeScale,
-		cs,
-		css,
-		s.beta,
-		s.gamma,
-		s.alpha,
-	})
-	outputPacked, err := bridgeTransformAndEvaluateQuotientCoset(
-		"bn254",
-		dynamicPacked,
-		packBN254FrVectorRegularLEInto(nil, scalingVector),
-		staticPacked,
-		packBN254FrVectorRegularLEInto(nil, twiddles0),
-		packBN254FrVectorRegularLEInto(nil, s.precomputedDenominators),
-		blindsPacked,
-		scalarsPacked,
-		n,
-		blindCoeffCount,
-		commitmentCount,
-		dynamicTransformCacheKey,
-		staticMontCacheKey,
-	)
-	if err != nil {
-		return err
-	}
-	if len(outputPacked) != vectorBytes {
-		return fmt.Errorf("webgpu plonk bn254: quotient evaluator returned %d bytes, expected %d", len(outputPacked), vectorBytes)
-	}
-	return unpackBN254FrVectorRegularLEInto(buf, outputPacked)
-}
-
 // deriveGammaAndBeta (copy constraint)
 func (s *instance) deriveGammaAndBeta() error {
 	wWitness, ok := s.fullWitness.Vector().(fr.Vector)
@@ -1847,18 +1661,6 @@ func batchInvert(vec, buf []fr.Element) {
 		acc.Mul(&acc, &buf[i])
 	}
 	vec[0].Set(&acc)
-}
-
-// p <- <p, (1, w, .., wⁿ) >
-// p is supposed to be in canonical form
-func scalePowers(p *iop.Polynomial, w fr.Element) {
-	var acc fr.Element
-	acc.SetOne()
-	cp := p.Coefficients()
-	for i := 0; i < p.Size(); i++ {
-		cp[i].Mul(&cp[i], &acc)
-		acc.Mul(&acc, &w)
-	}
 }
 
 func evaluateBlinded(p, bp *iop.Polynomial, zeta fr.Element) fr.Element {
