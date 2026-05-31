@@ -10,9 +10,9 @@ import (
 	"sync"
 
 	"github.com/consensys/gnark-crypto/ecc"
-	curve "github.com/consensys/gnark-crypto/ecc/bls12-381"
-	bls12381fp "github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
-	bls12381fr "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
+	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
+	"github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
+	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr/hash_to_field"
 	"github.com/consensys/gnark/backend"
 	native "github.com/consensys/gnark/backend/groth16/bls12-381"
@@ -26,11 +26,11 @@ import (
 )
 
 const (
-	bls12381FrBytes           = 32
-	bls12381G1CoordinateBytes = 48
-	bls12381G1PointBytes      = 144
-	bls12381G2ComponentBytes  = 48
-	bls12381G2PointBytes      = 288
+	frBytes           = 32
+	g1CoordinateBytes = 48
+	g1PointBytes      = 144
+	g2ComponentBytes  = 48
+	g2PointBytes      = 288
 )
 
 // ProvingKey wraps gnark's native BLS12-381 Groth16 proving key with
@@ -66,9 +66,9 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 	defer pk.scratchMu.Unlock()
 
 	proof := &native.Proof{
-		Commitments: make([]curve.G1Affine, len(commitmentInfo)),
+		Commitments: make([]bls12381.G1Affine, len(commitmentInfo)),
 	}
-	privateCommittedValues := make([][]bls12381fr.Element, len(commitmentInfo))
+	privateCommittedValues := make([][]fr.Element, len(commitmentInfo))
 	solverOpts := opt.SolverOpts[:len(opt.SolverOpts):len(opt.SolverOpts)]
 	bsb22ID := solver.GetHintID(fcs.Bsb22CommitmentComputePlaceholder)
 	solverOpts = append(solverOpts, solver.OverrideHint(bsb22ID, func(_ *big.Int, in []*big.Int, out []*big.Int) error {
@@ -84,30 +84,30 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		hashed := in[:hashedCount]
 		committed := in[hashedCount:]
 
-		privateCommittedValues[i] = make([]bls12381fr.Element, len(committed))
+		privateCommittedValues[i] = make([]fr.Element, len(committed))
 		for j, inJ := range committed {
 			privateCommittedValues[i][j].SetBigInt(inJ)
 		}
 
-		scalars := packBLS12381FrVectorRegularLEInto(nil, privateCommittedValues[i])
+		scalars := packFrVectorRegularLEInto(nil, privateCommittedValues[i])
 		commitmentPacked, err := bridge.Bridge.MSMG1(pk.handle, "commitmentBasis"+strconv.Itoa(i), scalars)
 		if err != nil {
 			return fmt.Errorf("webgpu groth16 bls12_381: commitment %d MSM: %w", i, err)
 		}
-		if proof.Commitments[i], err = decodeBLS12381G1AffineFromPacked(commitmentPacked, nil); err != nil {
+		if proof.Commitments[i], err = decodeG1AffineFromPacked(commitmentPacked, nil); err != nil {
 			return fmt.Errorf("webgpu groth16 bls12_381: commitment %d decode: %w", i, err)
 		}
 
-		if _, err := opt.HashToFieldFn.Write(constraint.SerializeCommitment(proof.Commitments[i].Marshal(), hashed, (bls12381fr.Bits-1)/8+1)); err != nil {
+		if _, err := opt.HashToFieldFn.Write(constraint.SerializeCommitment(proof.Commitments[i].Marshal(), hashed, (fr.Bits-1)/8+1)); err != nil {
 			return err
 		}
 		hashBts := opt.HashToFieldFn.Sum(nil)
 		opt.HashToFieldFn.Reset()
-		nbBuf := bls12381fr.Bytes
-		if opt.HashToFieldFn.Size() < bls12381fr.Bytes {
+		nbBuf := fr.Bytes
+		if opt.HashToFieldFn.Size() < fr.Bytes {
 			nbBuf = opt.HashToFieldFn.Size()
 		}
-		var res bls12381fr.Element
+		var res fr.Element
 		res.SetBytes(hashBts[:nbBuf])
 		res.BigInt(out[0])
 		return nil
@@ -118,29 +118,29 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		return nil, err
 	}
 	solution := _solution.(*cs.R1CSSolution)
-	wireValues := []bls12381fr.Element(solution.W)
+	wireValues := []fr.Element(solution.W)
 	domainSize := int(pk.Domain.Cardinality)
 
 	if len(commitmentInfo) > 0 {
-		poks := make([]curve.G1Affine, len(commitmentInfo))
+		poks := make([]bls12381.G1Affine, len(commitmentInfo))
 		for i := range commitmentInfo {
 			if privateCommittedValues[i] == nil {
 				return nil, fmt.Errorf("webgpu groth16 bls12_381: commitment hint %d was not evaluated", i)
 			}
-			scalars := packBLS12381FrVectorRegularLEInto(nil, privateCommittedValues[i])
+			scalars := packFrVectorRegularLEInto(nil, privateCommittedValues[i])
 			pokPacked, err := bridge.Bridge.MSMG1(pk.handle, "commitmentBasisExpSigma"+strconv.Itoa(i), scalars)
 			if err != nil {
 				return nil, fmt.Errorf("webgpu groth16 bls12_381: commitment %d pok MSM: %w", i, err)
 			}
-			if poks[i], err = decodeBLS12381G1AffineFromPacked(pokPacked, nil); err != nil {
+			if poks[i], err = decodeG1AffineFromPacked(pokPacked, nil); err != nil {
 				return nil, fmt.Errorf("webgpu groth16 bls12_381: commitment %d pok decode: %w", i, err)
 			}
 		}
-		commitmentsSerialized := make([]byte, bls12381fr.Bytes*len(commitmentInfo))
+		commitmentsSerialized := make([]byte, fr.Bytes*len(commitmentInfo))
 		for i := range commitmentInfo {
-			copy(commitmentsSerialized[bls12381fr.Bytes*i:], wireValues[commitmentInfo[i].CommitmentIndex].Marshal())
+			copy(commitmentsSerialized[fr.Bytes*i:], wireValues[commitmentInfo[i].CommitmentIndex].Marshal())
 		}
-		challenge, err := bls12381fr.Hash(commitmentsSerialized, []byte("G16-BSB22"), 1)
+		challenge, err := fr.Hash(commitmentsSerialized, []byte("G16-BSB22"), 1)
 		if err != nil {
 			return nil, err
 		}
@@ -149,45 +149,45 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 		}
 	}
 
-	pk.scratch0 = packBLS12381FrVectorMontLEPaddedInto(pk.scratch0, solution.A, domainSize)
-	pk.scratch1 = packBLS12381FrVectorMontLEPaddedInto(pk.scratch1, solution.B, domainSize)
-	pk.scratch2 = packBLS12381FrVectorMontLEPaddedInto(pk.scratch2, solution.C, domainSize)
+	pk.scratch0 = packFrVectorMontLEPaddedInto(pk.scratch0, solution.A, domainSize)
+	pk.scratch1 = packFrVectorMontLEPaddedInto(pk.scratch1, solution.B, domainSize)
+	pk.scratch2 = packFrVectorMontLEPaddedInto(pk.scratch2, solution.C, domainSize)
 	zPacked, err := bridge.Bridge.ComputeHZMSMG1(pk.handle, pk.scratch0, pk.scratch1, pk.scratch2)
 	if err != nil {
 		return nil, fmt.Errorf("webgpu groth16 bls12_381: quotient H + msm G1.Z: %w", err)
 	}
 	publicVariables := r1cs.GetNbPublicVariables()
 
-	pk.scratch0, _ = packBLS12381FrVectorFilteredInto(pk.scratch0, wireValues, pk.g1AIndices, len(pk.InfinityA))
-	pk.scratch1, _ = packBLS12381FrVectorFilteredInto(pk.scratch1, wireValues, pk.g1BIndices, len(pk.InfinityB))
-	pk.scratch2 = packBLS12381FrVectorRegularLEFilteredOutInto(pk.scratch2, wireValues[publicVariables:], publicVariables, common.CommitmentWireIndexesToRemove(commitmentInfo))
+	pk.scratch0, _ = packFrVectorFilteredInto(pk.scratch0, wireValues, pk.g1AIndices, len(pk.InfinityA))
+	pk.scratch1, _ = packFrVectorFilteredInto(pk.scratch1, wireValues, pk.g1BIndices, len(pk.InfinityB))
+	pk.scratch2 = packFrVectorRegularLEFilteredOutInto(pk.scratch2, wireValues[publicVariables:], publicVariables, common.CommitmentWireIndexesToRemove(commitmentInfo))
 	batchMSM, err := bridge.Bridge.MSMBatch(pk.handle, pk.scratch0, pk.scratch1, pk.scratch2)
 	if err != nil {
 		return nil, fmt.Errorf("webgpu groth16 bls12_381: batched MSMs: %w", err)
 	}
-	arBaseAff, err := decodeBLS12381G1AffineFromPacked(batchMSM.G1ABytes, nil)
+	arBaseAff, err := decodeG1AffineFromPacked(batchMSM.G1ABytes, nil)
 	if err != nil {
 		return nil, fmt.Errorf("webgpu groth16 bls12_381: msm G1.A: %w", err)
 	}
-	bs1BaseAff, err := decodeBLS12381G1AffineFromPacked(batchMSM.G1BBytes, nil)
+	bs1BaseAff, err := decodeG1AffineFromPacked(batchMSM.G1BBytes, nil)
 	if err != nil {
 		return nil, fmt.Errorf("webgpu groth16 bls12_381: msm G1.B: %w", err)
 	}
-	kBaseAff, err := decodeBLS12381G1AffineFromPacked(batchMSM.G1KBytes, nil)
+	kBaseAff, err := decodeG1AffineFromPacked(batchMSM.G1KBytes, nil)
 	if err != nil {
 		return nil, fmt.Errorf("webgpu groth16 bls12_381: msm G1.K: %w", err)
 	}
-	zBaseAff, err := decodeBLS12381G1AffineFromPacked(zPacked, nil)
+	zBaseAff, err := decodeG1AffineFromPacked(zPacked, nil)
 	if err != nil {
 		return nil, fmt.Errorf("webgpu groth16 bls12_381: msm G1.Z: %w", err)
 	}
-	bsBaseAff, err := decodeBLS12381G2AffineFromPacked(batchMSM.G2BBytes, nil)
+	bsBaseAff, err := decodeG2AffineFromPacked(batchMSM.G2BBytes, nil)
 	if err != nil {
 		return nil, fmt.Errorf("webgpu groth16 bls12_381: msm G2.B: %w", err)
 	}
 
 	var r, s big.Int
-	var _r, _s, _kr bls12381fr.Element
+	var _r, _s, _kr fr.Element
 	if _, err := _r.SetRandom(); err != nil {
 		return nil, err
 	}
@@ -198,9 +198,9 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 	_r.BigInt(&r)
 	_s.BigInt(&s)
 
-	deltas := curve.BatchScalarMultiplicationG1(&pk.G1.Delta, []bls12381fr.Element{_r, _s, _kr})
+	deltas := bls12381.BatchScalarMultiplicationG1(&pk.G1.Delta, []fr.Element{_r, _s, _kr})
 
-	var ar, bs1, krs, krs2, tmp curve.G1Jac
+	var ar, bs1, krs, krs2, tmp bls12381.G1Jac
 	ar.FromAffine(&arBaseAff)
 	ar.AddMixed(&pk.G1.Alpha)
 	ar.AddMixed(&deltas[0])
@@ -219,7 +219,7 @@ func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...b
 	tmp.ScalarMultiplication(&bs1, &r)
 	krs.AddAssign(&tmp)
 
-	var bs, deltaS curve.G2Jac
+	var bs, deltaS bls12381.G2Jac
 	bs.FromAffine(&bsBaseAff)
 	deltaS.FromAffine(&pk.G2.Delta)
 	deltaS.ScalarMultiplication(&deltaS, &s)
@@ -245,22 +245,22 @@ func (pk *ProvingKey) Prepare() error {
 
 	if pk.handle == "" {
 		payload := bridge.JSObject()
-		payload.Set("g1A", bridge.JSUint8Array(packBLS12381G1AffineJacobianBatch(pk.G1.A)))
+		payload.Set("g1A", bridge.JSUint8Array(packG1AffineJacobianBatch(pk.G1.A)))
 		payload.Set("g1ACount", len(pk.G1.A))
-		payload.Set("g1B", bridge.JSUint8Array(packBLS12381G1AffineJacobianBatch(pk.G1.B)))
+		payload.Set("g1B", bridge.JSUint8Array(packG1AffineJacobianBatch(pk.G1.B)))
 		payload.Set("g1BCount", len(pk.G1.B))
-		payload.Set("g1K", bridge.JSUint8Array(packBLS12381G1AffineJacobianBatch(pk.G1.K)))
+		payload.Set("g1K", bridge.JSUint8Array(packG1AffineJacobianBatch(pk.G1.K)))
 		payload.Set("g1KCount", len(pk.G1.K))
-		payload.Set("g1Z", bridge.JSUint8Array(packBLS12381G1AffineJacobianBatch(pk.G1.Z)))
+		payload.Set("g1Z", bridge.JSUint8Array(packG1AffineJacobianBatch(pk.G1.Z)))
 		payload.Set("g1ZCount", len(pk.G1.Z))
-		payload.Set("g2B", bridge.JSUint8Array(packBLS12381G2AffineJacobianBatch(pk.G2.B)))
+		payload.Set("g2B", bridge.JSUint8Array(packG2AffineJacobianBatch(pk.G2.B)))
 		payload.Set("g2BCount", len(pk.G2.B))
 		payload.Set("commitmentCount", len(pk.CommitmentKeys))
 		for i := range pk.CommitmentKeys {
 			suffix := strconv.Itoa(i)
-			payload.Set("commitmentBasis"+suffix, bridge.JSUint8Array(packBLS12381G1AffineJacobianBatch(pk.CommitmentKeys[i].Basis)))
+			payload.Set("commitmentBasis"+suffix, bridge.JSUint8Array(packG1AffineJacobianBatch(pk.CommitmentKeys[i].Basis)))
 			payload.Set("commitmentBasis"+suffix+"Count", len(pk.CommitmentKeys[i].Basis))
-			payload.Set("commitmentBasisExpSigma"+suffix, bridge.JSUint8Array(packBLS12381G1AffineJacobianBatch(pk.CommitmentKeys[i].BasisExpSigma)))
+			payload.Set("commitmentBasisExpSigma"+suffix, bridge.JSUint8Array(packG1AffineJacobianBatch(pk.CommitmentKeys[i].BasisExpSigma)))
 			payload.Set("commitmentBasisExpSigma"+suffix+"Count", len(pk.CommitmentKeys[i].BasisExpSigma))
 		}
 
@@ -281,23 +281,23 @@ func (pk *ProvingKey) Prepare() error {
 	return nil
 }
 
-func packBLS12381FrVectorRegularLEInto(dst []byte, values []bls12381fr.Element) []byte {
-	required := len(values) * bls12381FrBytes
+func packFrVectorRegularLEInto(dst []byte, values []fr.Element) []byte {
+	required := len(values) * frBytes
 	if cap(dst) < required {
 		dst = make([]byte, required)
 	} else {
 		dst = dst[:required]
 	}
 	for i := range values {
-		base := i * bls12381FrBytes
-		writeBLS12381FrRegularLE(dst[base:base+bls12381FrBytes], &values[i])
+		base := i * frBytes
+		writeFrRegularLE(dst[base:base+frBytes], &values[i])
 	}
 	return dst
 }
 
-func packBLS12381FrVectorRegularLEFilteredOutInto(dst []byte, values []bls12381fr.Element, firstIndex int, remove []int) []byte {
+func packFrVectorRegularLEFilteredOutInto(dst []byte, values []fr.Element, firstIndex int, remove []int) []byte {
 	if len(remove) == 0 {
-		return packBLS12381FrVectorRegularLEInto(dst, values)
+		return packFrVectorRegularLEInto(dst, values)
 	}
 	removeSet := make(map[int]struct{}, len(remove))
 	for _, idx := range remove {
@@ -309,7 +309,7 @@ func packBLS12381FrVectorRegularLEFilteredOutInto(dst []byte, values []bls12381f
 			count++
 		}
 	}
-	required := count * bls12381FrBytes
+	required := count * frBytes
 	if cap(dst) < required {
 		dst = make([]byte, required)
 	} else {
@@ -320,14 +320,14 @@ func packBLS12381FrVectorRegularLEFilteredOutInto(dst []byte, values []bls12381f
 		if _, ok := removeSet[firstIndex+i]; ok {
 			continue
 		}
-		writeBLS12381FrRegularLE(dst[offset:offset+bls12381FrBytes], &values[i])
-		offset += bls12381FrBytes
+		writeFrRegularLE(dst[offset:offset+frBytes], &values[i])
+		offset += frBytes
 	}
 	return dst
 }
 
-func packBLS12381FrVectorMontLEPaddedInto(dst []byte, values []bls12381fr.Element, size int) []byte {
-	required := size * bls12381FrBytes
+func packFrVectorMontLEPaddedInto(dst []byte, values []fr.Element, size int) []byte {
+	required := size * frBytes
 	if cap(dst) < required {
 		dst = make([]byte, required)
 	} else {
@@ -335,13 +335,13 @@ func packBLS12381FrVectorMontLEPaddedInto(dst []byte, values []bls12381fr.Elemen
 		clear(dst)
 	}
 	for i := range values {
-		base := i * bls12381FrBytes
-		writeBLS12381FrMontLE(dst[base:base+bls12381FrBytes], &values[i])
+		base := i * frBytes
+		writeFrMontLE(dst[base:base+frBytes], &values[i])
 	}
 	return dst
 }
 
-func packBLS12381FrVectorFilteredInto(dst []byte, values []bls12381fr.Element, keptPrefixIndices []int, prefixLen int) ([]byte, int) {
+func packFrVectorFilteredInto(dst []byte, values []fr.Element, keptPrefixIndices []int, prefixLen int) ([]byte, int) {
 	limit := prefixLen
 	if limit > len(values) {
 		limit = len(values)
@@ -353,7 +353,7 @@ func packBLS12381FrVectorFilteredInto(dst []byte, values []bls12381fr.Element, k
 		}
 		count++
 	}
-	required := count * bls12381FrBytes
+	required := count * frBytes
 	if cap(dst) < required {
 		dst = make([]byte, required)
 	} else {
@@ -364,107 +364,107 @@ func packBLS12381FrVectorFilteredInto(dst []byte, values []bls12381fr.Element, k
 		if idx >= limit {
 			break
 		}
-		writeBLS12381FrRegularLE(dst[offset:offset+bls12381FrBytes], &values[idx])
-		offset += bls12381FrBytes
+		writeFrRegularLE(dst[offset:offset+frBytes], &values[idx])
+		offset += frBytes
 	}
 	for i := limit; i < len(values); i++ {
-		writeBLS12381FrRegularLE(dst[offset:offset+bls12381FrBytes], &values[i])
-		offset += bls12381FrBytes
+		writeFrRegularLE(dst[offset:offset+frBytes], &values[i])
+		offset += frBytes
 	}
 	return dst, count
 }
 
-func writeBLS12381FrRegularLE(dst []byte, value *bls12381fr.Element) {
+func writeFrRegularLE(dst []byte, value *fr.Element) {
 	be := value.Bytes()
-	for i := 0; i < bls12381FrBytes; i++ {
-		dst[i] = be[bls12381FrBytes-1-i]
+	for i := 0; i < frBytes; i++ {
+		dst[i] = be[frBytes-1-i]
 	}
 }
 
-func writeBLS12381FrMontLE(dst []byte, value *bls12381fr.Element) {
+func writeFrMontLE(dst []byte, value *fr.Element) {
 	for i, word := range [4]uint64(*value) {
 		binary.LittleEndian.PutUint64(dst[i*8:(i+1)*8], word)
 	}
 }
 
-func packBLS12381G1AffineJacobianBatch(points []curve.G1Affine) []byte {
-	out := make([]byte, len(points)*bls12381G1PointBytes)
-	one := bls12381FpOneMontLE()
+func packG1AffineJacobianBatch(points []bls12381.G1Affine) []byte {
+	out := make([]byte, len(points)*g1PointBytes)
+	one := fpOneMontLE()
 	for i := range points {
 		if points[i].IsInfinity() {
 			continue
 		}
-		base := i * bls12381G1PointBytes
-		writeBLS12381FPMontLE(out[base:base+bls12381G1CoordinateBytes], &points[i].X)
-		writeBLS12381FPMontLE(out[base+bls12381G1CoordinateBytes:base+2*bls12381G1CoordinateBytes], &points[i].Y)
-		copy(out[base+2*bls12381G1CoordinateBytes:base+3*bls12381G1CoordinateBytes], one)
+		base := i * g1PointBytes
+		writeFPMontLE(out[base:base+g1CoordinateBytes], &points[i].X)
+		writeFPMontLE(out[base+g1CoordinateBytes:base+2*g1CoordinateBytes], &points[i].Y)
+		copy(out[base+2*g1CoordinateBytes:base+3*g1CoordinateBytes], one)
 	}
 	return out
 }
 
-func packBLS12381G2AffineJacobianBatch(points []curve.G2Affine) []byte {
-	out := make([]byte, len(points)*bls12381G2PointBytes)
-	one := bls12381FpOneMontLE()
+func packG2AffineJacobianBatch(points []bls12381.G2Affine) []byte {
+	out := make([]byte, len(points)*g2PointBytes)
+	one := fpOneMontLE()
 	for i := range points {
 		if points[i].IsInfinity() {
 			continue
 		}
-		base := i * bls12381G2PointBytes
-		writeBLS12381FPMontLE(out[base:base+bls12381G2ComponentBytes], &points[i].X.A0)
-		writeBLS12381FPMontLE(out[base+bls12381G2ComponentBytes:base+2*bls12381G2ComponentBytes], &points[i].X.A1)
-		writeBLS12381FPMontLE(out[base+2*bls12381G2ComponentBytes:base+3*bls12381G2ComponentBytes], &points[i].Y.A0)
-		writeBLS12381FPMontLE(out[base+3*bls12381G2ComponentBytes:base+4*bls12381G2ComponentBytes], &points[i].Y.A1)
-		copy(out[base+4*bls12381G2ComponentBytes:base+5*bls12381G2ComponentBytes], one)
+		base := i * g2PointBytes
+		writeFPMontLE(out[base:base+g2ComponentBytes], &points[i].X.A0)
+		writeFPMontLE(out[base+g2ComponentBytes:base+2*g2ComponentBytes], &points[i].X.A1)
+		writeFPMontLE(out[base+2*g2ComponentBytes:base+3*g2ComponentBytes], &points[i].Y.A0)
+		writeFPMontLE(out[base+3*g2ComponentBytes:base+4*g2ComponentBytes], &points[i].Y.A1)
+		copy(out[base+4*g2ComponentBytes:base+5*g2ComponentBytes], one)
 	}
 	return out
 }
 
-func decodeBLS12381G1AffineFromPacked(packed []byte, err error) (curve.G1Affine, error) {
+func decodeG1AffineFromPacked(packed []byte, err error) (bls12381.G1Affine, error) {
 	if err != nil {
-		return curve.G1Affine{}, err
+		return bls12381.G1Affine{}, err
 	}
-	if len(packed) != 2*bls12381G1CoordinateBytes {
-		return curve.G1Affine{}, fmt.Errorf("webgpu groth16 bls12_381: expected %d G1 bytes, got %d", 2*bls12381G1CoordinateBytes, len(packed))
+	if len(packed) != 2*g1CoordinateBytes {
+		return bls12381.G1Affine{}, fmt.Errorf("webgpu groth16 bls12_381: expected %d G1 bytes, got %d", 2*g1CoordinateBytes, len(packed))
 	}
-	return curve.G1Affine{
-		X: readBLS12381FPMontLE(packed[:bls12381G1CoordinateBytes]),
-		Y: readBLS12381FPMontLE(packed[bls12381G1CoordinateBytes:]),
+	return bls12381.G1Affine{
+		X: readFPMontLE(packed[:g1CoordinateBytes]),
+		Y: readFPMontLE(packed[g1CoordinateBytes:]),
 	}, nil
 }
 
-func decodeBLS12381G2AffineFromPacked(packed []byte, err error) (curve.G2Affine, error) {
+func decodeG2AffineFromPacked(packed []byte, err error) (bls12381.G2Affine, error) {
 	if err != nil {
-		return curve.G2Affine{}, err
+		return bls12381.G2Affine{}, err
 	}
-	if len(packed) != 4*bls12381G2ComponentBytes {
-		return curve.G2Affine{}, fmt.Errorf("webgpu groth16 bls12_381: expected %d G2 bytes, got %d", 4*bls12381G2ComponentBytes, len(packed))
+	if len(packed) != 4*g2ComponentBytes {
+		return bls12381.G2Affine{}, fmt.Errorf("webgpu groth16 bls12_381: expected %d G2 bytes, got %d", 4*g2ComponentBytes, len(packed))
 	}
-	var out curve.G2Affine
-	out.X.A0 = readBLS12381FPMontLE(packed[0*bls12381G2ComponentBytes : 1*bls12381G2ComponentBytes])
-	out.X.A1 = readBLS12381FPMontLE(packed[1*bls12381G2ComponentBytes : 2*bls12381G2ComponentBytes])
-	out.Y.A0 = readBLS12381FPMontLE(packed[2*bls12381G2ComponentBytes : 3*bls12381G2ComponentBytes])
-	out.Y.A1 = readBLS12381FPMontLE(packed[3*bls12381G2ComponentBytes : 4*bls12381G2ComponentBytes])
+	var out bls12381.G2Affine
+	out.X.A0 = readFPMontLE(packed[0*g2ComponentBytes : 1*g2ComponentBytes])
+	out.X.A1 = readFPMontLE(packed[1*g2ComponentBytes : 2*g2ComponentBytes])
+	out.Y.A0 = readFPMontLE(packed[2*g2ComponentBytes : 3*g2ComponentBytes])
+	out.Y.A1 = readFPMontLE(packed[3*g2ComponentBytes : 4*g2ComponentBytes])
 	return out, nil
 }
 
-func readBLS12381FPMontLE(src []byte) bls12381fp.Element {
+func readFPMontLE(src []byte) fp.Element {
 	var words [6]uint64
 	for i := range words {
 		words[i] = binary.LittleEndian.Uint64(src[i*8 : (i+1)*8])
 	}
-	return bls12381fp.Element(words)
+	return fp.Element(words)
 }
 
-func writeBLS12381FPMontLE(dst []byte, value *bls12381fp.Element) {
+func writeFPMontLE(dst []byte, value *fp.Element) {
 	for i, word := range [6]uint64(*value) {
 		binary.LittleEndian.PutUint64(dst[i*8:(i+1)*8], word)
 	}
 }
 
-func bls12381FpOneMontLE() []byte {
-	out := make([]byte, bls12381G1CoordinateBytes)
-	var one bls12381fp.Element
+func fpOneMontLE() []byte {
+	out := make([]byte, g1CoordinateBytes)
+	var one fp.Element
 	one.SetOne()
-	writeBLS12381FPMontLE(out, &one)
+	writeFPMontLE(out, &one)
 	return out
 }
