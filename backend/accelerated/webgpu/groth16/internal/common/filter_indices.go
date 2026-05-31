@@ -1,10 +1,10 @@
 //go:build js && wasm
 
-package groth16
+package common
 
 import "github.com/consensys/gnark/constraint"
 
-func computeKeptIndices(infinity []bool) []int {
+func ComputeKeptIndices(infinity []bool) []int {
 	if len(infinity) == 0 {
 		return nil
 	}
@@ -23,7 +23,7 @@ func computeKeptIndices(infinity []bool) []int {
 	return indices
 }
 
-func commitmentWireIndexesToRemove(commitmentInfo constraint.Groth16Commitments) []int {
+func CommitmentWireIndexesToRemove(commitmentInfo constraint.Groth16Commitments) []int {
 	if len(commitmentInfo) == 0 {
 		return nil
 	}

@@ -1,6 +1,6 @@
 //go:build js && wasm
 
-package groth16
+package bls12377
 
 import (
 	"encoding/binary"
@@ -21,6 +21,8 @@ import (
 	cs "github.com/consensys/gnark/constraint/bls12-377"
 	"github.com/consensys/gnark/constraint/solver"
 	fcs "github.com/consensys/gnark/frontend/cs"
+	"github.com/ivokub/wnark-crypto/backend/accelerated/webgpu/groth16/internal/bridge"
+	"github.com/ivokub/wnark-crypto/backend/accelerated/webgpu/groth16/internal/common"
 )
 
 const (
@@ -31,9 +33,9 @@ const (
 	bls12377G2PointBytes      = 288
 )
 
-// BLS12377ProvingKey wraps gnark's native BLS12-377 Groth16 proving key with
+// ProvingKey wraps gnark's native BLS12-377 Groth16 proving key with
 // browser-side cached MSM bases.
-type BLS12377ProvingKey struct {
+type ProvingKey struct {
 	native.ProvingKey
 	prepareMu      sync.Mutex
 	scratchMu      sync.Mutex
@@ -46,7 +48,7 @@ type BLS12377ProvingKey struct {
 	scratch2       []byte
 }
 
-func proveBLS12377(r1cs *cs.R1CS, pk *BLS12377ProvingKey, fullWitness witness.Witness, opts ...backend.ProverOption) (*native.Proof, error) {
+func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...backend.ProverOption) (*native.Proof, error) {
 	opt, err := backend.NewProverConfig(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("new prover config: %w", err)
@@ -57,7 +59,7 @@ func proveBLS12377(r1cs *cs.R1CS, pk *BLS12377ProvingKey, fullWitness witness.Wi
 
 	commitmentInfo := r1cs.CommitmentInfo.(constraint.Groth16Commitments)
 
-	if err := pk.ensurePrepared(); err != nil {
+	if err := pk.Prepare(); err != nil {
 		return nil, err
 	}
 	pk.scratchMu.Lock()
@@ -88,7 +90,7 @@ func proveBLS12377(r1cs *cs.R1CS, pk *BLS12377ProvingKey, fullWitness witness.Wi
 		}
 
 		scalars := packBLS12377FrVectorRegularLEInto(nil, privateCommittedValues[i])
-		commitmentPacked, err := bridgeClient.MSMG1(pk.handle, "commitmentBasis"+strconv.Itoa(i), scalars)
+		commitmentPacked, err := bridge.Bridge.MSMG1(pk.handle, "commitmentBasis"+strconv.Itoa(i), scalars)
 		if err != nil {
 			return fmt.Errorf("webgpu groth16 bls12_377: commitment %d MSM: %w", i, err)
 		}
@@ -126,7 +128,7 @@ func proveBLS12377(r1cs *cs.R1CS, pk *BLS12377ProvingKey, fullWitness witness.Wi
 				return nil, fmt.Errorf("webgpu groth16 bls12_377: commitment hint %d was not evaluated", i)
 			}
 			scalars := packBLS12377FrVectorRegularLEInto(nil, privateCommittedValues[i])
-			pokPacked, err := bridgeClient.MSMG1(pk.handle, "commitmentBasisExpSigma"+strconv.Itoa(i), scalars)
+			pokPacked, err := bridge.Bridge.MSMG1(pk.handle, "commitmentBasisExpSigma"+strconv.Itoa(i), scalars)
 			if err != nil {
 				return nil, fmt.Errorf("webgpu groth16 bls12_377: commitment %d pok MSM: %w", i, err)
 			}
@@ -150,7 +152,7 @@ func proveBLS12377(r1cs *cs.R1CS, pk *BLS12377ProvingKey, fullWitness witness.Wi
 	pk.scratch0 = packBLS12377FrVectorMontLEPaddedInto(pk.scratch0, solution.A, domainSize)
 	pk.scratch1 = packBLS12377FrVectorMontLEPaddedInto(pk.scratch1, solution.B, domainSize)
 	pk.scratch2 = packBLS12377FrVectorMontLEPaddedInto(pk.scratch2, solution.C, domainSize)
-	zPacked, err := bridgeClient.ComputeHZMSMG1(pk.handle, pk.scratch0, pk.scratch1, pk.scratch2)
+	zPacked, err := bridge.Bridge.ComputeHZMSMG1(pk.handle, pk.scratch0, pk.scratch1, pk.scratch2)
 	if err != nil {
 		return nil, fmt.Errorf("webgpu groth16 bls12_377: quotient H + msm G1.Z: %w", err)
 	}
@@ -158,8 +160,8 @@ func proveBLS12377(r1cs *cs.R1CS, pk *BLS12377ProvingKey, fullWitness witness.Wi
 
 	pk.scratch0, _ = packBLS12377FrVectorFilteredInto(pk.scratch0, wireValues, pk.g1AIndices, len(pk.InfinityA))
 	pk.scratch1, _ = packBLS12377FrVectorFilteredInto(pk.scratch1, wireValues, pk.g1BIndices, len(pk.InfinityB))
-	pk.scratch2 = packBLS12377FrVectorRegularLEFilteredOutInto(pk.scratch2, wireValues[publicVariables:], publicVariables, commitmentWireIndexesToRemove(commitmentInfo))
-	batchMSM, err := bridgeClient.MSMBatch(pk.handle, pk.scratch0, pk.scratch1, pk.scratch2)
+	pk.scratch2 = packBLS12377FrVectorRegularLEFilteredOutInto(pk.scratch2, wireValues[publicVariables:], publicVariables, common.CommitmentWireIndexesToRemove(commitmentInfo))
+	batchMSM, err := bridge.Bridge.MSMBatch(pk.handle, pk.scratch0, pk.scratch1, pk.scratch2)
 	if err != nil {
 		return nil, fmt.Errorf("webgpu groth16 bls12_377: batched MSMs: %w", err)
 	}
@@ -230,48 +232,48 @@ func proveBLS12377(r1cs *cs.R1CS, pk *BLS12377ProvingKey, fullWitness witness.Wi
 	return proof, nil
 }
 
-func (pk *BLS12377ProvingKey) ensurePrepared() error {
+func (pk *ProvingKey) Prepare() error {
 	pk.prepareMu.Lock()
 	defer pk.prepareMu.Unlock()
 
 	if pk.handle != "" && pk.quotientWarmed {
 		return nil
 	}
-	if err := bridgeClient.Init("bls12_377"); err != nil {
+	if err := bridge.Bridge.Init("bls12_377"); err != nil {
 		return err
 	}
 
 	if pk.handle == "" {
-		payload := jsObject()
-		payload.Set("g1A", jsUint8Array(packBLS12377G1AffineJacobianBatch(pk.G1.A)))
+		payload := bridge.JSObject()
+		payload.Set("g1A", bridge.JSUint8Array(packBLS12377G1AffineJacobianBatch(pk.G1.A)))
 		payload.Set("g1ACount", len(pk.G1.A))
-		payload.Set("g1B", jsUint8Array(packBLS12377G1AffineJacobianBatch(pk.G1.B)))
+		payload.Set("g1B", bridge.JSUint8Array(packBLS12377G1AffineJacobianBatch(pk.G1.B)))
 		payload.Set("g1BCount", len(pk.G1.B))
-		payload.Set("g1K", jsUint8Array(packBLS12377G1AffineJacobianBatch(pk.G1.K)))
+		payload.Set("g1K", bridge.JSUint8Array(packBLS12377G1AffineJacobianBatch(pk.G1.K)))
 		payload.Set("g1KCount", len(pk.G1.K))
-		payload.Set("g1Z", jsUint8Array(packBLS12377G1AffineJacobianBatch(pk.G1.Z)))
+		payload.Set("g1Z", bridge.JSUint8Array(packBLS12377G1AffineJacobianBatch(pk.G1.Z)))
 		payload.Set("g1ZCount", len(pk.G1.Z))
-		payload.Set("g2B", jsUint8Array(packBLS12377G2AffineJacobianBatch(pk.G2.B)))
+		payload.Set("g2B", bridge.JSUint8Array(packBLS12377G2AffineJacobianBatch(pk.G2.B)))
 		payload.Set("g2BCount", len(pk.G2.B))
 		payload.Set("commitmentCount", len(pk.CommitmentKeys))
 		for i := range pk.CommitmentKeys {
 			suffix := strconv.Itoa(i)
-			payload.Set("commitmentBasis"+suffix, jsUint8Array(packBLS12377G1AffineJacobianBatch(pk.CommitmentKeys[i].Basis)))
+			payload.Set("commitmentBasis"+suffix, bridge.JSUint8Array(packBLS12377G1AffineJacobianBatch(pk.CommitmentKeys[i].Basis)))
 			payload.Set("commitmentBasis"+suffix+"Count", len(pk.CommitmentKeys[i].Basis))
-			payload.Set("commitmentBasisExpSigma"+suffix, jsUint8Array(packBLS12377G1AffineJacobianBatch(pk.CommitmentKeys[i].BasisExpSigma)))
+			payload.Set("commitmentBasisExpSigma"+suffix, bridge.JSUint8Array(packBLS12377G1AffineJacobianBatch(pk.CommitmentKeys[i].BasisExpSigma)))
 			payload.Set("commitmentBasisExpSigma"+suffix+"Count", len(pk.CommitmentKeys[i].BasisExpSigma))
 		}
 
-		handle, err := bridgeClient.PrepareKey("bls12_377", payload)
+		handle, err := bridge.Bridge.PrepareKey("bls12_377", payload)
 		if err != nil {
 			return err
 		}
 		pk.handle = handle
-		pk.g1AIndices = computeKeptIndices(pk.InfinityA)
-		pk.g1BIndices = computeKeptIndices(pk.InfinityB)
+		pk.g1AIndices = common.ComputeKeptIndices(pk.InfinityA)
+		pk.g1BIndices = common.ComputeKeptIndices(pk.InfinityB)
 	}
 	if !pk.quotientWarmed {
-		if err := bridgeClient.PrewarmQuotientDomain("bls12_377", int(pk.Domain.Cardinality)); err != nil {
+		if err := bridge.Bridge.PrewarmQuotientDomain("bls12_377", int(pk.Domain.Cardinality)); err != nil {
 			return err
 		}
 		pk.quotientWarmed = true
