@@ -12,6 +12,7 @@ import (
 	"hash"
 	"math/big"
 	"math/bits"
+	"sync"
 
 	curve "github.com/consensys/gnark-crypto/ecc/bn254"
 	bn254fp "github.com/consensys/gnark-crypto/ecc/bn254/fp"
@@ -77,9 +78,11 @@ const (
 var bn254QuotientTransformCacheKey int
 var bn254QuotientStaticMontCacheKey int
 var bn254QuotientAuxMontCacheKey int
+var bn254CacheKeyMu sync.Mutex
 
 type BN254ProvingKey struct {
 	native.ProvingKey
+	prepareMu            sync.Mutex
 	handle               string
 	staticNumeratorCache *staticNumeratorCache
 }
@@ -114,6 +117,9 @@ type quotientAuxCache struct {
 }
 
 func nextBN254CacheKey(counter *int) int {
+	bn254CacheKeyMu.Lock()
+	defer bn254CacheKeyMu.Unlock()
+
 	*counter = *counter + 1
 	if *counter <= 0 {
 		*counter = 1
@@ -416,6 +422,13 @@ func transformPolynomialsToCoset(polys []*iop.Polynomial, domain *fft.Domain, sc
 }
 
 func (pk *BN254ProvingKey) ensurePrepared() error {
+	pk.prepareMu.Lock()
+	defer pk.prepareMu.Unlock()
+
+	return pk.ensurePreparedLocked()
+}
+
+func (pk *BN254ProvingKey) ensurePreparedLocked() error {
 	if pk.handle != "" {
 		return nil
 	}
@@ -436,7 +449,10 @@ func (pk *BN254ProvingKey) ensurePrepared() error {
 }
 
 func (pk *BN254ProvingKey) prepareWithCS(spr *cs.SparseR1CS) error {
-	if err := pk.ensurePrepared(); err != nil {
+	pk.prepareMu.Lock()
+	defer pk.prepareMu.Unlock()
+
+	if err := pk.ensurePreparedLocked(); err != nil {
 		return err
 	}
 	domain0, domain1 := domainsForSPR(spr)
@@ -454,6 +470,13 @@ func (pk *BN254ProvingKey) prepareWithCS(spr *cs.SparseR1CS) error {
 		return err
 	}
 	return bridgeClient.PrewarmQuotientCanonicalizeDomain("bn254", int(domain1.Cardinality))
+}
+
+func (pk *BN254ProvingKey) ensureStaticNumeratorCacheForTrace(trace *native.Trace, domain0, domain1 *fft.Domain) error {
+	pk.prepareMu.Lock()
+	defer pk.prepareMu.Unlock()
+
+	return pk.ensureStaticNumeratorCache(trace, domain0, domain1)
 }
 
 func (pk *BN254ProvingKey) preloadQuotientStaticCaches(trace *native.Trace, domain0, domain1 *fft.Domain) error {
@@ -508,6 +531,84 @@ func (pk *BN254ProvingKey) preloadQuotientStaticCaches(trace *native.Trace, doma
 	}
 	staticCache.webgpuAuxMontPopulated = true
 	return nil
+}
+
+type quotientStaticBridgeInputs struct {
+	staticCache               *staticNumeratorCache
+	quotientAux               quotientAuxCache
+	staticPacked              []byte
+	staticMontCacheKeysPacked []byte
+	twiddlesPacked            []byte
+	scalingPacked             []byte
+	denominatorsPacked        []byte
+	auxMontCacheKey           int
+}
+
+func (pk *BN254ProvingKey) quotientStaticBridgeInputs(rho, staticVectorCount, commitmentCount, n, vectorBytes int) (quotientStaticBridgeInputs, error) {
+	pk.prepareMu.Lock()
+	defer pk.prepareMu.Unlock()
+
+	staticCache := pk.staticNumeratorCache
+	if staticCache == nil || len(staticCache.cosets) != rho {
+		return quotientStaticBridgeInputs{}, errors.New("missing static numerator cache")
+	}
+	quotientAux := staticCache.quotientAux
+	if !quotientAux.valid(n, rho) {
+		return quotientStaticBridgeInputs{}, errors.New("webgpu plonk bn254: invalid quotient auxiliary cache")
+	}
+	staticMontCacheKeysPacked, err := packStaticMontCacheKeys(staticCache, rho)
+	if err != nil {
+		return quotientStaticBridgeInputs{}, err
+	}
+
+	reuseStaticMontCache := true
+	for i := 0; i < rho; i++ {
+		if !staticCache.webgpuStaticMontPopulated[i] {
+			reuseStaticMontCache = false
+		}
+	}
+	auxMontCacheKey := staticCache.webgpuAuxMontKey
+	if auxMontCacheKey <= 0 || int(uint32(auxMontCacheKey)) != auxMontCacheKey {
+		return quotientStaticBridgeInputs{}, fmt.Errorf("webgpu plonk bn254: invalid quotient auxiliary WebGPU cache key %d", auxMontCacheKey)
+	}
+
+	var staticPacked []byte
+	if !reuseStaticMontCache {
+		staticPacked, err = packStaticNumeratorCosets(staticCache, rho, staticVectorCount, commitmentCount, n, vectorBytes)
+		if err != nil {
+			return quotientStaticBridgeInputs{}, err
+		}
+	}
+
+	twiddlesPacked := quotientAux.twiddlesPacked
+	scalingPacked := quotientAux.scalingPacked
+	denominatorsPacked := quotientAux.denominatorsPacked
+	if staticCache.webgpuAuxMontPopulated {
+		twiddlesPacked = nil
+		scalingPacked = nil
+		denominatorsPacked = nil
+	}
+
+	return quotientStaticBridgeInputs{
+		staticCache:               staticCache,
+		quotientAux:               quotientAux,
+		staticPacked:              staticPacked,
+		staticMontCacheKeysPacked: staticMontCacheKeysPacked,
+		twiddlesPacked:            twiddlesPacked,
+		scalingPacked:             scalingPacked,
+		denominatorsPacked:        denominatorsPacked,
+		auxMontCacheKey:           auxMontCacheKey,
+	}, nil
+}
+
+func (pk *BN254ProvingKey) markQuotientStaticBridgeInputsPopulated(staticCache *staticNumeratorCache) {
+	pk.prepareMu.Lock()
+	defer pk.prepareMu.Unlock()
+
+	for i := range staticCache.webgpuStaticMontPopulated {
+		staticCache.webgpuStaticMontPopulated[i] = true
+	}
+	staticCache.webgpuAuxMontPopulated = true
 }
 
 func packStaticMontCacheKeys(staticCache *staticNumeratorCache, rho int) ([]byte, error) {
@@ -871,7 +972,7 @@ func newInstance(spr *cs.SparseR1CS, pk *BN254ProvingKey, fullWitness witness.Wi
 
 	// build trace
 	s.trace = native.NewTrace(spr, s.domain0)
-	if err := pk.ensureStaticNumeratorCache(s.trace, s.domain0, s.domain1); err != nil {
+	if err := pk.ensureStaticNumeratorCacheForTrace(s.trace, s.domain0, s.domain1); err != nil {
 		return nil, err
 	}
 
@@ -1458,27 +1559,13 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 	m := uint64(s.domain1.Cardinality)
 	mm := uint64(64 - bits.TrailingZeros64(m))
 
-	staticCache := s.pk.staticNumeratorCache
-	if staticCache == nil || len(staticCache.cosets) != rho {
-		return nil, errors.New("missing static numerator cache")
-	}
-	quotientAux := staticCache.quotientAux
-	if !quotientAux.valid(int(n), rho) {
-		return nil, errors.New("webgpu plonk bn254: invalid quotient auxiliary cache")
-	}
-
 	dynamicPolyIDs := []int{id_L, id_R, id_O, id_Z, id_Qk}
 	commitmentValuePolyIDs := make([]int, 0, len(s.commitmentInfo))
 	for i := range s.commitmentInfo {
 		commitmentValuePolyIDs = append(commitmentValuePolyIDs, id_Qci+2*i+1)
 	}
 	quotientDynamicPolyIDs := append(append([]int(nil), dynamicPolyIDs...), commitmentValuePolyIDs...)
-	bn254QuotientTransformCacheKey++
-	dynamicTransformCacheKey := bn254QuotientTransformCacheKey
-	if dynamicTransformCacheKey <= 0 {
-		bn254QuotientTransformCacheKey = 1
-		dynamicTransformCacheKey = 1
-	}
+	dynamicTransformCacheKey := nextBN254CacheKey(&bn254QuotientTransformCacheKey)
 
 	vectorBytes := int(n) * bn254FrBytes
 	commitmentCount := len(quotientDynamicPolyIDs) - bn254PlonkQuotientBaseDynamicVectorCount
@@ -1486,6 +1573,12 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 		return nil, fmt.Errorf("webgpu plonk bn254: quotient evaluator expected at least %d dynamic vectors, got %d", bn254PlonkQuotientBaseDynamicVectorCount, len(quotientDynamicPolyIDs))
 	}
 	staticVectorCount := bn254PlonkQuotientBaseStaticVectorCount + commitmentCount
+	staticInputs, err := s.pk.quotientStaticBridgeInputs(rho, staticVectorCount, commitmentCount, int(n), vectorBytes)
+	if err != nil {
+		return nil, err
+	}
+	quotientAux := staticInputs.quotientAux
+
 	dynamicPacked := make([]byte, len(quotientDynamicPolyIDs)*vectorBytes)
 	for i, id := range quotientDynamicPolyIDs {
 		if id >= len(s.x) || s.x[id] == nil {
@@ -1496,30 +1589,6 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 			return nil, fmt.Errorf("webgpu plonk bn254: quotient dynamic polynomial %d has %d coefficients, expected %d", id, len(coeffs), n)
 		}
 		packBN254FrVectorRegularLEInto(dynamicPacked[i*vectorBytes:(i+1)*vectorBytes], coeffs)
-	}
-
-	reuseStaticMontCache := true
-	staticMontCacheKeysPacked, err := packStaticMontCacheKeys(staticCache, rho)
-	if err != nil {
-		return nil, err
-	}
-	for i := 0; i < rho; i++ {
-		if !staticCache.webgpuStaticMontPopulated[i] {
-			reuseStaticMontCache = false
-		}
-	}
-	auxMontCacheKey := staticCache.webgpuAuxMontKey
-	if auxMontCacheKey <= 0 || int(uint32(auxMontCacheKey)) != auxMontCacheKey {
-		return nil, fmt.Errorf("webgpu plonk bn254: invalid quotient auxiliary WebGPU cache key %d", auxMontCacheKey)
-	}
-
-	staticPacked := []byte(nil)
-	if !reuseStaticMontCache {
-		var err error
-		staticPacked, err = packStaticNumeratorCosets(staticCache, rho, staticVectorCount, commitmentCount, int(n), vectorBytes)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	blinds := [][]fr.Element{
@@ -1535,14 +1604,6 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 		}
 	}
 
-	twiddlesPacked := quotientAux.twiddlesPacked
-	scalingPacked := quotientAux.scalingPacked
-	denominatorsPacked := quotientAux.denominatorsPacked
-	if staticCache.webgpuAuxMontPopulated {
-		twiddlesPacked = nil
-		scalingPacked = nil
-		denominatorsPacked = nil
-	}
 	blindBytes := len(blinds) * blindCoeffCount * bn254FrBytes
 	blindsPacked := make([]byte, rho*blindBytes)
 	scalarBytes := bn254PlonkQuotientEvalScalarCount * bn254FrBytes
@@ -1577,11 +1638,11 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 	outputPacked, err := bridgeClient.TransformAndEvaluateQuotientCosets(
 		"bn254",
 		dynamicPacked,
-		scalingPacked,
-		staticPacked,
-		staticMontCacheKeysPacked,
-		twiddlesPacked,
-		denominatorsPacked,
+		staticInputs.scalingPacked,
+		staticInputs.staticPacked,
+		staticInputs.staticMontCacheKeysPacked,
+		staticInputs.twiddlesPacked,
+		staticInputs.denominatorsPacked,
 		blindsPacked,
 		scalarsPacked,
 		int(n),
@@ -1589,7 +1650,7 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 		commitmentCount,
 		dynamicTransformCacheKey,
 		rho,
-		auxMontCacheKey,
+		staticInputs.auxMontCacheKey,
 	)
 	if err != nil {
 		return nil, err
@@ -1597,10 +1658,7 @@ func (s *instance) computeNumerator() (*iop.Polynomial, error) {
 	if len(outputPacked) != rho*vectorBytes {
 		return nil, fmt.Errorf("webgpu plonk bn254: quotient all-coset evaluator returned %d bytes, expected %d", len(outputPacked), rho*vectorBytes)
 	}
-	for i := range staticCache.webgpuStaticMontPopulated {
-		staticCache.webgpuStaticMontPopulated[i] = true
-	}
-	staticCache.webgpuAuxMontPopulated = true
+	s.pk.markQuotientStaticBridgeInputsPopulated(staticInputs.staticCache)
 	for i := 0; i < rho; i++ {
 		if err := unpackBN254FrVectorRegularLEInto(buf, outputPacked[i*vectorBytes:(i+1)*vectorBytes]); err != nil {
 			return nil, err
