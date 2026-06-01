@@ -1,3 +1,4 @@
+// curvegpu:section fr_types begin
 struct Fr {
   limbs: array<u32, 8>,
 }
@@ -5,6 +6,7 @@ struct Fr {
 struct Fr16 {
   limbs: array<u32, 16>,
 }
+// curvegpu:section fr_types end
 
 struct Params {
   count: u32,
@@ -26,6 +28,7 @@ const FR_OP_MUL: u32 = 9u;
 const FR_OP_SQUARE: u32 = 10u;
 const FR_OP_TO_MONT: u32 = 11u;
 const FR_OP_FROM_MONT: u32 = 12u;
+// curvegpu:section fr_constants begin
 const FR_LIMB16_MASK: u32 = 0xffffu;
 const FR_QINV_NEG_16: u32 = 0xffffu;
 
@@ -39,12 +42,14 @@ const FR_MODULUS16: array<u32, 16> = array<u32, 16>(
   0xa556u, 0x9a2cu,
   0x655eu, 0x12abu,
 );
+// curvegpu:section fr_constants end
 
 @group(0) @binding(0) var<storage, read> input_a: array<u32>;
 @group(0) @binding(1) var<storage, read> input_b: array<u32>;
 @group(0) @binding(2) var<storage, read_write> output: array<u32>;
 @group(0) @binding(3) var<uniform> params: Params;
 
+// curvegpu:section fr_core begin
 fn fr_zero() -> Fr {
   var z: Fr;
   z.limbs[0] = 0u;
@@ -390,6 +395,7 @@ fn fr_mul(x: Fr, y: Fr) -> Fr {
   }
   return fr_pack16(z16);
 }
+// curvegpu:section fr_core end
 
 fn fr_dispatch(opcode: u32, a: Fr, b: Fr) -> Fr {
   if (opcode == FR_OP_COPY) {

@@ -23,7 +23,7 @@ func main() {
 	var commitmentsCSV string
 	var outDir string
 
-	flag.StringVar(&curveName, "curve", "bn254", "curve to generate: bn254")
+	flag.StringVar(&curveName, "curve", "all", "curve to generate: bn254, bls12_377, bls12_381, or all")
 	flag.StringVar(&logsCSV, "logs", "12,15,18", "comma-separated circuit size logs")
 	flag.StringVar(&commitmentsCSV, "commitments", "0", "comma-separated commitment counts")
 	flag.StringVar(&outDir, "out", "poc-plonk/fixtures", "output fixture root")
@@ -152,8 +152,14 @@ func parseCommitments(csv string) ([]int, error) {
 
 func selectCurves(curveName string) ([]ecc.ID, error) {
 	switch curveName {
+	case "all":
+		return []ecc.ID{ecc.BN254, ecc.BLS12_377, ecc.BLS12_381}, nil
 	case "bn254":
 		return []ecc.ID{ecc.BN254}, nil
+	case "bls12_377":
+		return []ecc.ID{ecc.BLS12_377}, nil
+	case "bls12_381":
+		return []ecc.ID{ecc.BLS12_381}, nil
 	default:
 		return nil, fmt.Errorf("unsupported PLONK scaffold curve %q", curveName)
 	}
@@ -163,6 +169,10 @@ func curveKey(curveID ecc.ID) string {
 	switch curveID {
 	case ecc.BN254:
 		return "bn254"
+	case ecc.BLS12_377:
+		return "bls12_377"
+	case ecc.BLS12_381:
+		return "bls12_381"
 	default:
 		panic("unsupported curve")
 	}

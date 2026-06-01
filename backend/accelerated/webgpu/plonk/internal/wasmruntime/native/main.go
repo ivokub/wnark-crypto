@@ -17,7 +17,9 @@ func main() {
 	if err := wasmruntime.Install(wasmruntime.Config[gnarkplonk.ProvingKey, gnarkplonk.VerifyingKey, gnarkplonk.Proof]{
 		GlobalName: "wnarkPlonkRuntimeNative",
 		SupportedCurves: map[string]ecc.ID{
-			"bn254": ecc.BN254,
+			"bn254":     ecc.BN254,
+			"bls12_377": ecc.BLS12_377,
+			"bls12_381": ecc.BLS12_381,
 		},
 		CSFactory:    gnarkplonk.NewCS,
 		PKFactory:    gnarkplonk.NewProvingKey,

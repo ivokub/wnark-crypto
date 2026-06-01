@@ -5,7 +5,6 @@ ITERS ?= 1
 FIXTURE_CURVE ?= all
 FIXTURE_LOGS ?= 12,15,18
 FIXTURE_COMMITMENTS ?= 0,1,2
-PLONK_FIXTURE_CURVE ?= bn254
 
 web-bundle-shaders:
 	cd web && npm run build:shaders
@@ -55,4 +54,4 @@ poc-gnark-groth16-fixtures:
 	go run ./cmd/poc-gnark-groth16-fixtures -curve $(FIXTURE_CURVE) -logs $(FIXTURE_LOGS) -commitments $(FIXTURE_COMMITMENTS)
 
 poc-plonk-fixtures:
-	go run ./cmd/poc-plonk-fixtures -curve $(PLONK_FIXTURE_CURVE) -logs $(FIXTURE_LOGS) -commitments $(FIXTURE_COMMITMENTS)
+	go run ./cmd/poc-plonk-fixtures -curve $(FIXTURE_CURVE) -logs $(FIXTURE_LOGS) -commitments $(FIXTURE_COMMITMENTS)

@@ -40,8 +40,8 @@
   <body>
     <h1>PLONK TS Browser POC</h1>
     <p>
-      BN254-only scaffold for now. The WebGPU runtime currently delegates proving to gnark's native PLONK
-      implementation through the accelerated backend wrapper.
+      PLONK scaffold for BN254, BLS12-377, and BLS12-381. The WebGPU runtime uses the accelerated
+      backend wrapper for proving and gnark for verification.
     </p>
 
     <label>
@@ -56,6 +56,8 @@
       curve
       <select id="curve">
         <option value="bn254">bn254</option>
+        <option value="bls12_377">bls12_377</option>
+        <option value="bls12_381">bls12_381</option>
       </select>
     </label>
     <label>

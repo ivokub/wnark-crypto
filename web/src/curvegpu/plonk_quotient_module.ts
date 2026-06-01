@@ -15,12 +15,26 @@ const PLONK_QUOTIENT_BLIND_COUNT = 4;
 const PLONK_QUOTIENT_SCALAR_COUNT = 7;
 const PLONK_QUOTIENT_WORKGROUP_SIZE = 64;
 
-const BN254_PLONK_QUOTIENT_SHADER_PARTS = [
-  "/shaders/curves/bn254/fr_arith.wgsl#section=fr_types",
-  "/shaders/curves/bn254/fr_arith.wgsl#section=fr_constants",
-  "/shaders/curves/bn254/fr_arith.wgsl#section=fr_core",
-  "/shaders/curves/bn254/fr_plonk_quotient.wgsl",
-];
+const PLONK_QUOTIENT_SHADER_PARTS: Record<SupportedCurveID, readonly string[]> = {
+  bn254: [
+    "/shaders/curves/bn254/fr_arith.wgsl#section=fr_types",
+    "/shaders/curves/bn254/fr_arith.wgsl#section=fr_constants",
+    "/shaders/curves/bn254/fr_arith.wgsl#section=fr_core",
+    "/shaders/curves/bn254/fr_plonk_quotient.wgsl",
+  ],
+  bls12_381: [
+    "/shaders/curves/bls12_381/fr_arith.wgsl#section=fr_types",
+    "/shaders/curves/bls12_381/fr_arith.wgsl#section=fr_constants",
+    "/shaders/curves/bls12_381/fr_arith.wgsl#section=fr_core",
+    "/shaders/curves/bls12_381/fr_plonk_quotient.wgsl",
+  ],
+  bls12_377: [
+    "/shaders/curves/bls12_377/fr_arith.wgsl#section=fr_types",
+    "/shaders/curves/bls12_377/fr_arith.wgsl#section=fr_constants",
+    "/shaders/curves/bls12_377/fr_arith.wgsl#section=fr_core",
+    "/shaders/curves/bls12_377/fr_plonk_quotient.wgsl",
+  ],
+};
 
 type PlonkQuotientKernel = {
   device: GPUDevice;
@@ -139,9 +153,6 @@ export function createPlonkQuotientModule(config: {
   >();
 
   async function getQuotientKernel(commitmentCount: number): Promise<PlonkQuotientKernel> {
-    if (curve !== "bn254") {
-      throw new Error(`PLONK quotient WebGPU evaluator only supports bn254, got ${curve}`);
-    }
     if (!Number.isInteger(commitmentCount) || commitmentCount < 0) {
       throw new Error(`invalid PLONK quotient commitment count ${commitmentCount}`);
     }
@@ -152,7 +163,7 @@ export function createPlonkQuotientModule(config: {
     }
 
     const bindGroupLayout = device.createBindGroupLayout({
-      label: "plonk-bn254-quotient-bgl",
+      label: `plonk-${curve}-quotient-bgl`,
       entries: [
         { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
         { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
@@ -162,16 +173,16 @@ export function createPlonkQuotientModule(config: {
       ],
     });
     const pipelineLayout = device.createPipelineLayout({
-      label: "plonk-bn254-quotient-pl",
+      label: `plonk-${curve}-quotient-pl`,
       bindGroupLayouts: [bindGroupLayout],
     });
-    const code = await loadShaderParts(BN254_PLONK_QUOTIENT_SHADER_PARTS);
+    const code = await loadShaderParts(PLONK_QUOTIENT_SHADER_PARTS[curve]);
     const shader = device.createShaderModule({
-      label: "plonk-bn254-quotient-shader",
+      label: `plonk-${curve}-quotient-shader`,
       code,
     });
     const pipeline = await device.createComputePipelineAsync({
-      label: `plonk-bn254-quotient-c${commitmentCount}`,
+      label: `plonk-${curve}-quotient-c${commitmentCount}`,
       layout: pipelineLayout,
       compute: {
         module: shader,

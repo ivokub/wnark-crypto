@@ -1,4 +1,4 @@
-import { createBN254, createCurveGPUContext, curveDefinition } from "/web/dist/index.js";
+import { createBLS12377, createBLS12381, createBN254, createCurveGPUContext, curveDefinition } from "/web/dist/index.js";
 
 const implSelect = document.getElementById("impl");
 const curveSelect = document.getElementById("curve");
@@ -8,6 +8,7 @@ const proveRunsInput = document.getElementById("prove-runs");
 const runButton = document.getElementById("run");
 const statusEl = document.getElementById("status");
 const logEl = document.getElementById("log");
+const SUPPORTED_CURVES = ["bn254", "bls12_377", "bls12_381"];
 
 function appendLog(line = "") {
   logEl.textContent += `${line}\n`;
@@ -52,7 +53,7 @@ function applyQueryDefaults() {
   if (impl && ["both", "webgpu-go", "native-go"].includes(impl)) {
     implSelect.value = impl;
   }
-  if (curve && curve === "bn254") {
+  if (curve && SUPPORTED_CURVES.includes(curve)) {
     curveSelect.value = curve;
   }
   if (sizeLog && ["12", "15", "18"].includes(sizeLog)) {
@@ -136,6 +137,10 @@ async function createCurve(config) {
   switch (config.curve) {
     case "bn254":
       return createBN254(context);
+    case "bls12_377":
+      return createBLS12377(context);
+    case "bls12_381":
+      return createBLS12381(context);
     default:
       throw new Error(`unsupported PLONK scaffold curve ${config.curve}`);
   }
