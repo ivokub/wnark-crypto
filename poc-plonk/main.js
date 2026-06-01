@@ -155,7 +155,8 @@ async function loadFixture(curve, config) {
   ]);
   const [ccs, pk, vk] = await Promise.all([
     curve.plonk.readConstraintSystem(ccsBytes),
-    curve.plonk.readProvingKey(pkBytes),
+    // Note: using "unsafe" as the proving key is trusted and this avoid subgroup membership checks
+    curve.plonk.readProvingKey(pkBytes, { format: "unsafe" }),
     curve.plonk.readVerificationKey(vkBytes),
   ]);
   return { ccs, pk, vk };
